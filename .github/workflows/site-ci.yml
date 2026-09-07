@@ -59,11 +59,11 @@ jobs:
       - name: Type check
         run: bun run check
 
-      - name: Unit tests
-        run: bun run test:unit
-
       - name: Build
         run: bun run build
+
+      - name: Unit tests
+        run: bun run test:unit
 
       - name: Check file changes
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
