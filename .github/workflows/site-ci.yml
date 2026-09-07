@@ -1,0 +1,120 @@
+name: Site CI
+
+# Shared "Validate" job for the Astro/bun/Playwright site repos (soundry,
+# queeromaha, synthomaha). Callers just need pull_request/workflow_dispatch
+# triggers and this job; the script *names* below are the contract every
+# caller repo's package.json must satisfy — see README.md.
+
+on:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Cache npm package dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint workflow files
+        run: bun run lint:actions
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Type check
+        run: bun run check
+
+      - name: Unit tests
+        run: bun run test:unit
+
+      - name: Build
+        run: bun run build
+
+      - name: Check file changes
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: changes
+        with:
+          filters: |
+            lockfile:
+              - 'bun.lock'
+            checker_script:
+              - 'scripts/check-licenses.ts'
+            e2e_relevant:
+              - 'src/**'
+              - 'public/**'
+              - 'test/**'
+              - 'astro.config.ts'
+              - 'playwright.config.js'
+              - 'package.json'
+              - 'bun.lock'
+              - 'tsconfig.json'
+              - '.github/workflows/ci.yml'
+
+      - name: Check dependency licenses (block GPL family)
+        if: steps.changes.outputs.lockfile == 'true' || steps.changes.outputs.checker_script == 'true'
+        run: bun run check:licenses
+
+      - name: Install Playwright browsers
+        if: steps.changes.outputs.e2e_relevant == 'true'
+        run: bunx playwright install --with-deps chromium
+
+      - name: Fast e2e — mobile only (main)
+        if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+        run: bun run test:e2e:full
+
+      - name: Broader e2e + a11y (next)
+        if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'next'
+        run: |
+          bun run test:e2e:all
+          bun run test:a11y
+
+      - name: Full e2e + a11y + lighthouse (live)
+        if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'live'
+        run: |
+          bun run test:e2e:all
+          bun run test:a11y
+          bun run test:e2e:lighthouse
+
+      - name: Upload failure reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-reports
+          path: |
+            playwright-report/
+            test-results/
