@@ -53,8 +53,9 @@ in CI instead):
 
 | script      | purpose                                                        |
 | ----------- | ---------------------------------------------------------------- |
-| `audit`     | `bun audit`, gated to package.json/bun.lock changes             |
-| `test:push` | build + audit + check + test:unit + `test:e2e:smoke`, run from `.husky/pre-push` |
+| `audit`     | `bun audit` — run from `.husky/pre-commit`, gated on package.json/bun.lock changes, same as `check:licenses` |
+| `test`      | build + check + test:unit + `test:e2e:full` — the manual, thorough local run |
+| `test:push` | build + check + test:unit + `test:e2e:smoke`, run from `.husky/pre-push` — no audit here, pushes are more frequent than manual `bun run test` so this tier stays cheap |
 | `test:e2e:smoke` | Playwright, mobile-chrome only, just the smoke spec — the fast local/pre-push tier |
 
 `test:e2e:full` vs `test:e2e:smoke` is a spec-breadth distinction (all specs
