@@ -57,7 +57,7 @@ genuinely broken YAML match what CI reports instead of going opaque.
 | `check:licenses`       | GPL-family license gate (`scripts/check-licenses.ts`)      |
 | `test:e2e:full`        | Playwright, mobile-chrome only, all specs — runs on PRs into `main` |
 | `test:e2e:all`         | Playwright, every project, all specs — runs on PRs into `next`/`live` |
-| `test:a11y`            | axe-core a11y spec — runs on PRs into `next`/`live`         |
+| `test:e2e:a11y`            | axe-core a11y spec — runs on PRs into `next`/`live`         |
 | `test:e2e:lighthouse`  | Lighthouse CI (`scripts/run-lhci.ts`) — runs on PRs into `live` only |
 
 Not part of CI, but part of the same naming contract (used by local

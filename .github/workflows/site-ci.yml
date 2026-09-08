@@ -109,13 +109,13 @@ jobs:
         if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'next'
         run: |
           bun run test:e2e:all
-          bun run test:a11y
+          bun run test:e2e:a11y
 
       - name: Full e2e + a11y + lighthouse (live)
         if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'live'
         run: |
           bun run test:e2e:all
-          bun run test:a11y
+          bun run test:e2e:a11y
           bun run test:e2e:lighthouse
 
       - name: Upload failure reports
