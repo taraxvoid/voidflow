@@ -1,13 +1,22 @@
 name: Site CI
 
-# Shared "Validate" job for the Astro/bun/Playwright site repos (soundry,
-# queeromaha, synthomaha). Callers just need pull_request/workflow_dispatch
-# triggers and this job; the script *names* below (bar workflow linting,
-# which runs here directly) are the contract every caller repo's
-# package.json must satisfy — see README.md.
+# Shared "Validate" job for the Astro/bun/Playwright repos, both the public
+# sites (soundry, queeromaha, synthomaha) and the private ravenflight repos
+# on self-hosted runners (pass `runner`). Callers just need
+# pull_request/workflow_dispatch triggers and this job; the script *names*
+# below (bar workflow linting, which runs here directly) are the contract
+# every caller repo's package.json must satisfy — see README.md.
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        description: >
+          Runner label for the validate job. Defaults to a GitHub-hosted
+          runner; pass a self-hosted label (e.g. 'rvnflt-com') for repos
+          that run their own CI fleet.
+        type: string
+        default: ubuntu-latest
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -19,7 +28,7 @@ permissions:
 jobs:
   validate:
     name: Validate
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 25
 
     steps:

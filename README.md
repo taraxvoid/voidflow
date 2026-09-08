@@ -1,7 +1,12 @@
 # voidflow
 
 Personal re-usable GitHub Actions workflows, shared across the Astro/bun/Playwright
-site repos (soundry, queeromaha, synthomaha).
+repos — both the public sites (soundry, queeromaha, synthomaha), on
+GitHub-hosted runners, and the private ravenflight repos (rvnflt, rvnflt.com,
+ravenflight.io), on their own self-hosted runners. Public, since none of
+this holds secret values — every secret is passed in by the caller at call
+time — which also makes it reusable/marketing-adjacent for anyone else who
+wants the same setup.
 
 ## site-ci.yml
 
@@ -26,6 +31,72 @@ on:
 jobs:
   validate:
     uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@main
+```
+
+### Self-hosted runners
+
+`runner` (default `ubuntu-latest`) lets a caller run validate on its own
+fleet instead of GitHub-hosted:
+
+```yaml
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@main
+    with:
+      runner: rvnflt-com
+```
+
+This is the only difference between the public-site and ravenflight-repo use
+of this workflow — everything else (script contract, actionlint, license
+gate, e2e tiers) is identical, so there's one file rather than two near-
+duplicates. A repo whose stack doesn't match the script contract below (a
+plain API service with no Playwright/e2e, say) doesn't fit this workflow —
+that's a case for a different reusable workflow, not a new input here.
+
+## Deploy actions
+
+Deploy is deliberately **not** part of `site-ci.yml` — it varies too much
+per app (build steps, binding verification, D1 migrations, post-deploy
+checks) and touches production secrets, so it stays a job the caller repo
+owns. These composite actions cover the part that actually repeats across
+repos, following one convention: branches `main`/`next`/`live` map to
+environments `dev`/`staging`/`prod`.
+
+- **`actions/branch-env-map`** — resolves `github.ref_name` to `dev`/
+  `staging`/`prod` (outputs `env`), failing loudly on any other branch.
+  Use this once per deploy job, then feed its `env` output to whichever
+  deploy action(s) below the job needs.
+- **`actions/cloudflare-deploy`** — wraps `cloudflare/wrangler-action`
+  with an optional D1-migration step first. Takes the resolved `env`,
+  builds a default `deploy --env <env>` command (override via `command`
+  for cases like ravenflight.io's `--config dist/server/wrangler.json`).
+- **`actions/netlify-deploy`** — wraps `nwtgck/actions-netlify`; `prod`
+  is a real production deploy, `dev`/`staging` are alias deploys. **Not
+  yet wired into queeromaha/synthomaha/soundry** — those currently deploy
+  via Netlify's own GitHub App on push to `main`, not from Actions. Using
+  this action means turning that auto-deploy off first (both racing on
+  the same site double-deploys), and picking a site topology (one site
+  with alias deploys per env, vs. three separate sites) before it's
+  wired into any repo's CI.
+
+Example deploy job:
+
+```yaml
+jobs:
+  deploy:
+    needs: validate
+    runs-on: rvnflt-com
+    if: github.event_name == 'push'
+    environment: ${{ github.ref_name == 'main' && 'dev' || github.ref_name == 'next' && 'staging' || 'prod' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: env
+        uses: taraxvoid/voidflow/actions/branch-env-map@main
+      - uses: taraxvoid/voidflow/actions/cloudflare-deploy@main
+        with:
+          env: ${{ steps.env.outputs.env }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          migrate-d1: 'true'
 ```
 
 ### Workflow linting

@@ -1,0 +1,47 @@
+name: Netlify deploy
+description: >
+  Deploys via nwtgck/actions-netlify, honoring the ravenflight main/next/live
+  branch convention: 'prod' is a real production deploy, 'dev'/'staging' are
+  alias deploys under that environment name. NOTE: this assumes deploys are
+  driven from here, not Netlify's own GitHub App auto-deploy — the two will
+  race/double-deploy if both are enabled on the same site. Confirm which
+  model a given repo uses before wiring this in.
+
+inputs:
+  env:
+    description: Resolved environment name (dev/staging/prod) — e.g. branch-env-map's output.
+    required: true
+  publish-dir:
+    description: Directory to deploy, relative to working-directory.
+    required: true
+  netlify-auth-token:
+    required: true
+  netlify-site-id:
+    required: true
+  working-directory:
+    default: '.'
+  github-token:
+    description: Passed through so the action can comment on the PR/commit; optional.
+    default: ''
+
+outputs:
+  deployment-url:
+    value: ${{ steps.deploy.outputs.deploy-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Deploy
+      id: deploy
+      uses: nwtgck/actions-netlify@d22a32a27c918fe470bbc562e984f80ec48c2668 # v4.0.0
+      with:
+        publish-dir: ${{ inputs.working-directory }}/${{ inputs.publish-dir }}
+        production-deploy: ${{ inputs.env == 'prod' }}
+        alias: ${{ inputs.env != 'prod' && inputs.env || '' }}
+        github-token: ${{ inputs.github-token }}
+        enable-pull-request-comment: false
+        enable-commit-comment: false
+        fails-without-credentials: true
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ inputs.netlify-auth-token }}
+        NETLIFY_SITE_ID: ${{ inputs.netlify-site-id }}
