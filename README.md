@@ -101,12 +101,16 @@ jobs:
 
 ### Workflow linting
 
-`site-ci.yml` lints `.github/workflows/*.yml` itself, via
-[reviewdog/action-actionlint](https://github.com/reviewdog/action-actionlint)
-(reporter `local`, so no extra permissions needed) wrapping the real
-[actionlint](https://github.com/rhysd/actionlint) binary — not a per-repo
-script. Caller repos don't need a `lint:actions` script, a workflow copy, or
-an `actionlint` devDependency; drop all three if a repo still has them.
+`site-ci.yml` lints `.github/workflows/*.yml` itself by downloading the real
+[actionlint](https://github.com/rhysd/actionlint) binary (via its own
+SHA-pinned `download-actionlint.bash`, at a pinned version) and running it
+directly — not a per-repo script, and not
+[reviewdog/action-actionlint](https://github.com/reviewdog/action-actionlint),
+which is a Docker-container action and so can't run on the self-hosted ARC
+runners this workflow targets (they have no Docker daemon available to the
+runner pod). Caller repos don't need a `lint:actions` script, a workflow
+copy, or an `actionlint` devDependency; drop all three if a repo still has
+them.
 
 For fast local/pre-commit feedback (optional — CI doesn't need it), use the
 [`github-actionlint`](https://www.npmjs.com/package/github-actionlint) npm
