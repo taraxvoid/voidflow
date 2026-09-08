@@ -28,6 +28,21 @@ jobs:
     uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@main
 ```
 
+### Workflow linting
+
+`site-ci.yml` lints `.github/workflows/*.yml` itself, via
+[reviewdog/action-actionlint](https://github.com/reviewdog/action-actionlint)
+(reporter `local`, so no extra permissions needed) wrapping the real
+[actionlint](https://github.com/rhysd/actionlint) binary — not a per-repo
+script. Caller repos don't need a `lint:actions` script, a workflow copy, or
+an `actionlint` devDependency; drop all three if a repo still has them.
+
+For fast local/pre-commit feedback (optional — CI doesn't need it), use the
+[`github-actionlint`](https://www.npmjs.com/package/github-actionlint) npm
+package instead of the `actionlint` npm package: it downloads and runs the
+real binary rather than reimplementing it in WASM, so error messages on
+genuinely broken YAML match what CI reports instead of going opaque.
+
 ### Script contract
 
 `site-ci.yml` calls these `bun run <script>` names — the caller repo's
@@ -35,7 +50,6 @@ jobs:
 
 | script                 | purpose                                                    |
 | ---------------------- | ----------------------------------------------------------- |
-| `lint:actions`         | actionlint over `.github/workflows/*.yml`                  |
 | `lint`                 | Biome                                                       |
 | `check`                | `astro check`                                               |
 | `test:unit`            | vitest (no build prefix — build already ran earlier in CI) |
