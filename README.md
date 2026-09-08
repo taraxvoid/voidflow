@@ -1,12 +1,6 @@
 # voidflow
 
-Personal re-usable GitHub Actions workflows, shared across the Astro/bun/Playwright
-repos — both the public sites (soundry, queeromaha, synthomaha), on
-GitHub-hosted runners, and the private ravenflight repos (rvnflt, rvnflt.com,
-ravenflight.io), on their own self-hosted runners. Public, since none of
-this holds secret values — every secret is passed in by the caller at call
-time — which also makes it reusable/marketing-adjacent for anyone else who
-wants the same setup.
+Workflows for my personal sites and my [consultancy shop RavenFlight Industries, LLC](https://ravenflight.com/github)
 
 ## site-ci.yml
 
