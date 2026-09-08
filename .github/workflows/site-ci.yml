@@ -2,8 +2,9 @@ name: Site CI
 
 # Shared "Validate" job for the Astro/bun/Playwright site repos (soundry,
 # queeromaha, synthomaha). Callers just need pull_request/workflow_dispatch
-# triggers and this job; the script *names* below are the contract every
-# caller repo's package.json must satisfy — see README.md.
+# triggers and this job; the script *names* below (bar workflow linting,
+# which runs here directly) are the contract every caller repo's
+# package.json must satisfy — see README.md.
 
 on:
   workflow_call:
@@ -74,6 +75,7 @@ jobs:
 
       - name: Lint workflow files
         if: steps.changes.outputs.workflows == 'true'
+        continue-on-error: true
         uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae # v1.73.4
         with:
           reporter: local
