@@ -1,0 +1,60 @@
+name: Cloudflare deploy
+description: >
+  Wrangler deploy against a resolved environment (see branch-env-map),
+  with an optional D1 migration step first. Deliberately thin: build,
+  binding verification, and post-deploy checks stay in the caller's own
+  job since those vary per app.
+
+inputs:
+  env:
+    description: Target environment name (dev/staging/prod) — e.g. branch-env-map's output.
+    required: true
+  cloudflare-api-token:
+    required: true
+  cloudflare-account-id:
+    required: false
+    default: ''
+  working-directory:
+    description: Directory to run wrangler (and, if enabled, the D1 migration) from.
+    default: '.'
+  command:
+    description: >
+      Full wrangler subcommand and args, e.g. 'deploy --config
+      dist/server/wrangler.json'. Defaults to 'deploy --env <env>'.
+    default: ''
+  migrate-d1:
+    description: If 'true', run 'bun run db:migrate:<env>' before deploying.
+    default: 'false'
+
+outputs:
+  deployment-url:
+    description: The deployed URL, as reported by wrangler-action.
+    value: ${{ steps.deploy.outputs.deployment-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Apply D1 migrations
+      if: ${{ inputs.migrate-d1 == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bun run db:migrate:${{ inputs.env }}
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+
+    - id: resolve-command
+      shell: bash
+      run: |
+        cmd="${{ inputs.command }}"
+        if [ -z "$cmd" ]; then cmd="deploy --env ${{ inputs.env }}"; fi
+        echo "cmd=$cmd" >> "$GITHUB_OUTPUT"
+
+    - name: Deploy
+      id: deploy
+      uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+      with:
+        apiToken: ${{ inputs.cloudflare-api-token }}
+        accountId: ${{ inputs.cloudflare-account-id }}
+        workingDirectory: ${{ inputs.working-directory }}
+        command: ${{ steps.resolve-command.outputs.cmd }}

@@ -1,0 +1,23 @@
+name: Branch env map
+description: >
+  Maps the ravenflight main/next/live branch convention to dev/staging/prod
+  environment names. Fails the step if the ref doesn't match one of the
+  three, so deploy jobs can't silently no-op on an unexpected branch.
+
+outputs:
+  env:
+    description: Resolved environment name (dev, staging, or prod).
+    value: ${{ steps.map.outputs.env }}
+
+runs:
+  using: composite
+  steps:
+    - id: map
+      shell: bash
+      run: |
+        case "${{ github.ref_name }}" in
+          main) echo "env=dev" >> "$GITHUB_OUTPUT" ;;
+          next) echo "env=staging" >> "$GITHUB_OUTPUT" ;;
+          live) echo "env=prod" >> "$GITHUB_OUTPUT" ;;
+          *) echo "::error::Refusing to deploy unknown branch: ${{ github.ref_name }} (expected main, next, or live)" >&2; exit 1 ;;
+        esac
