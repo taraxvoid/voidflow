@@ -75,7 +75,6 @@ jobs:
 
       - name: Lint workflow files
         if: steps.changes.outputs.workflows == 'true'
-        continue-on-error: true
         uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae # v1.73.4
         with:
           reporter: local
