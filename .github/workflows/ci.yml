@@ -18,4 +18,5 @@ jobs:
         uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae # v1.73.4
         with:
           reporter: local
+          filter_mode: nofilter
           fail_level: error
