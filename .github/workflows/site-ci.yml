@@ -84,11 +84,10 @@ jobs:
 
       - name: Lint workflow files
         if: steps.changes.outputs.workflows == 'true'
-        uses: reviewdog/action-actionlint@d290e336d5a743810aef4404f757dc862276d2ae # v1.73.4
-        with:
-          reporter: local
-          filter_mode: nofilter
-          fail_level: error
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
+            | bash -s -- 1.7.12 "$RUNNER_TEMP"
+          "$RUNNER_TEMP/actionlint" -color
 
       - name: Lint
         run: bun run lint
