@@ -35,7 +35,9 @@ jobs:
 
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-      
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
       - name: Check file changes
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
@@ -89,7 +91,7 @@ jobs:
       - name: Lint CI workflows
         if: steps.changes.outputs.workflows == 'true'
         run: |
-         curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
+          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
             | bash -s -- 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
         shell: bash
