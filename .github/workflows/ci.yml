@@ -7,7 +7,7 @@ on:
 
 jobs:
   validation:
-    name: Lint workflow files
+    name: Validation
     runs-on: ubuntu-latest
     permissions:
       contents: read
