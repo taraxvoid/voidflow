@@ -1,4 +1,4 @@
-name: Validate / Check
+name: Validation
 
 # Validation job for sites using a Astro/bun/Playwright stack
 # for self-hosted runners pass `runner`
@@ -28,6 +28,7 @@ jobs:
     name: Validate
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 25
+    if: github.event.pull_request.draft == false
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
