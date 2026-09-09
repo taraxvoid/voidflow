@@ -1,6 +1,6 @@
 # voidflow
 
-Semi-opinionated GitHub Actions workflows for my personal sites and consultancy shop [RavenFlight Industries, LLC](https://rvnflt.com/github)
+Semi-opinionated GitHub Actions workflows for [RavenFlight Industries, LLC](https://rvnflt.com/github)
 
 ## Usage
 
