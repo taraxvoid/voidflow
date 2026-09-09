@@ -83,26 +83,26 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-
 
-      - name: Install dependencies
+      - name: Install NPM Dependencies
         run: bun install --frozen-lockfile
 
-      - name: Lint workflow files
+      - name: Lint CI workflows
         if: steps.changes.outputs.workflows == 'true'
         run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
-            | bash -s -- 1.7.12 "$RUNNER_TEMP"
-          "$RUNNER_TEMP/actionlint" -color
-
-      - name: Lint
+         bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+         ./actionlint -color
+        shell: bash
+      
+      - name: Lint Code
         run: bun run lint
 
-      - name: TypeCheck
+      - name: TypeCheck Code
         run: bun run check
 
-      - name: Build
+      - name: Build Code
         run: bun run build
 
-      - name: Unit Test
+      - name: Unit Tests
         run: bun run test:unit
 
       - name: Check Licenses for GPL kudzu
