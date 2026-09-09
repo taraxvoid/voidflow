@@ -1,11 +1,9 @@
-name: Site CI
+name: Validate / Check
 
-# Shared "Validate" job for the Astro/bun/Playwright repos, both the public
-# sites (soundry, queeromaha, synthomaha) and the private ravenflight repos
-# on self-hosted runners (pass `runner`). Callers just need
-# pull_request/workflow_dispatch triggers and this job; the script *names*
-# below (bar workflow linting, which runs here directly) are the contract
-# every caller repo's package.json must satisfy — see README.md.
+# Validation job for sites using a Astro/bun/Playwright stack
+# for self-hosted runners pass `runner`
+# Callers need pull_request/workflow_dispatch triggers 
+# Caller is expected to define referenced package.json scripts
 
 on:
   workflow_call:
@@ -13,8 +11,7 @@ on:
       runner:
         description: >
           Runner label for the validate job. Defaults to a GitHub-hosted
-          runner; pass a self-hosted label (e.g. 'rvnflt-com') for repos
-          that run their own CI fleet.
+          runner; pass a self-hosted label (e.g. 'my-hosted-runner')
         type: string
         default: ubuntu-latest
 
@@ -60,9 +57,13 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
-
+        # specify in package.json or .bun-version to override
+        # falls thru to "latest"
+        # XXX holding off on pinning here until 1.4.x is stable
+        # with:
+          # bun-version: 1.4.2
+          # bun-version-file: ".bun-version"
+          
       - name: Cache npm package dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -107,19 +108,19 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.changes.outputs.e2e_relevant == 'true'
-        run: bunx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium # npx has better compat than bunx for this
 
-      - name: Fast e2e — mobile only (main)
+      - name: Fast e2e checks
         if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
         run: bun run test:e2e:full
 
-      - name: Broader e2e + a11y (next)
+      - name: Broad e2e checks
         if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'next'
         run: |
           bun run test:e2e:all
           bun run test:e2e:a11y
 
-      - name: Full e2e + a11y + lighthouse (live)
+      - name: Complete e2e 
         if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'live'
         run: |
           bun run test:e2e:all
