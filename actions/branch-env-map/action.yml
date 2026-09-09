@@ -1,7 +1,7 @@
 name: Branch env map
 description: >
-  Maps the ravenflight main/next/live branch convention to dev/staging/prod
-  environment names. Fails the step if the ref doesn't match one of the
+  Maps branch conventions to dev/staging/prod
+  environment names. Fails if the ref doesn't match one of the
   three, so deploy jobs can't silently no-op on an unexpected branch.
 
 outputs:
