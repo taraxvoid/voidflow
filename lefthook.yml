@@ -1,0 +1,17 @@
+pre-commit:
+  parallel: true
+  commands:
+    actionlint:
+      glob: ".github/workflows/*.{yml,yaml}"
+      run: just lint-workflows
+    schema-validation:
+      glob: "{actions/**/action.{yml,yaml},.github/workflows/*.{yml,yaml}}"
+      run: just lint-actions
+    shellcheck-actions:
+      glob: "actions/**/action.{yml,yaml}"
+      run: just lint-shell
+
+pre-push:
+  commands:
+    zizmor:
+      run: just security

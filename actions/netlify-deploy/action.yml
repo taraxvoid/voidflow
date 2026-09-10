@@ -15,10 +15,13 @@ inputs:
     description: Directory to deploy, relative to working-directory.
     required: true
   netlify-auth-token:
+    description: Netlify personal access token used to authenticate the deploy.
     required: true
   netlify-site-id:
+    description: Target Netlify site ID.
     required: true
   working-directory:
+    description: Base directory that publish-dir is relative to.
     default: '.'
   github-token:
     description: Passed through so the action can comment on the PR/commit; optional.
@@ -26,6 +29,7 @@ inputs:
 
 outputs:
   deployment-url:
+    description: The deployed URL, as reported by actions-netlify.
     value: ${{ steps.deploy.outputs.deploy-url }}
 
 runs:

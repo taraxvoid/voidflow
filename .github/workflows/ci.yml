@@ -15,9 +15,62 @@ jobs:
     
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install shellcheck
+        run: |
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) sc_arch=x86_64 ;;
+            aarch64|arm64) sc_arch=aarch64 ;;
+            *) echo "::error::unsupported arch for shellcheck: $arch" >&2; exit 1 ;;
+          esac
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.${sc_arch}.tar.xz" -o "$RUNNER_TEMP/shellcheck.tar.xz"
+          tar -xf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
+        # don't rely on the runner image happening to ship shellcheck: actionlint
+        # auto-detects it on PATH and shellchecks run: steps in .github/workflows/*.yml,
+        # and scripts/shellcheck-actions.sh needs it directly. arch-aware since this
+        # repo supports self-hosted runners (see README), not just amd64 ubuntu-latest.
 
       - name: actionlint
         run: |
           curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
             | bash -s -- 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
+
+      - name: Install yq
+        run: |
+          arch="$(uname -m)"
+          case "$arch" in
+            x86_64) yq_arch=amd64 ;;
+            aarch64|arm64) yq_arch=arm64 ;;
+            *) echo "::error::unsupported arch for yq: $arch" >&2; exit 1 ;;
+          esac
+          curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_${yq_arch}" -o "$RUNNER_TEMP/yq"
+          chmod +x "$RUNNER_TEMP/yq"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Shellcheck composite action scripts
+        run: ./scripts/shellcheck-actions.sh
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Validate action.yml schemas
+        run: |
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(git ls-files -- 'actions/**/action.yml' 'actions/**/action.yaml')
+          uvx check-jsonschema@0.38.0 --builtin-schema vendor.github-actions "${files[@]}"
+
+      - name: Validate workflow schemas
+        run: |
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(git ls-files -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+          uvx check-jsonschema@0.38.0 --builtin-schema vendor.github-workflows "${files[@]}"
+
+      - name: zizmor (security)
+        run: uvx zizmor@1.30.1 --min-severity medium .
+        env:
+          GH_TOKEN: ${{ github.token }}

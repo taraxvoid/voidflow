@@ -61,4 +61,29 @@ jobs:
 
 This project uses semver. Treat `@main` as unstable. Pin to a specific version or digest eg (`@v1`)
 
+## Self-validation
+
+This repo validates its own workflows and composite actions (`.github/workflows/ci.yml`):
+
+- **actionlint** — workflow schema/logic; also shellchecks `run:` steps in `.github/workflows/*.yml` automatically (`shellcheck` ships on `ubuntu-latest`)
+- **check-jsonschema** — schema-checks `actions/**/action.yml` and the workflow files against [SchemaStore](https://www.schemastore.org/)'s `github-action.json` / `github-workflow.json`
+- **shellcheck** (`scripts/shellcheck-actions.sh`) — checks `run:` steps inside `actions/**/action.yml`, which actionlint doesn't reach
+- **zizmor** — security audit (unpinned refs, script injection via `${{ }}` in `run:`, excess permissions, etc.)
+
+### Local dev setup
+
+```sh
+brew install just lefthook actionlint shellcheck yq act uv
+lefthook install
+```
+
+- `just validate` — run everything CI runs, locally
+- `just lint-workflows` / `lint-actions` / `lint-shell` / `security` — run one check at a time
+- `just dry-run` — full local run of `ci.yml` via [`act`](https://github.com/nektos/act) (needs Docker running); pass extra args, e.g. `just dry-run -j validation`
+- lefthook runs the fast checks (`lint-workflows`, `lint-actions`, `lint-shell`) on `pre-commit`, and `zizmor` on `pre-push`
+
+**Colima users:** `.actrc` already disables the docker-socket mount (`--container-daemon-socket -`) — `act` binds `/var/run/docker.sock` by default, which doesn't exist under Colima and fails with `operation not supported`. None of these workflow steps need docker-in-docker, so this is safe.
+
+**Run `just dry-run` from a normal checkout, not a linked git worktree.** `act` copies the working tree via `docker cp` rather than a real clone, so a worktree's `.git` pointer back to the parent repo doesn't resolve inside the container — `git ls-files`-based steps (schema validation, `scripts/shellcheck-actions.sh`) silently see zero files instead of erroring. Verified clean end-to-end (`🏁 Job succeeded`) from a plain clone.
+
 YMMV, caveat emptor, your satisfaction **not** guaranteed
