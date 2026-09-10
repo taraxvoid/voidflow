@@ -66,14 +66,14 @@ This project uses semver. Treat `@main` as unstable. Pin to a specific version o
 This repo validates its own workflows and composite actions (`.github/workflows/ci.yml`):
 
 - **actionlint** — workflow schema/logic; also shellchecks `run:` steps in `.github/workflows/*.yml` automatically (`shellcheck` ships on `ubuntu-latest`)
-- **action-validator** — schema-checks `actions/**/action.yml` and the workflow files
+- **check-jsonschema** — schema-checks `actions/**/action.yml` and the workflow files against [SchemaStore](https://www.schemastore.org/)'s `github-action.json` / `github-workflow.json`
 - **shellcheck** (`scripts/shellcheck-actions.sh`) — checks `run:` steps inside `actions/**/action.yml`, which actionlint doesn't reach
 - **zizmor** — security audit (unpinned refs, script injection via `${{ }}` in `run:`, excess permissions, etc.)
 
 ### Local dev setup
 
 ```sh
-brew install just lefthook actionlint action-validator shellcheck yq act uv
+brew install just lefthook actionlint shellcheck yq act uv
 lefthook install
 ```
 
@@ -84,8 +84,6 @@ lefthook install
 
 **Colima users:** `.actrc` already disables the docker-socket mount (`--container-daemon-socket -`) — `act` binds `/var/run/docker.sock` by default, which doesn't exist under Colima and fails with `operation not supported`. None of these workflow steps need docker-in-docker, so this is safe.
 
-**Known `act` gaps on this repo (not bugs in the workflow itself):**
-- Run `just dry-run` from a normal checkout, not a linked git worktree — `act` copies the working tree via `docker cp` rather than a real clone, so a worktree's `.git` pointer back to the parent repo doesn't resolve inside the container, and `git ls-files`-based steps (action-validator's own script, `scripts/shellcheck-actions.sh`) silently see zero files instead of erroring.
-- `astral-sh/setup-uv`'s step currently crashes under `act`'s bundled Node 20 (`webidl.util.markAsUncloneable is not a function`) — a known Node-version mismatch between `act`'s embedded JS runtime and newer actions' dependencies, not something this repo can fix. actionlint and action-validator's schema check do run correctly under `act`; the zizmor step doesn't get reached until that's resolved upstream.
+**Run `just dry-run` from a normal checkout, not a linked git worktree.** `act` copies the working tree via `docker cp` rather than a real clone, so a worktree's `.git` pointer back to the parent repo doesn't resolve inside the container — `git ls-files`-based steps (schema validation, `scripts/shellcheck-actions.sh`) silently see zero files instead of erroring. Verified clean end-to-end (`🏁 Job succeeded`) from a plain clone.
 
 YMMV, caveat emptor, your satisfaction **not** guaranteed

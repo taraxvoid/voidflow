@@ -2,6 +2,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 zizmor_version := "1.30.1"
 actionlint_version := "1.7.12"
+check_jsonschema_version := "0.38.0"
 
 # List available recipes
 default:
@@ -19,9 +20,16 @@ lint-workflows:
         /tmp/actionlint -color
     fi
 
-# Validate actions/**/action.yml and workflow schemas
+# Validate actions/**/action.yml and workflow schemas against SchemaStore
 lint-actions:
-    action-validator --verbose $(git ls-files -- 'actions/**/action.yml' 'actions/**/action.yaml' '.github/workflows/*.yml' '.github/workflows/*.yaml')
+    #!/usr/bin/env bash
+    set -euo pipefail
+    action_files=()
+    while IFS= read -r f; do action_files+=("$f"); done < <(git ls-files -- 'actions/**/action.yml' 'actions/**/action.yaml')
+    uvx check-jsonschema@{{ check_jsonschema_version }} --builtin-schema vendor.github-actions "${action_files[@]}"
+    workflow_files=()
+    while IFS= read -r f; do workflow_files+=("$f"); done < <(git ls-files -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+    uvx check-jsonschema@{{ check_jsonschema_version }} --builtin-schema vendor.github-workflows "${workflow_files[@]}"
 
 # Shellcheck the run: blocks inside composite action.yml files
 lint-shell:

@@ -4,7 +4,7 @@ pre-commit:
     actionlint:
       glob: ".github/workflows/*.{yml,yaml}"
       run: just lint-workflows
-    action-validator:
+    schema-validation:
       glob: "{actions/**/action.{yml,yaml},.github/workflows/*.{yml,yaml}}"
       run: just lint-actions
     shellcheck-actions:
