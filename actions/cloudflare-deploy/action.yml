@@ -10,8 +10,10 @@ inputs:
     description: Target environment name (dev/staging/prod) — e.g. branch-env-map's output.
     required: true
   cloudflare-api-token:
+    description: Cloudflare API token with permission to deploy the target Worker.
     required: true
   cloudflare-account-id:
+    description: Cloudflare account ID. Optional if the API token is scoped to a single account.
     required: false
     default: ''
   working-directory:
@@ -38,16 +40,20 @@ runs:
       if: ${{ inputs.migrate-d1 == 'true' }}
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: bun run db:migrate:${{ inputs.env }}
       env:
         CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
         CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+        ENV_NAME: ${{ inputs.env }}
+      run: bun run "db:migrate:$ENV_NAME"
 
     - id: resolve-command
       shell: bash
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_ENV: ${{ inputs.env }}
       run: |
-        cmd="${{ inputs.command }}"
-        if [ -z "$cmd" ]; then cmd="deploy --env ${{ inputs.env }}"; fi
+        cmd="$INPUT_COMMAND"
+        if [ -z "$cmd" ]; then cmd="deploy --env $INPUT_ENV"; fi
         echo "cmd=$cmd" >> "$GITHUB_OUTPUT"
 
     - name: Deploy

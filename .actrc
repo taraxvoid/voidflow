@@ -1,0 +1,5 @@
+# full-latest (not act-latest) because ci.yml needs `gh` (via action-validator),
+# which the smaller image doesn't ship. Bigger pull, but closer to the real
+# ubuntu-latest runner.
+-P ubuntu-latest=catthehacker/ubuntu:full-latest
+--container-daemon-socket -
