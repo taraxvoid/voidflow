@@ -5,12 +5,23 @@ All notable changes to this project are documented here, generated with
 
 Commits made before conventional commits were adopted are not included.
 <!-- git-cliff: end of header -->
+## [0.4.0] - 2026-09-11
+
+### 🚀 Features
+
+- *(site-ci.yml)* Add support for Playwright installation without OS-level browser dependencies on self-hosted runners
+
+### 🐛 Bug Fixes
+
+- *(release.yml)* Pin --tag-pattern for the auto-bump path ([#38](https://github.com/taraxvoid/voidflow/issues/38))
 ## [0.3.0] - 2026-09-11
 
 ### 🚀 Features
 
 - *(site-ci.yml)* Add GITLEAKS\_LICENSE secret since organizations require it
 - Add conventional-commits release method ([#27](https://github.com/taraxvoid/voidflow/issues/27))
+- *(justfile)* Add lint-only validation target
+- *(site-ci.yml)* Add optional GITLEAKS_LICENSE secret for gitleaks Organization plan
 
 ### 🐛 Bug Fixes
 
