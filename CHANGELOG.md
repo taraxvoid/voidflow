@@ -5,15 +5,18 @@ All notable changes to this project are documented here, generated with
 
 Commits made before conventional commits were adopted are not included.
 <!-- git-cliff: end of header -->
-## [unreleased]
+## [0.3.0] - 2026-09-11
 
 ### 🚀 Features
 
 - *(site-ci.yml)* Add GITLEAKS\_LICENSE secret since organizations require it
+- Add conventional-commits release method ([#27](https://github.com/taraxvoid/voidflow/issues/27))
 
 ### 🐛 Bug Fixes
 
 - Improve Playwright cache invalidation ([#22](https://github.com/taraxvoid/voidflow/issues/22))
+- *(release.yml)* Pass GH_TOKEN through to just validate ([#28](https://github.com/taraxvoid/voidflow/issues/28))
+- *(release)* Split into PR-then-tag flow, main is PR-only ([#30](https://github.com/taraxvoid/voidflow/issues/30))
 
 ### ⚙️ Miscellaneous Tasks
 
