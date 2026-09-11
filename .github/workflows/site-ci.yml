@@ -40,6 +40,7 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
         
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
@@ -55,8 +56,11 @@ jobs:
               - 'src/**'
               - 'public/**'
               - 'test/**'
-              - 'astro.config.ts'
-              - 'playwright.config.js'
+              - 'scripts/**'
+              - 'astro.config.*'
+              - 'playwright.config.*'
+              - 'wrangler.jsonc'
+              - 'site.vars.json'
               - 'package.json'
               - 'bun.lock'
               - 'tsconfig.json'
