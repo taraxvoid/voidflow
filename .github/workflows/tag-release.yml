@@ -36,7 +36,9 @@ jobs:
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          TAG=$(head -n1 <<< "$HEAD_COMMIT_MESSAGE" | sed -n 's/^chore(release): prepare for \(v[0-9]\+\.[0-9]\+\.[0-9]\+\)$/\1/p')
+          # squash-merge appends " (#NN)" to the PR title, so match a trailing
+          # optional " (#...)" rather than anchoring the tag to end-of-line.
+          TAG=$(head -n1 <<< "$HEAD_COMMIT_MESSAGE" | sed -En 's/^chore\(release\): prepare for (v[0-9]+\.[0-9]+\.[0-9]+)( \(#[0-9]+\))?$/\1/p')
           if [ -z "$TAG" ]; then
             echo "::error::Could not extract a vX.Y.Z tag from the head commit message." >&2
             exit 1
