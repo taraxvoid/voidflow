@@ -59,7 +59,14 @@ jobs:
 
 ### Versioning
 
-This project uses semver. Treat `@main` as unstable. Pin to a specific version or digest eg (`@v1`)
+This project uses semver, released manually via [`release.yml`](.github/workflows/release.yml)
+(`workflow_dispatch`, so nothing ships automatically on merge). Commit messages should
+follow [Conventional Commits](https://www.conventionalcommits.org) — enforced loosely, as
+an advisory `commit-msg` hint (see [`scripts/check-commit-msg.sh`](scripts/check-commit-msg.sh)),
+not a blocking check. They drive the generated [`CHANGELOG.md`](CHANGELOG.md).
+
+Treat `@main` as unstable. Consumers should pin to an exact release tag, e.g. `@v0.3.0` —
+there is no floating major-version tag (`@v1`) to track yet.
 
 ## Self-validation
 

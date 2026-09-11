@@ -54,3 +54,17 @@ dry-run *ARGS:
 # Install lefthook git hooks
 install-hooks:
     lefthook install
+
+# Show what the changelog would look like for unreleased commits
+changelog-unreleased:
+    git-cliff --config cliff.toml --unreleased
+
+# Regenerate CHANGELOG.md up to the given tag (defaults to unreleased)
+changelog TAG="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{ TAG }}" ]; then
+        git-cliff --config cliff.toml --tag "{{ TAG }}" -o CHANGELOG.md
+    else
+        git-cliff --config cliff.toml -o CHANGELOG.md
+    fi
