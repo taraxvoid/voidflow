@@ -14,6 +14,16 @@ on:
           runner; pass a self-hosted label (e.g. 'my-hosted-runner')
         type: string
         default: ubuntu-latest
+      playwright-install-with-deps:
+        description: >
+          Whether the Playwright install step also apt-installs OS-level
+          browser deps via sudo (`--with-deps`). GitHub-hosted runners need
+          this. Self-hosted runners with those deps already baked into the
+          image should pass `false` -- some runner containers set
+          no-new-privileges, which makes sudo (and so --with-deps) fail
+          outright.
+        type: boolean
+        default: true
     secrets:
       GITLEAKS_LICENSE:
         description: >
@@ -127,8 +137,12 @@ jobs:
         run: bun run check:licenses
 
       - name: Install Playwright
-        if: steps.changes.outputs.e2e_relevant == 'true'
+        if: steps.changes.outputs.e2e_relevant == 'true' && inputs.playwright-install-with-deps
         run: npx playwright install --with-deps chromium # npx has better compat than bunx for this
+
+      - name: Install Playwright (no OS deps)
+        if: steps.changes.outputs.e2e_relevant == 'true' && !inputs.playwright-install-with-deps
+        run: npx playwright install chromium
 
       - name: E2E - Dev
         if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
