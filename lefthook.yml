@@ -11,6 +11,11 @@ pre-commit:
       glob: "actions/**/action.{yml,yaml}"
       run: just lint-shell
 
+commit-msg:
+  commands:
+    conventional-commit-hint:
+      run: scripts/check-commit-msg.sh {1}
+
 pre-push:
   commands:
     zizmor:
