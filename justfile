@@ -8,6 +8,10 @@ check_jsonschema_version := "0.38.0"
 default:
     just --list
 
+# Lint all
+
+lint: lint-actions lint-shell lint-workflows
+    
 # Lint .github/workflows/*.yml (schema + built-in shellcheck)
 lint-workflows:
     #!/usr/bin/env bash
@@ -45,7 +49,7 @@ security:
     uvx zizmor@{{ zizmor_version }} --min-severity medium .
 
 # Run everything ci.yml runs, locally
-validate: lint-workflows lint-actions lint-shell security
+validate: lint security
 
 # Full local dry-run of ci.yml via act (needs Docker running)
 dry-run *ARGS:
