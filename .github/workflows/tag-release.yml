@@ -1,0 +1,65 @@
+name: Tag Release
+
+# Manual release, step 2 of 2 — fires automatically once a release.yml PR
+# ("chore(release): prepare for vX.Y.Z") lands on main. Tags the merge
+# commit and creates the GitHub release from the changelog section for that
+# version. Tag pushes aren't covered by main's branch-protection ruleset
+# (it targets refs/heads/main only), so this doesn't need the PR step
+# release.yml needs.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  tag:
+    name: Tag and publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    if: "startsWith(github.event.head_commit.message, 'chore(release): prepare for v')"
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
+        with:
+          tool: git-cliff
+
+      - name: Extract tag
+        id: version
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          TAG=$(head -n1 <<< "$HEAD_COMMIT_MESSAGE" | sed -n 's/^chore(release): prepare for \(v[0-9]\+\.[0-9]\+\.[0-9]\+\)$/\1/p')
+          if [ -z "$TAG" ]; then
+            echo "::error::Could not extract a vX.Y.Z tag from the head commit message." >&2
+            exit 1
+          fi
+          if git tag --list "$TAG" | grep -q .; then
+            echo "::error::Tag $TAG already exists — nothing to do." >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Extract release notes
+        run: git-cliff --config cliff.toml --current --strip header -o release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release create "$TAG" --title "$TAG" --notes-file release-notes.md

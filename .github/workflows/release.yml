@@ -1,12 +1,16 @@
 name: Release
 
-# Manual release — nothing here runs automatically on merge. Trigger
-# explicitly when it's time to cut a release: regenerates CHANGELOG.md via
-# git-cliff, runs the same validation ci.yml runs, commits, tags, and
-# creates a GitHub release. Version is given explicitly (this repo's only
-# prior tag, v0.2, predates semver-strict tagging, so `--bumped-version`
-# isn't trustworthy yet) — once a real vX.Y.Z tag exists, future runs can
-# leave it blank to have git-cliff compute the next version.
+# Manual release, step 1 of 2 — nothing here runs automatically on merge.
+# Trigger explicitly when it's time to cut a release: regenerates
+# CHANGELOG.md via git-cliff, runs the same validation ci.yml runs, and
+# opens a PR with the changelog commit. `main` is protected (PR-only, no
+# direct pushes even from Actions), so this can't commit straight to main
+# the way rvnflt's CLI release does. Merging that PR triggers
+# tag-release.yml, which tags the merge commit and creates the GitHub
+# release. Version is given explicitly (this repo's only prior tag, v0.2,
+# predates semver-strict tagging, so `--bumped-version` isn't trustworthy
+# yet) — once a real vX.Y.Z tag exists, future runs can leave it blank to
+# have git-cliff compute the next version.
 on:
   workflow_dispatch:
     inputs:
@@ -16,12 +20,13 @@ on:
         type: string
 
 jobs:
-  release:
-    name: Release
+  prepare:
+    name: Prepare release PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,6 +82,7 @@ jobs:
           {
             echo "version=$VERSION"
             echo "tag=$TAG"
+            echo "branch=release/${TAG}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate changelog
@@ -89,27 +95,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Commit and tag
+      - name: Commit and open release PR
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
-          REF_NAME: ${{ github.ref_name }}
+          BRANCH: ${{ steps.version.outputs.branch }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
           git add CHANGELOG.md
           git commit -m "chore(release): prepare for ${TAG}"
-          git tag "$TAG"
-          git push origin "HEAD:${REF_NAME}"
-          git push origin "$TAG"
-
-      - name: Extract release notes
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-        run: git-cliff --config cliff.toml --current --strip header -o release-notes.md
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
+          git push origin "$BRANCH"
+          gh pr create --title "chore(release): prepare for ${TAG}" --base main --head "$BRANCH" \
+            --body "Merging this tags \`${TAG}\` and publishes the GitHub release (see tag-release.yml)."
