@@ -1,0 +1,31 @@
+name: Resolve env
+
+# Resolves the deploy environment (dev/staging/prod) for the current branch
+# via the branch-env-map action, exposing it as a job output so callers can
+# reference it in a downstream job's `name:` (e.g. `Deploy [${{ needs.resolve-env.outputs.env }}]`).
+# Job names may use the `needs` context, but not composite action outputs
+# directly, so this indirection is what makes that possible.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >
+          Runner label for the resolve-env job. Defaults to a GitHub-hosted
+          runner; pass a self-hosted label to match the caller's deploy job.
+        type: string
+        default: ubuntu-latest
+    outputs:
+      env:
+        description: Resolved environment name (dev, staging, or prod).
+        value: ${{ jobs.resolve-env.outputs.env }}
+
+jobs:
+  resolve-env:
+    name: Resolve env
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      env: ${{ steps.map.outputs.env }}
+    steps:
+      - id: map
+        uses: taraxvoid/voidflow/actions/branch-env-map@main

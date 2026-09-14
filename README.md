@@ -39,21 +39,29 @@ Runs lint, typecheck, check for GPL licenses, e2e with Playwright
 
 ## Deployments
 
-Example deployment job added to your workflow above:
+Example deployment job added to your workflow above. `resolve-env` maps the
+branch to dev/staging/prod once, up front, so its output can be used both to
+drive the deploy and to label the job (`Deploy [dev]`, `Deploy [staging]`,
+`Deploy [prod]`) — a job's `name:` can reference `needs.<job>.outputs.*` but
+not a step output from within itself, hence the split:
 
 ```yaml
 jobs:
-  deploy:
+  resolve-env:
     needs: validate
     if: github.event_name == 'push'
-    environment: ${{ github.ref_name == 'main' && 'dev' || github.ref_name == 'next' && 'staging' || 'prod' }}
+    uses: taraxvoid/voidflow/.github/workflows/resolve-env.yml@main
+
+  deploy:
+    name: Deploy [${{ needs.resolve-env.outputs.env }}]
+    needs: resolve-env
+    if: github.event_name == 'push'
+    environment: ${{ needs.resolve-env.outputs.env }}
     steps:
       - uses: actions/checkout@v7.0.1
-      - id: env
-        uses: taraxvoid/voidflow/actions/branch-env-map@main
       - uses: taraxvoid/voidflow/actions/cloudflare-deploy@main
         with:
-          env: ${{ steps.env.outputs.env }}
+          env: ${{ needs.resolve-env.outputs.env }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 ```
 
