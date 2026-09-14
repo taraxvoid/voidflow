@@ -28,4 +28,4 @@ jobs:
       env: ${{ steps.map.outputs.env }}
     steps:
       - id: map
-        uses: taraxvoid/voidflow/actions/branch-env-map@main
+        uses: ./actions/branch-env-map
