@@ -1,11 +1,11 @@
 name: Tag Release
 
-# Manual release, step 2 of 2 — fires automatically once a release.yml PR
-# ("chore(release): prepare for vX.Y.Z") lands on main. Tags the merge
-# commit and creates the GitHub release from the changelog section for that
-# version. Tag pushes aren't covered by main's branch-protection ruleset
-# (it targets refs/heads/main only), so this doesn't need the PR step
-# release.yml needs.
+# Manual release, step 2 of 2 — fires automatically once the PR opened by
+# `just release` (release.yml's "chore(release): prepare for vX.Y.Z" PR)
+# lands on main. Tags the merge commit and creates the GitHub release from
+# the changelog section for that version. Tag pushes aren't covered by
+# main's branch-protection ruleset (it targets refs/heads/main only), so
+# this doesn't need the PR step release.yml needs.
 on:
   push:
     branches: [main]

@@ -1,16 +1,17 @@
 name: Release
 
 # Manual release, step 1 of 2 — nothing here runs automatically on merge.
-# Trigger explicitly when it's time to cut a release: regenerates
-# CHANGELOG.md via git-cliff, runs the same validation ci.yml runs, and
-# opens a PR with the changelog commit. `main` is protected (PR-only, no
-# direct pushes even from Actions), so this can't commit straight to main
-# the way rvnflt's CLI release does. Merging that PR triggers
-# tag-release.yml, which tags the merge commit and creates the GitHub
-# release. Version is given explicitly (this repo's only prior tag, v0.2,
-# predates semver-strict tagging, so `--bumped-version` isn't trustworthy
-# yet) — once a real vX.Y.Z tag exists, future runs can leave it blank to
-# have git-cliff compute the next version.
+# Trigger explicitly when it's time to cut a release, via `just release
+# [VERSION]` (wraps `gh workflow run release.yml`) or the Actions UI:
+# regenerates CHANGELOG.md via git-cliff, runs the same validation ci.yml
+# runs, and opens a PR with the changelog commit. `main` is protected
+# (PR-only, no direct pushes even from Actions), so this can't commit
+# straight to main the way rvnflt's CLI release does. Merging that PR
+# triggers tag-release.yml, which tags the merge commit and creates the
+# GitHub release. Version is given explicitly (this repo's only prior tag,
+# v0.2, predates semver-strict tagging, so `--bumped-version` isn't
+# trustworthy yet) — once a real vX.Y.Z tag exists, future runs can leave
+# it blank to have git-cliff compute the next version.
 on:
   workflow_dispatch:
     inputs:

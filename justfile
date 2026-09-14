@@ -72,3 +72,7 @@ changelog TAG="":
     else
         git-cliff --config cliff.toml -o CHANGELOG.md
     fi
+
+# Cut a release: opens the "chore(release)" PR; merging it tags and publishes (see tag-release.yml). VERSION e.g. "0.5.0"; blank lets git-cliff compute it.
+release VERSION="":
+    gh workflow run release.yml {{ if VERSION != "" { "-f version=" + VERSION } else { "" } }}
