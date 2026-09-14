@@ -5,6 +5,19 @@ All notable changes to this project are documented here, generated with
 
 Commits made before conventional commits were adopted are not included.
 <!-- git-cliff: end of header -->
+## [0.5.0] - 2026-09-14
+
+### 🚀 Features
+
+- *(resolve-env)* Add reusable workflow to expose deploy env as a job output
+
+### 🐛 Bug Fixes
+
+- *(resolve-env)* Use local action path to satisfy zizmor's unpinned-uses policy
+
+### ⚙️ Miscellaneous Tasks
+
+- Add `just release` target, update workflow comments
 ## [0.4.0] - 2026-09-11
 
 ### 🚀 Features
@@ -14,6 +27,7 @@ Commits made before conventional commits were adopted are not included.
 ### 🐛 Bug Fixes
 
 - *(release.yml)* Pin --tag-pattern for the auto-bump path ([#38](https://github.com/taraxvoid/voidflow/issues/38))
+- *(ci.yml)* Disable uv dependency cache since repo has no lockfile/requirements to key it on ([#37](https://github.com/taraxvoid/voidflow/issues/37))
 ## [0.3.0] - 2026-09-11
 
 ### 🚀 Features
