@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-    if: "startsWith(github.event.head_commit.message, 'chore(release): prepare for v')"
+    if: "contains(github.event.head_commit.message, 'chore(release): prepare for v')"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,9 +36,13 @@ jobs:
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          # squash-merge appends " (#NN)" to the PR title, so match a trailing
-          # optional " (#...)" rather than anchoring the tag to end-of-line.
-          TAG=$(head -n1 <<< "$HEAD_COMMIT_MESSAGE" | sed -En 's/^chore\(release\): prepare for (v[0-9]+\.[0-9]+\.[0-9]+)( \(#[0-9]+\))?$/\1/p')
+          # squash-merge appends " (#NN)" to the PR title (line 1), so match a
+          # trailing optional " (#...)" rather than anchoring to end-of-line.
+          # A regular (non-squash) merge instead produces a merge-commit
+          # message like "Merge pull request #NN from ...\n\nchore(release):
+          # prepare for vX.Y.Z", putting the title on a later line — scan all
+          # lines rather than assuming line 1.
+          TAG=$(sed -En 's/^chore\(release\): prepare for (v[0-9]+\.[0-9]+\.[0-9]+)( \(#[0-9]+\))?$/\1/p' <<< "$HEAD_COMMIT_MESSAGE" | head -n1)
           if [ -z "$TAG" ]; then
             echo "::error::Could not extract a vX.Y.Z tag from the head commit message." >&2
             exit 1
