@@ -145,17 +145,17 @@ jobs:
         run: npx playwright install chromium
 
       - name: E2E - Dev
-        if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main'
+        if: steps.changes.outputs.e2e_relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'main'
         run: bun run test:e2e:full
 
       - name: E2E - Staging
-        if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'next'
+        if: steps.changes.outputs.e2e_relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'next'
         run: |
           bun run test:e2e:all
           bun run test:e2e:a11y
 
       - name: E2E - Production
-        if: steps.changes.outputs.e2e_relevant == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'live'
+        if: steps.changes.outputs.e2e_relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
         run: |
           bun run test:e2e:all
           bun run test:e2e:a11y
