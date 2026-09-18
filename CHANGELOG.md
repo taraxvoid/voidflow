@@ -5,6 +5,13 @@ All notable changes to this project are documented here, generated with
 
 Commits made before conventional commits were adopted are not included.
 <!-- git-cliff: end of header -->
+## [0.5.1] - 2026-09-18
+
+### 🐛 Bug Fixes
+
+- *(tag-release)* Handle merge-commit release messages
+- Also run validate on pushes ([#48](https://github.com/taraxvoid/voidflow/issues/48))
+- *(cloudflare-deploy)* Sanitize deployment-url output for multi-custom-domain deploys ([#49](https://github.com/taraxvoid/voidflow/issues/49))
 ## [0.5.0] - 2026-09-14
 
 ### 🚀 Features
