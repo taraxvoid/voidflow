@@ -30,8 +30,8 @@ inputs:
 
 outputs:
   deployment-url:
-    description: The deployed URL, as reported by wrangler-action.
-    value: ${{ steps.deploy.outputs.deployment-url }}
+    description: The deployed URL, as reported by wrangler-action, sanitized to a bare URL.
+    value: ${{ steps.sanitize-url.outputs.url }}
 
 runs:
   using: composite
@@ -64,3 +64,19 @@ runs:
         accountId: ${{ inputs.cloudflare-account-id }}
         workingDirectory: ${{ inputs.working-directory }}
         command: ${{ steps.resolve-command.outputs.cmd }}
+
+    - id: sanitize-url
+      shell: bash
+      env:
+        RAW_URL: ${{ steps.deploy.outputs.deployment-url }}
+      # wrangler-action's deployment-url is taken verbatim from wrangler's `targets`
+      # list, which for a worker with custom-domain routes reads like
+      # "ravenflight.io (custom domain)" rather than a URL -- strip that
+      # trailing " (...)" annotation and add a scheme if one isn't already
+      # present, so consumers always get a URL page.goto()/curl can use.
+      run: |
+        url="${RAW_URL%% (*}"
+        if [ -n "$url" ] && [[ "$url" != http://* && "$url" != https://* ]]; then
+          url="https://$url"
+        fi
+        echo "url=$url" >> "$GITHUB_OUTPUT"
