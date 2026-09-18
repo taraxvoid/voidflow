@@ -10,7 +10,7 @@ on:
 jobs:
   validation:
     name: Validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     if: github.event.pull_request.draft == false
@@ -34,7 +34,7 @@ jobs:
         # don't rely on the runner image happening to ship shellcheck: actionlint
         # auto-detects it on PATH and shellchecks run: steps in .github/workflows/*.yml,
         # and scripts/shellcheck-actions.sh needs it directly. arch-aware since this
-        # repo supports self-hosted runners (see README), not just amd64 ubuntu-latest.
+        # repo supports self-hosted runners (see README), not just amd64 ubuntu-26.04.
 
       - name: actionlint
         run: |
