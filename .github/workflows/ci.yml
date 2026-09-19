@@ -10,7 +10,7 @@ on:
 jobs:
   validation:
     name: Validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest # nektos/act does not support 26.04 yet, this maps to 24.04 for local builds (see .actrc)
     permissions:
       contents: read
     if: github.event.pull_request.draft == false
@@ -31,10 +31,6 @@ jobs:
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.${sc_arch}.tar.xz" -o "$RUNNER_TEMP/shellcheck.tar.xz"
           tar -xf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
-        # don't rely on the runner image happening to ship shellcheck: actionlint
-        # auto-detects it on PATH and shellchecks run: steps in .github/workflows/*.yml,
-        # and scripts/shellcheck-actions.sh needs it directly. arch-aware since this
-        # repo supports self-hosted runners (see README), not just amd64 ubuntu-latest.
 
       - name: actionlint
         run: |
@@ -54,27 +50,27 @@ jobs:
           chmod +x "$RUNNER_TEMP/yq"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
-      - name: Shellcheck composite action scripts
-        run: ./scripts/shellcheck-actions.sh
-
       - name: Setup uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: false
 
-      - name: Validate action.yml schemas
+      - name: Shellcheck composite action 
+        run: ./scripts/shellcheck-actions.sh
+
+      - name: Validate composite actions
         run: |
           files=()
           while IFS= read -r f; do files+=("$f"); done < <(git ls-files -- 'actions/**/action.yml' 'actions/**/action.yaml')
           uvx check-jsonschema@0.38.0 --builtin-schema vendor.github-actions "${files[@]}"
 
-      - name: Validate workflow schemas
+      - name: Validate workflows
         run: |
           files=()
           while IFS= read -r f; do files+=("$f"); done < <(git ls-files -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
           uvx check-jsonschema@0.38.0 --builtin-schema vendor.github-workflows "${files[@]}"
 
-      - name: zizmor (security)
+      - name: Security checks w/ zizmor
         run: uvx zizmor@1.30.1 --min-severity medium .
         env:
           GH_TOKEN: ${{ github.token }}
