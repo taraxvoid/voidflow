@@ -14,7 +14,7 @@ on:
           Runner label for the resolve-env job. Defaults to a GitHub-hosted
           runner; pass a self-hosted label to match the caller's deploy job.
         type: string
-        default: ubuntu-latest
+        default: ubuntu-26.04
     outputs:
       env:
         description: Resolved environment name (dev, staging, or prod).
