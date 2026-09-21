@@ -51,6 +51,13 @@ security:
     export GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
     uvx zizmor@{{ zizmor_version }} --min-severity medium .
 
+# Apply zizmor's auto-fixes (e.g. pin unpinned action refs to hashes)
+security-fix:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
+    uvx zizmor@{{ zizmor_version }} --min-severity medium --fix=all .
+
 # Run everything ci.yml runs, locally
 validate: lint security
 
