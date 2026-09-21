@@ -33,7 +33,8 @@ jobs:
           echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
         # don't rely on the runner image happening to ship shellcheck: actionlint
         # auto-detects it on PATH and shellchecks run: steps in .github/workflows/*.yml,
-        # and scripts/shellcheck-actions.sh needs it directly. arch-aware since this
+        # and scripts/shellcheck-actions.sh needs it directly. 
+        # arch-aware since this
         # repo supports self-hosted runners (see README), not just amd64 ubuntu-latest.
 
       - name: actionlint
@@ -41,10 +42,12 @@ jobs:
           gh release download --repo rhysd/actionlint --pattern '*_linux_amd64.tar.gz' v1.7.12 --dir "$RUNNER_TEMP"
           gh attestation verify -R rhysd/actionlint "$RUNNER_TMP/actionlint_1.7.12_linux_amd64.tar.gz"
           tar xf "$RUNNER_TMP"/actionlint_1.7.11_linux_amd64.tar.gz -C "$RUNNER_TMP"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
           "$RUNNER_TEMP/actionlint" -color
 
-      - name: Install yq
+      - name: Shellcheck composite action scripts
         run: |
           arch="$(uname -m)"
           case "$arch" in
@@ -56,13 +59,11 @@ jobs:
           chmod +x "$RUNNER_TEMP/yq"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
-      - name: Shellcheck composite action scripts
-        run: ./scripts/shellcheck-actions.sh
+          ./scripts/shellcheck-actions.sh
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          enable-cache: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+          enable-cache: true
+
 
       - name: Validate action.yml schemas
         run: |
