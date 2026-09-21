@@ -40,8 +40,8 @@ jobs:
       - name: actionlint
         run: |
           gh release download --repo rhysd/actionlint --pattern '*_linux_amd64.tar.gz' v1.7.12 --dir "$RUNNER_TEMP"
-          gh attestation verify -R rhysd/actionlint "$RUNNER_TMP/actionlint_1.7.12_linux_amd64.tar.gz"
-          tar xf "$RUNNER_TMP"/actionlint_1.7.11_linux_amd64.tar.gz -C "$RUNNER_TMP"
+          gh attestation verify -R rhysd/actionlint "$RUNNER_TEMP/actionlint_1.7.12_linux_amd64.tar.gz"
+          tar xf "$RUNNER_TEMP"/actionlint_1.7.12_linux_amd64.tar.gz -C "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,6 +61,7 @@ jobs:
           ./scripts/shellcheck-actions.sh
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
           enable-cache: true
 
 
