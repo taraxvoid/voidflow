@@ -38,8 +38,10 @@ jobs:
 
       - name: actionlint
         run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
-            | bash -s -- 1.7.12 "$RUNNER_TEMP"
+          gh release download --repo rhysd/actionlint --pattern '*_linux_amd64.tar.gz' v1.7.12 --dir "$RUNNER_TEMP"
+          gh attestation verify -R rhysd/actionlint "$RUNNER_TMP/actionlint_1.7.12_linux_amd64.tar.gz"
+          tar xf "$RUNNER_TMP"/actionlint_1.7.11_linux_amd64.tar.gz -C "$RUNNER_TMP"
+
           "$RUNNER_TEMP/actionlint" -color
 
       - name: Install yq
