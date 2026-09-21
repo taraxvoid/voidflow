@@ -10,8 +10,11 @@ default:
 
 # Lint all
 
-lint: lint-actions lint-shell lint-workflows
+lint: gitleaks lint-actions lint-shell lint-workflows
     
+gitleaks:
+    gitleaks detect --source . --redact -v --no-banner
+
 # Lint .github/workflows/*.yml (schema + built-in shellcheck)
 lint-workflows:
     #!/usr/bin/env bash
@@ -76,3 +79,9 @@ changelog TAG="":
 # Cut a release: opens the "chore(release)" PR; merging it tags and publishes (see tag-release.yml). VERSION e.g. "0.5.0"; blank lets git-cliff compute it.
 release VERSION="":
     gh workflow run release.yml {{ if VERSION != "" { "-f version=" + VERSION } else { "" } }}
+
+# Verify required tools are installed
+doctor:
+    @echo "shellcheck:        $(shellcheck --version)"
+    @command -v lefthook >/dev/null && echo "lefthook:  $(lefthook version)" || echo "lefthook:  NOT FOUND (needed for git hooks — run 'just doctor' then 'lefthook install')"
+    @command -v gitleaks >/dev/null && echo "gitleaks:  $(gitleaks version)" || echo "gitleaks:  NOT FOUND (needed for 'just lint')"
