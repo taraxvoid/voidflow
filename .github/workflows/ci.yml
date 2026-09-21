@@ -58,7 +58,6 @@ jobs:
           curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_${yq_arch}" -o "$RUNNER_TEMP/yq"
           chmod +x "$RUNNER_TEMP/yq"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-
           ./scripts/shellcheck-actions.sh
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
