@@ -25,3 +25,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+
+# Unlighthouse
+.unlighthouse/
