@@ -48,7 +48,7 @@ Chromium. It exits non-zero if a category budget in the site's config fails.
 In the site's `package.json` (pin the tag):
 
 ```json
-"test:e2e:lighthouse": "bun run build && bunx github:taraxvoid/voidflow#v0.6.0 --dir dist"
+"test:e2e:lighthouse": "bun run build && bunx --package @taraxvoid/voidflow@0.6.0 unlighthouse-runner --dir dist"
 ```
 
 Options: `--dir` (default `dist`, use `dist/client` for Cloudflare adapter
@@ -66,7 +66,7 @@ environments, which makes Playwright think the server exited), and drops the
 `webServer` when `PLAYWRIGHT_BASE_URL` is set.
 
 ```sh
-bun add -d github:taraxvoid/voidflow#<tag>
+bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
 ```
 
 ```js
