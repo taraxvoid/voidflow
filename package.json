@@ -1,9 +1,23 @@
 {
-    "name": "voidflow",
+    "name": "@taraxvoid/voidflow",
     "version": "0.0.0",
     "private": true,
     "description": "Shared workflows, actions and tooling for ravenflight sites",
     "bin": {
         "unlighthouse-runner": "scripts/unlighthouse/run.ts"
+    },
+    "exports": {
+        "./playwright": {
+            "types": "./playwright/index.d.mts",
+            "default": "./playwright/index.mjs"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "playwright",
+        "scripts/unlighthouse"
+    ],
+    "peerDependencies": {
+        "@playwright/test": ">=1.40"
     }
 }

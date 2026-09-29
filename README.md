@@ -57,6 +57,29 @@ Unlighthouse version). Start from
 [`scripts/unlighthouse/unlighthouse.config.example.ts`](scripts/unlighthouse/unlighthouse.config.example.ts)
 and add `.unlighthouse/` to the site's `.gitignore`.
 
+### Playwright preview config
+
+Shared `playwright.config` for Astro sites that run e2e against
+`astro preview`. It picks a free port outside CI, sets
+`ASTRO_PREVIEW_BACKGROUND=false` (Astro backgrounds `preview` in agent
+environments, which makes Playwright think the server exited), and drops the
+`webServer` when `PLAYWRIGHT_BASE_URL` is set.
+
+```sh
+bun add -d github:taraxvoid/voidflow#<tag>
+```
+
+```js
+// playwright.config.js
+import { definePreviewConfig } from '@taraxvoid/voidflow/playwright'
+
+export default definePreviewConfig({ ciPort: 4141 })
+```
+
+Options: `ciPort` (required in CI), `runner` (default `bun`, e.g. `pnpm`),
+`timeout` (default 30000), `projects` (default Pixel 7 and Desktop Chrome),
+`testDir` (default `./test/e2e`). Requires `@playwright/test` in the site.
+
 ## Deployments
 
 Example deployment job added to your workflow above. `resolve-env` maps the
