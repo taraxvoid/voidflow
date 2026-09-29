@@ -37,6 +37,26 @@ jobs:
 
 Runs lint, typecheck, check for GPL licenses, e2e with Playwright
 
+### Unlighthouse (performance / SEO budgets)
+
+`site-ci.yml` runs `bun run test:e2e:lighthouse` on PRs into `live`. Sites
+implement that script with the shared runner here, which serves the built
+static directory on a free port and runs
+[Unlighthouse](https://unlighthouse.dev/) against it, reusing Playwright's
+Chromium. It exits non-zero if a category budget in the site's config fails.
+
+In the site's `package.json` (pin the tag):
+
+```json
+"test:e2e:lighthouse": "bun run build && bunx github:taraxvoid/voidflow#v0.6.0 --dir dist"
+```
+
+Options: `--dir` (default `dist`, use `dist/client` for Cloudflare adapter
+builds), `--config` (default `unlighthouse.config.ts`), `--version` (pinned
+Unlighthouse version). Start from
+[`scripts/unlighthouse/unlighthouse.config.example.ts`](scripts/unlighthouse/unlighthouse.config.example.ts)
+and add `.unlighthouse/` to the site's `.gitignore`.
+
 ## Deployments
 
 Example deployment job added to your workflow above. `resolve-env` maps the
