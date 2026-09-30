@@ -69,24 +69,6 @@ dry-run *ARGS:
 install-hooks:
     lefthook install
 
-# Show what the changelog would look like for unreleased commits
-changelog-unreleased:
-    git-cliff --config cliff.toml --unreleased
-
-# Regenerate CHANGELOG.md up to the given tag (defaults to unreleased)
-changelog TAG="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -n "{{ TAG }}" ]; then
-        git-cliff --config cliff.toml --tag "{{ TAG }}" -o CHANGELOG.md
-    else
-        git-cliff --config cliff.toml -o CHANGELOG.md
-    fi
-
-# Cut a release: opens the "chore(release)" PR; merging it tags and publishes (see tag-release.yml). VERSION e.g. "0.5.0"; blank lets git-cliff compute it.
-release VERSION="":
-    gh workflow run release.yml {{ if VERSION != "" { "-f version=" + VERSION } else { "" } }}
-
 # Verify required tools are installed
 doctor:
     @command -v shellcheck >/dev/null && echo "shellcheck:  $(shellcheck --version | sed -n 2p)" || echo "shellcheck:  NOT FOUND (needed for actionlint)"
