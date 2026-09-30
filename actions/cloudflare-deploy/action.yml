@@ -21,8 +21,11 @@ inputs:
     default: '.'
   command:
     description: >
-      Full wrangler subcommand and args, e.g. 'deploy --config
-      dist/server/wrangler.json'. Defaults to 'deploy --env <env>'.
+      Full wrangler subcommand and args. Defaults to 'deploy --env <env>'.
+      Astro's Cloudflare adapter writes the real worker config into its build
+      output plus a redirect at .wrangler/deploy/config.json, which plain
+      'deploy' follows. Passing '--config' (even to the root wrangler.jsonc)
+      bypasses the redirect and deploys an assets-only Worker.
     default: ''
   migrate-d1:
     description: If 'true', run 'bun run db:migrate:<env>' before deploying.
@@ -51,9 +54,14 @@ runs:
       env:
         INPUT_COMMAND: ${{ inputs.command }}
         INPUT_ENV: ${{ inputs.env }}
+        INPUT_WD: ${{ inputs.working-directory }}
       run: |
         cmd="$INPUT_COMMAND"
         if [ -z "$cmd" ]; then cmd="deploy --env $INPUT_ENV"; fi
+        if [[ " $cmd " == *" --config "* || " $cmd " == *" -c "* || " $cmd " == *" --config="* ]] \
+          && [ -f "$INPUT_WD/.wrangler/deploy/config.json" ]; then
+          echo "::warning::command passes --config, but $INPUT_WD/.wrangler/deploy/config.json exists (build-generated redirect). --config bypasses it and can deploy the wrong config (e.g. an assets-only Worker). Drop --config unless intended."
+        fi
         echo "cmd=$cmd" >> "$GITHUB_OUTPUT"
 
     - name: Deploy
