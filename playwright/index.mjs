@@ -1,3 +1,4 @@
+// @ts-self-types="./index.d.mts"
 /*
  * Shared Playwright config for Astro sites that e2e against `astro preview`.
  *

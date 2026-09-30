@@ -95,6 +95,11 @@ jobs:
             echo "::error::package.json version ${PKG_VERSION} does not match tag ${TAG}." >&2
             exit 1
           fi
+          JSR_VERSION=$(jq -r .version jsr.json)
+          if [ "${JSR_VERSION}" != "${PKG_VERSION}" ]; then
+            echo "::error::jsr.json version ${JSR_VERSION} does not match package.json ${PKG_VERSION}." >&2
+            exit 1
+          fi
 
       # Publishes with the NPM_TOKEN secret (granular token scoped to both
       # packages, stored on the `npm` environment) as a stopgap: npm's trusted
@@ -119,5 +124,9 @@ jobs:
           npm pkg set name=voidflow
           npm publish
 
+      # JSR is linked to this repo so trusted publishing Just Works^TM
       - name: Publish @taraxvoid/voidflow to JSR
-        run: jsr publish
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock --ignore-scripts @playwright/test
+          npx --yes jsr publish
