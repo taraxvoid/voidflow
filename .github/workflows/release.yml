@@ -103,6 +103,21 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: git-cliff --config cliff.toml --tag "$TAG" -o CHANGELOG.md
 
+      # Keeps the npm version identical to the git tag; tag-release.yml's
+      # publish job refuses to publish if the two differ.
+      - name: Sync package.json version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          jq --indent 4 --arg v "$VERSION" '.version = $v' package.json > "$RUNNER_TEMP/package.json"
+          mv "$RUNNER_TEMP/package.json" package.json
+
+      - name: Validate
+        run: just validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Commit and open release PR
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,7 +128,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add CHANGELOG.md
+          git add CHANGELOG.md package.json
           git commit -m "chore(release): prepare for ${TAG}"
           git push origin "$BRANCH"
           gh pr create --title "chore(release): prepare for ${TAG}" --base main --head "$BRANCH" \

@@ -18,6 +18,8 @@ jobs:
     permissions:
       contents: write
     if: "contains(github.event.head_commit.message, 'chore(release): prepare for v')"
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,3 +71,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: gh release create "$TAG" --title "$TAG" --notes-file release-notes.md
+
+  publish:
+    name: Publish to npm
+    needs: tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Trusted publishing (OIDC): no NPM_TOKEN. The package's trusted publisher
+    # on npmjs.com must name this repo, this workflow file and this environment.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          persist-credentials: false
+
+      # Trusted publishing needs npm >= 11.5.1, which ships with Node 24.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Check package.json version matches tag
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(jq -r .version package.json)
+          if [ "v${PKG_VERSION}" != "$TAG" ]; then
+            echo "::error::package.json version ${PKG_VERSION} does not match tag ${TAG}." >&2
+            exit 1
+          fi
+
+      - name: Publish
+        run: npm publish
