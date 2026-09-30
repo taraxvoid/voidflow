@@ -485,6 +485,40 @@ Ways to consume a release:
 
 Treat `@main` and `@next` as unstable.
 
+## Design decisions
+
+Choices that look arbitrary from the outside, and the reasons for them.
+
+- **`resolve-env` is its own workflow.** A job's `name:` can read `needs.<job>.outputs.*`
+  but not a step output from the same job, so the environment is resolved once up front.
+  That lets `Deploy [dev]`, `Deploy [staging]` and `Deploy [prod]` show in the checks list
+  and drive the deploy from one mapping.
+- **Everything is SHA-pinned, including examples.** A mutable tag is a supply-chain
+  foothold, so third-party actions use full commit SHAs with a version comment. The
+  docs follow the same rule so copy-paste is safe by default.
+- **Validation is split by cost.** `lefthook` runs the fast checks (actionlint, schema
+  validation, shellcheck) on commit and leaves zizmor to pre-push. CI runs all of them.
+- **Conventional Commits are advisory.** The `commit-msg` hook prints a hint and never
+  blocks, because a rejected commit mid-flow costs more than a badly worded changelog
+  line. release-please still needs the prefixes to pick a version bump.
+- **Releases use a GitHub App token.** Pull requests opened with the default
+  `GITHUB_TOKEN` do not trigger other workflows, so the release PR would never run CI.
+- **npm publishes with a token, for now.** Trusted publishing fails with a 403 because
+  this repo issues GitHub's immutable OIDC subject claims and npm's token exchange
+  rejects them ([npm/cli#9969](https://github.com/npm/cli/issues/9969)). Provenance still
+  works. The token step is meant to be deleted once npm fixes that.
+- **JSR publishes before npm.** The npm steps modify the working tree (the unscoped mirror
+  renames the package in `package.json`), and `jsr publish` refuses to run on a dirty
+  tree.
+- **An unscoped `voidflow` mirror exists.** It ships the same code as `@taraxvoid/voidflow`
+  and mainly reserves the bare name. Its README points back to the scoped package.
+- **The Bun version is not pinned in `site-ci`.** It falls through to the latest release
+  until 1.4.x settles. Callers pin with `bun-version` in `package.json` or a `.bun-version`
+  file.
+- **Sites run their own scripts.** The workflows call `bun run` scripts such as
+  `test:e2e:a11y` and `test:e2e:lighthouse` that the site defines, so each site keeps its
+  own test setup while the pipeline stays identical.
+
 ## Self-validation
 
 This repo validates its own workflows and composite actions (`.github/workflows/ci.yml`):
