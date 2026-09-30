@@ -11,7 +11,7 @@ It is semi-opinionated: the defaults match how my own sites are built (bun, Astr
 ## Used by
 
 - [taraxvoid.net](https://taraxvoid.net), my portfolio
-- [Queer Omaha](https://queeromaha.net), Synth Omaha and Soundry, free community sites for Omaha's queer and music scenes
+- [Queer Omaha](https://queeromaha.net), [Synth Omaha](https://synthomaha.net) and [Soundry](https://soundryomaha.net), free community sites for Omaha's queer and music scenes
 - [ravenflight.io](https://ravenflight.io), RavenFlight's marketing site
 
 ## Usage
