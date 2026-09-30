@@ -76,6 +76,11 @@ import { definePreviewConfig } from '@taraxvoid/voidflow/playwright'
 export default definePreviewConfig({ ciPort: 4141 })
 ```
 
+The same release is also published unscoped as `voidflow` (identical
+contents and version), so `bun add -d voidflow` and
+`import ... from 'voidflow/playwright'` work too. `@taraxvoid/voidflow` is the
+canonical name.
+
 Options: `ciPort` (required in CI), `runner` (default `bun`, e.g. `pnpm`),
 `timeout` (default 30000), `projects` (default Pixel 7 and Desktop Chrome),
 `testDir` (default `./test/e2e`). Requires `@playwright/test` in the site.
