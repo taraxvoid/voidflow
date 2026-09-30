@@ -5,6 +5,31 @@ All notable changes to this project are documented here, generated with
 
 Commits made before conventional commits were adopted are not included.
 <!-- git-cliff: end of header -->
+## [0.6.0] - 2026-09-30
+
+### 🚀 Features
+
+- *(unlighthouse)* Add shared Unlighthouse CI runner ([#63](https://github.com/taraxvoid/voidflow/issues/63))
+- *(playwright)* Add shared definePreviewConfig helper ([#64](https://github.com/taraxvoid/voidflow/issues/64)) ([#66](https://github.com/taraxvoid/voidflow/issues/66))
+- *(npm)* Publish @taraxvoid/voidflow via trusted publishing ([#67](https://github.com/taraxvoid/voidflow/issues/67))
+
+### 🐛 Bug Fixes
+
+- Just use github actions a la site-ci.yml instead of using just validate ([#68](https://github.com/taraxvoid/voidflow/issues/68))
+- Just use github actions a la site-ci.yml instead of using just validate
+
+### ⚙️ Miscellaneous Tasks
+
+- Don't try to cache uv - same deal as https://github.com/taraxvoid/voidflow/pull/37
+- Don't try to cache uv - same deal as https://github.com/taraxvoid/voidflow/pull/37 ([#51](https://github.com/taraxvoid/voidflow/issues/51))
+- Remove un-necessary full checkout on resolve-env
+- Add gitignore
+- Pull actionlint bin using gh cli and verify it
+- Use uv cache, formatting
+- Fix actionlint step (undefined RUNNER_TMP, version mismatch, missing with:)
+- Update justfile
+- Add security-fix to justfile
+- Update justfile
 ## [0.5.1] - 2026-09-18
 
 ### 🐛 Bug Fixes

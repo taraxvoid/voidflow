@@ -1,6 +1,6 @@
 {
     "name": "@taraxvoid/voidflow",
-    "version": "0.0.0",
+    "version": "0.6.0",
     "description": "Shared workflows, actions and tooling for ravenflight sites",
     "license": "MIT",
     "repository": {
