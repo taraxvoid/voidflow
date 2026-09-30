@@ -17,12 +17,21 @@ name: Release Please
 on:
   push:
     branches: [main]
+  # Manual republish of an existing release's tag (e.g. after fixing npm
+  # trusted-publisher config); skips release-please and only runs `publish`.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish to npm (e.g. v0.7.0)"
+        required: true
+        type: string
 
 permissions: {}
 
 jobs:
   release-please:
     name: Release Please
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -52,7 +61,9 @@ jobs:
   publish:
     name: Publish to npm
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >-
+      !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm
@@ -63,7 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           persist-credentials: false
 
       # Trusted publishing needs npm >= 11.5.1, which ships with Node 24.
@@ -74,7 +85,7 @@ jobs:
 
       - name: Check package.json version matches tag
         env:
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
           PKG_VERSION=$(jq -r .version package.json)
@@ -82,6 +93,17 @@ jobs:
             echo "::error::package.json version ${PKG_VERSION} does not match tag ${TAG}." >&2
             exit 1
           fi
+
+      # TEMPORARY: print the OIDC claims npm will match against the trusted
+      # publisher config (payload only, no secrets). Remove once publishing works.
+      - name: Debug OIDC claims
+        run: |
+          set -euo pipefail
+          npm --version
+          tok=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
+          p=$(cut -d. -f2 <<<"$tok" | tr '_-' '/+')
+          while [ $((${#p} % 4)) -ne 0 ]; do p="${p}="; done
+          base64 -d <<<"$p" | jq '{sub,repository,repository_owner,repository_id,repository_owner_id,job_workflow_ref,workflow_ref,environment,ref,event_name,runner_environment}'
 
       - name: Publish @taraxvoid/voidflow
         run: npm publish
