@@ -12,8 +12,10 @@ name: Release Please
 # RELEASE_BOT_APP_PRIVATE_KEY are org-level secrets shared with the sibling
 # repos.
 #
-# The npm trusted publisher on npmjs.com must name this repo, this workflow
-# file (release-please.yml) and the `npm` environment.
+# npm publishing currently uses an NPM_TOKEN secret, not trusted publishing
+# (see the publish steps); the trusted publisher entries on npmjs.com should
+# still name this repo, this workflow file (release-please.yml) and the `npm`
+# environment so it can switch back once npm supports immutable OIDC subjects.
 on:
   push:
     branches: [main]
@@ -94,24 +96,24 @@ jobs:
             exit 1
           fi
 
-      # TEMPORARY: print the OIDC claims npm will match against the trusted
-      # publisher config (payload only, no secrets). Remove once publishing works.
-      - name: Debug OIDC claims
-        run: |
-          set -euo pipefail
-          npm --version
-          tok=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)
-          p=$(cut -d. -f2 <<<"$tok" | tr '_-' '/+')
-          while [ $((${#p} % 4)) -ne 0 ]; do p="${p}="; done
-          base64 -d <<<"$p" | jq '{sub,repository,repository_owner,repository_id,repository_owner_id,job_workflow_ref,workflow_ref,environment,ref,event_name,runner_environment}'
-
+      # Publishes with the NPM_TOKEN secret (granular token scoped to both
+      # packages, stored on the `npm` environment) as a stopgap: npm's trusted
+      # publishing rejects GitHub's immutable OIDC subject claims, which this
+      # repo can't opt out of (npm/cli#9969). Provenance still works via
+      # id-token: write. Once npm fixes that, delete the NPM_TOKEN secret and
+      # these NODE_AUTH_TOKEN lines to fall back to pure OIDC; the trusted
+      # publisher entries (this repo, release-please.yml, `npm` environment)
+      # are already configured on both packages.
       - name: Publish @taraxvoid/voidflow
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
       # Unscoped mirror of the same tarball, so `bun add -d voidflow` and
-      # `bunx voidflow` work. Needs its own trusted publisher entry on npmjs.com
-      # (same repo, workflow file and environment as above).
+      # `bunx voidflow` work.
       - name: Publish voidflow (unscoped mirror)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           npm pkg set name=voidflow
