@@ -110,20 +110,17 @@ jobs:
 
 ### Versioning
 
-This project uses semver, released manually in two steps (`main` requires PRs, so nothing
-can push straight to it — not even Actions):
-
-1. Dispatch [`release.yml`](.github/workflows/release.yml) (`workflow_dispatch`, with a
-   `version` input) — it regenerates [`CHANGELOG.md`](CHANGELOG.md) via git-cliff, validates,
-   and opens a `chore(release): prepare for vX.Y.Z` PR.
-2. Merging that PR triggers [`tag-release.yml`](.github/workflows/tag-release.yml), which
-   tags the merge commit and publishes the GitHub release. (Tag pushes aren't covered by
-   `main`'s branch protection, only branch pushes are.)
+This project uses semver, released with [release-please](https://github.com/googleapis/release-please)
+([`release-please.yml`](.github/workflows/release-please.yml)). It keeps a standing
+`chore(release): X.Y.Z` PR open against `main`, updated as commits land. Merging it bumps
+`package.json` and [`CHANGELOG.md`](CHANGELOG.md), tags `vX.Y.Z`, creates the GitHub release,
+and publishes to npm. The PR is opened with the org's release-bot GitHub App token
+(`RELEASE_BOT_CLIENT_ID` / `RELEASE_BOT_APP_PRIVATE_KEY`) so CI runs on it.
 
 Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org) —
 enforced loosely, as an advisory `commit-msg` hint (see
 [`scripts/check-commit-msg.sh`](scripts/check-commit-msg.sh)), not a blocking check. They
-drive the generated changelog.
+drive the version bump and generated changelog.
 
 Treat `@main` as unstable. Consumers should pin to an exact release tag, e.g. `@v0.3.0` —
 there is no floating major-version tag (`@v1`) to track yet.
