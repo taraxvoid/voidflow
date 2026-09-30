@@ -1,0 +1,96 @@
+name: Release Please
+
+# Maintains a standing "chore(release): X.Y.Z" PR against main, auto-updated
+# as commits land. Merging it bumps package.json + CHANGELOG.md, pushes the
+# vX.Y.Z tag and creates the GitHub release (all by release-please itself),
+# then the publish job below pushes the tagged commit to npm. Same setup as
+# rvnflt's release-please.yml.
+#
+# token is a GitHub App installation token, not the default GITHUB_TOKEN:
+# events authored by GITHUB_TOKEN don't trigger other workflows, so the
+# release PR would open without CI ever running on it. RELEASE_BOT_CLIENT_ID /
+# RELEASE_BOT_APP_PRIVATE_KEY are org-level secrets shared with the sibling
+# repos.
+#
+# The npm trusted publisher on npmjs.com must name this repo, this workflow
+# file (release-please.yml) and the `npm` environment.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    name: Publish to npm
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      # Trusted publishing needs npm >= 11.5.1, which ships with Node 24.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Check package.json version matches tag
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(jq -r .version package.json)
+          if [ "v${PKG_VERSION}" != "$TAG" ]; then
+            echo "::error::package.json version ${PKG_VERSION} does not match tag ${TAG}." >&2
+            exit 1
+          fi
+
+      - name: Publish @taraxvoid/voidflow
+        run: npm publish
+
+      # Unscoped mirror of the same tarball, so `bun add -d voidflow` and
+      # `bunx voidflow` work. Needs its own trusted publisher entry on npmjs.com
+      # (same repo, workflow file and environment as above).
+      - name: Publish voidflow (unscoped mirror)
+        run: |
+          set -euo pipefail
+          npm pkg set name=voidflow
+          npm publish

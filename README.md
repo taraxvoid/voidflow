@@ -48,7 +48,7 @@ Chromium. It exits non-zero if a category budget in the site's config fails.
 In the site's `package.json` (pin the tag):
 
 ```json
-"test:e2e:lighthouse": "bun run build && bunx github:taraxvoid/voidflow#v0.6.0 --dir dist"
+"test:e2e:lighthouse": "bun run build && bunx --package @taraxvoid/voidflow@0.6.0 unlighthouse-runner --dir dist"
 ```
 
 Options: `--dir` (default `dist`, use `dist/client` for Cloudflare adapter
@@ -66,7 +66,7 @@ environments, which makes Playwright think the server exited), and drops the
 `webServer` when `PLAYWRIGHT_BASE_URL` is set.
 
 ```sh
-bun add -d github:taraxvoid/voidflow#<tag>
+bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
 ```
 
 ```js
@@ -75,6 +75,11 @@ import { definePreviewConfig } from '@taraxvoid/voidflow/playwright'
 
 export default definePreviewConfig({ ciPort: 4141 })
 ```
+
+The same release is also published unscoped as `voidflow` (identical
+contents and version), so `bun add -d voidflow` and
+`import ... from 'voidflow/playwright'` work too. `@taraxvoid/voidflow` is the
+canonical name.
 
 Options: `ciPort` (required in CI), `runner` (default `bun`, e.g. `pnpm`),
 `timeout` (default 30000), `projects` (default Pixel 7 and Desktop Chrome),
@@ -110,20 +115,17 @@ jobs:
 
 ### Versioning
 
-This project uses semver, released manually in two steps (`main` requires PRs, so nothing
-can push straight to it — not even Actions):
-
-1. Dispatch [`release.yml`](.github/workflows/release.yml) (`workflow_dispatch`, with a
-   `version` input) — it regenerates [`CHANGELOG.md`](CHANGELOG.md) via git-cliff, validates,
-   and opens a `chore(release): prepare for vX.Y.Z` PR.
-2. Merging that PR triggers [`tag-release.yml`](.github/workflows/tag-release.yml), which
-   tags the merge commit and publishes the GitHub release. (Tag pushes aren't covered by
-   `main`'s branch protection, only branch pushes are.)
+This project uses semver, released with [release-please](https://github.com/googleapis/release-please)
+([`release-please.yml`](.github/workflows/release-please.yml)). It keeps a standing
+`chore(release): X.Y.Z` PR open against `main`, updated as commits land. Merging it bumps
+`package.json` and [`CHANGELOG.md`](CHANGELOG.md), tags `vX.Y.Z`, creates the GitHub release,
+and publishes to npm. The PR is opened with the org's release-bot GitHub App token
+(`RELEASE_BOT_CLIENT_ID` / `RELEASE_BOT_APP_PRIVATE_KEY`) so CI runs on it.
 
 Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org) —
 enforced loosely, as an advisory `commit-msg` hint (see
 [`scripts/check-commit-msg.sh`](scripts/check-commit-msg.sh)), not a blocking check. They
-drive the generated changelog.
+drive the version bump and generated changelog.
 
 Treat `@main` as unstable. Consumers should pin to an exact release tag, e.g. `@v0.3.0` —
 there is no floating major-version tag (`@v1`) to track yet.

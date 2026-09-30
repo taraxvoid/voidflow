@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Friendly nudge toward Conventional Commits (https://www.conventionalcommits.org).
 # This is advisory only — it never blocks a commit, it just prints a hint.
-# Drives the changelog/release automation (cliff.toml).
+# Drives the changelog/release automation (release-please).
 set -euo pipefail
 
 msg_file="$1"
