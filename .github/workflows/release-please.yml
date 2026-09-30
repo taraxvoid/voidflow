@@ -121,13 +121,15 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
-      # Unscoped mirror of the same tarball, so `npm add -d voidflow` and
-      # `npx voidflow` work.
+      # Unscoped mirror with the same code and version. It mainly reserves the
+      # bare `voidflow` name; the README is swapped for a short pointer to the
+      # scoped package so the npm page reads as intentional.
       - name: Publish voidflow (unscoped mirror)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           npm pkg set name=voidflow
+          cp scripts/mirror-readme.md README.md
           npm publish
 
