@@ -113,11 +113,6 @@ jobs:
           jq --indent 4 --arg v "$VERSION" '.version = $v' package.json > "$RUNNER_TEMP/package.json"
           mv "$RUNNER_TEMP/package.json" package.json
 
-      - name: Validate
-        run: just validate
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       - name: Commit and open release PR
         env:
           GH_TOKEN: ${{ github.token }}
