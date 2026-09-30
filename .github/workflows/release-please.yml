@@ -95,6 +95,11 @@ jobs:
             echo "::error::package.json version ${PKG_VERSION} does not match tag ${TAG}." >&2
             exit 1
           fi
+          JSR_VERSION=$(jq -r .version jsr.json)
+          if [ "${JSR_VERSION}" != "${PKG_VERSION}" ]; then
+            echo "::error::jsr.json version ${JSR_VERSION} does not match package.json ${PKG_VERSION}." >&2
+            exit 1
+          fi
 
       # Publishes with the NPM_TOKEN secret (granular token scoped to both
       # packages, stored on the `npm` environment) as a stopgap: npm's trusted
@@ -104,13 +109,13 @@ jobs:
       # these NODE_AUTH_TOKEN lines to fall back to pure OIDC; the trusted
       # publisher entries (this repo, release-please.yml, `npm` environment)
       # are already configured on both packages.
-      - name: Publish @taraxvoid/voidflow
+      - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
-      # Unscoped mirror of the same tarball, so `bun add -d voidflow` and
-      # `bunx voidflow` work.
+      # Unscoped mirror of the same tarball, so `npm add -d voidflow` and
+      # `npx voidflow` work.
       - name: Publish voidflow (unscoped mirror)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -118,3 +123,10 @@ jobs:
           set -euo pipefail
           npm pkg set name=voidflow
           npm publish
+
+      # JSR is linked to this repo so trusted publishing Just Works^TM
+      - name: Publish @taraxvoid/voidflow to JSR
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock --ignore-scripts @playwright/test
+          npx --yes jsr publish
