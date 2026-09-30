@@ -35,10 +35,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Install git-cliff and just
+      - name: Install git-cliff
         uses: taiki-e/install-action@9534c84618278caac52cb373bb164ed464dbd8af # v2.87.11
         with:
-          tool: git-cliff,just
+          tool: git-cliff
 
       - name: Setup uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -62,6 +62,12 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
             | bash -s -- 1.7.12 "$RUNNER_TEMP"
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Secrets Scan
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
       - name: Compute version
         id: version
