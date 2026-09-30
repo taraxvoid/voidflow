@@ -83,5 +83,14 @@ jobs:
             exit 1
           fi
 
-      - name: Publish
+      - name: Publish @taraxvoid/voidflow
         run: npm publish
+
+      # Unscoped mirror of the same tarball, so `bun add -d voidflow` and
+      # `bunx voidflow` work. Needs its own trusted publisher entry on npmjs.com
+      # (same repo, workflow file and environment as above).
+      - name: Publish voidflow (unscoped mirror)
+        run: |
+          set -euo pipefail
+          npm pkg set name=voidflow
+          npm publish
