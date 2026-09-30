@@ -104,13 +104,13 @@ jobs:
       # these NODE_AUTH_TOKEN lines to fall back to pure OIDC; the trusted
       # publisher entries (this repo, release-please.yml, `npm` environment)
       # are already configured on both packages.
-      - name: Publish @taraxvoid/voidflow
+      - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
-      # Unscoped mirror of the same tarball, so `bun add -d voidflow` and
-      # `bunx voidflow` work.
+      # Unscoped mirror of the same tarball, so `npm add -d voidflow` and
+      # `npx voidflow` work.
       - name: Publish voidflow (unscoped mirror)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -118,3 +118,6 @@ jobs:
           set -euo pipefail
           npm pkg set name=voidflow
           npm publish
+
+      - name: Publish @taraxvoid/voidflow to JSR
+        run: jsr publish
