@@ -3,6 +3,19 @@
     "version": "0.8.1",
     "description": "Shared workflows, actions and tooling for @taraxvoid sites",
     "license": "MIT",
+    "keywords": [
+        "github-actions",
+        "ci",
+        "reusable-workflows",
+        "playwright",
+        "unlighthouse",
+        "astro",
+        "cloudflare"
+    ],
+    "homepage": "https://github.com/taraxvoid/voidflow#readme",
+    "bugs": {
+        "url": "https://github.com/taraxvoid/voidflow/issues"
+    },
     "repository": {
         "type": "git",
         "url": "git+https://github.com/taraxvoid/voidflow.git"
@@ -25,7 +38,13 @@
         "playwright",
         "scripts/unlighthouse"
     ],
+    "scripts": {
+        "test": "bun test"
+    },
     "peerDependencies": {
         "@playwright/test": ">=1.40"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.40.0"
     }
 }
