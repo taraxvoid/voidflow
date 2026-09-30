@@ -88,8 +88,8 @@ import { definePreviewConfig } from '@taraxvoid/voidflow/playwright'
 export default definePreviewConfig({ ciPort: 4141 })
 ```
 
-The same release is also published unscoped as `voidflow` (identical
-contents and version), so `bun add -d voidflow` and
+The same release is also published unscoped as `voidflow` (identical code and
+version, with a short pointer README), so `bun add -d voidflow` and
 `import ... from 'voidflow/playwright'` work too. `@taraxvoid/voidflow` is the
 canonical name.
 
