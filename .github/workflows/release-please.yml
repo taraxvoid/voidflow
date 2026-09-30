@@ -101,6 +101,13 @@ jobs:
             exit 1
           fi
 
+      # JSR is linked to this repo so trusted publishing Just Works^TM
+      - name: Publish @taraxvoid/voidflow to JSR
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock --ignore-scripts @playwright/test
+          npx --yes jsr publish
+
       # Publishes with the NPM_TOKEN secret (granular token scoped to both
       # packages, stored on the `npm` environment) as a stopgap: npm's trusted
       # publishing rejects GitHub's immutable OIDC subject claims, which this
@@ -124,9 +131,3 @@ jobs:
           npm pkg set name=voidflow
           npm publish
 
-      # JSR is linked to this repo so trusted publishing Just Works^TM
-      - name: Publish @taraxvoid/voidflow to JSR
-        run: |
-          set -euo pipefail
-          npm install --no-save --no-package-lock --ignore-scripts @playwright/test
-          npx --yes jsr publish
