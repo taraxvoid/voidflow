@@ -43,11 +43,34 @@ jobs:
       runner: my-hosted-runner
 ```
 
+### pnpm sites, build env, extra e2e paths
+
+```yaml
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # <version>
+    with:
+      package-manager: pnpm # default: bun
+      e2e-extra-paths: '["wrangler.jsonc", "site.vars.json"]' # JSON array of globs
+      build-env: ${{ format('{{"PUBLIC_SITE_URL":"https://example.com","GIT_SHA":"{0}"}}', github.sha) }}
+```
+
+With `pnpm`, the pnpm version comes from `packageManager` and Node from `volta`
+or `engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
+follows the package manager. `build-env` is a JSON object, visible in logs, so
+no secrets.
+
 ## Workflow Types
 
 ### Validation / Checks
 
-Runs lint, typecheck, check for GPL licenses, e2e with Playwright
+Runs lint, typecheck, check for GPL licenses, e2e with Playwright.
+
+`site-ci.yml` runs these `package.json` scripts: `lint`, `check`, `build`,
+`test:unit`, `check:licenses`, `test:e2e:full` (PRs into `main`),
+`test:e2e:all` (PRs into `next` and `live`), `test:e2e:a11y` (`next` and
+`live`), and `test:e2e:lighthouse` (`live`). A script the site does not define
+is skipped with a notice, so none of them is required.
 
 ### Unlighthouse (performance / SEO budgets)
 

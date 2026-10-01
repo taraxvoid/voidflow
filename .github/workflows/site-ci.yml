@@ -24,6 +24,30 @@ on:
           outright.
         type: boolean
         default: true
+      package-manager:
+        description: >
+          Package manager for setup, dependency cache, install and every
+          script call: 'bun' or 'pnpm'. For pnpm the pnpm version comes from
+          `packageManager` in package.json and Node from `volta` / `engines`
+          in package.json. The lockfile name follows (bun.lock or
+          pnpm-lock.yaml).
+        type: string
+        default: bun
+      e2e-extra-paths:
+        description: >
+          JSON array of extra globs that count as e2e-relevant changes, on top
+          of the built-in src/, public/, test/, scripts/, astro/playwright
+          config, package.json, lockfile, tsconfig.json and workflows.
+        type: string
+        default: '["wrangler.jsonc", "site.vars.json"]'
+      build-env:
+        description: >
+          JSON object of environment variables for the build step, e.g.
+          '{"PUBLIC_SITE_URL": "https://example.com", "GIT_SHA": "abc"}'.
+          Build the string in the caller with toJSON/format. Not for secrets
+          (inputs are visible in logs).
+        type: string
+        default: '{}'
     secrets:
       GITLEAKS_LICENSE:
         description: >
@@ -48,6 +72,9 @@ jobs:
     name: Validate
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 20
+    env:
+      PM: ${{ inputs.package-manager }}
+      LOCKFILE: ${{ inputs.package-manager == 'pnpm' && 'pnpm-lock.yaml' || 'bun.lock' }}
     if: github.event.pull_request.draft == false
 
     steps:
@@ -62,12 +89,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
         
+      - name: Check package manager
+        run: |
+          case "$PM" in
+            bun | pnpm) ;;
+            *) echo "::error::package-manager must be 'bun' or 'pnpm', got '$PM'" >&2; exit 1 ;;
+          esac
+
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
         with:
           filters: |
             lockfile:
-              - 'bun.lock'
+              - '${{ env.LOCKFILE }}'
             scripts:
               - 'scripts/**'
             workflows:
@@ -79,14 +113,21 @@ jobs:
               - 'scripts/**'
               - 'astro.config.*'
               - 'playwright.config.*'
-              - 'wrangler.jsonc'
-              - 'site.vars.json'
               - 'package.json'
-              - 'bun.lock'
+              - '${{ env.LOCKFILE }}'
               - 'tsconfig.json'
               - '.github/workflows/**'
+            e2e_extra: ${{ inputs.e2e-extra-paths }}
+
+      - name: Resolve e2e relevance
+        id: e2e
+        run: echo "relevant=$([[ "$MAIN" == true || "$EXTRA" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        env:
+          MAIN: ${{ steps.changes.outputs.e2e_relevant }}
+          EXTRA: ${{ steps.changes.outputs.e2e_extra }}
 
       - name: Setup Bun
+        if: inputs.package-manager == 'bun'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         # XXX holding off on pinning here until 1.4.x is stable
         # in caller: specify version in package.json or .bun-version to override
@@ -94,23 +135,48 @@ jobs:
         # with:
           # bun-version: 1.4.2
           # bun-version-file: ".bun-version"
-          
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        # pnpm version comes from `packageManager` in the caller's package.json
+
+      - name: Setup Node (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json # reads `volta` / `engines`
+          cache: pnpm
+
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: inputs.package-manager == 'bun'
         with:
           path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          key: ${{ runner.os }}-bun-${{ hashFiles(env.LOCKFILE) }}
           restore-keys: |
             ${{ runner.os }}-bun-
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock', 'playwright.config.js', 'package.json') }}
+          key: ${{ runner.os }}-playwright-${{ hashFiles(env.LOCKFILE, 'playwright.config.*', 'package.json') }}
           restore-keys: |
             ${{ runner.os }}-playwright-
 
       - name: Install NPM Dependencies
-        run: bun install --frozen-lockfile
+        run: '"$PM" install --frozen-lockfile'
+
+      - name: Detect package scripts
+        id: scripts
+        # Fail open: a check whose script the caller doesn't define is skipped, not failed.
+        run: |
+          for name in lint check build test:unit check:licenses test:e2e:full test:e2e:all test:e2e:a11y test:e2e:lighthouse; do
+            if jq -e --arg n "$name" '.scripts // {} | has($n)' package.json >/dev/null; then
+              echo "${name//:/_}=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Skipping '$name': no such script in package.json"
+            fi
+          done
 
       - name: Lint CI workflows
         if: steps.changes.outputs.workflows == 'true'
@@ -119,47 +185,59 @@ jobs:
             | bash -s -- 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
         shell: bash
-        
+
       - name: Lint Code
-        run: bun run lint
+        if: steps.scripts.outputs.lint == 'true'
+        run: '"$PM" run lint'
 
       - name: TypeCheck Code
-        run: bun run check
+        if: steps.scripts.outputs.check == 'true'
+        run: '"$PM" run check'
 
       - name: Build Code
-        run: bun run build
+        if: steps.scripts.outputs.build == 'true'
+        run: '"$PM" run build'
+        env: ${{ fromJSON(inputs.build-env) }}
 
       - name: Unit Tests
-        run: bun run test:unit
+        if: steps.scripts.outputs.test_unit == 'true'
+        run: '"$PM" run test:unit'
 
       - name: Check Licenses for GPL kudzu
-        if: steps.changes.outputs.lockfile == 'true' || steps.changes.outputs.scripts == 'true'
-        run: bun run check:licenses
+        if: steps.scripts.outputs.check_licenses == 'true' && (steps.changes.outputs.lockfile == 'true' || steps.changes.outputs.scripts == 'true')
+        run: '"$PM" run check:licenses'
 
       - name: Install Playwright
-        if: steps.changes.outputs.e2e_relevant == 'true' && inputs.playwright-install-with-deps
+        if: steps.e2e.outputs.relevant == 'true' && inputs.playwright-install-with-deps
         run: npx playwright install --with-deps chromium # npx has better compat than bunx for this
 
       - name: Install Playwright (no OS deps)
-        if: steps.changes.outputs.e2e_relevant == 'true' && !inputs.playwright-install-with-deps
+        if: steps.e2e.outputs.relevant == 'true' && !inputs.playwright-install-with-deps
         run: npx playwright install chromium
 
       - name: E2E - Dev
-        if: steps.changes.outputs.e2e_relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'main'
-        run: bun run test:e2e:full
+        if: steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'main'
+        run: '"$PM" run test:e2e:full'
 
       - name: E2E - Staging
-        if: steps.changes.outputs.e2e_relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'next'
-        run: |
-          bun run test:e2e:all
-          bun run test:e2e:a11y
+        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'next'
+        run: '"$PM" run test:e2e:all'
+
+      - name: E2E - Accessibility (staging)
+        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'next'
+        run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Production
-        if: steps.changes.outputs.e2e_relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
-        run: |
-          bun run test:e2e:all
-          bun run test:e2e:a11y
-          bun run test:e2e:lighthouse
+        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
+        run: '"$PM" run test:e2e:all'
+
+      - name: E2E - Accessibility (production)
+        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
+        run: '"$PM" run test:e2e:a11y'
+
+      - name: E2E - Lighthouse (production)
+        if: steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
+        run: '"$PM" run test:e2e:lighthouse'
 
       - name: Upload failure reports
         if: failure()
