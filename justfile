@@ -40,7 +40,7 @@ lint-actions:
 
 # Shellcheck the run: blocks inside composite action.yml files
 lint-shell:
-    ./scripts/shellcheck-actions.sh
+    ./scripts/shellcheck-actions.ts
 
 # Security audit for unpinned refs, script injection, excess permissions, etc.
 security:
