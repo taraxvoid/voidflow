@@ -125,6 +125,11 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 ```
 
+Sites with a single production environment and per-PR previews (no `next` or
+`live` branch) pass `with: { single-environment: true }` to `resolve-env.yml`
+(or the same input on `actions/branch-env-map`). `main` then maps to `prod` and
+`pull_request` events map to `preview`; any other ref fails.
+
 ### Versioning
 
 This project uses semver, released with [release-please](https://github.com/googleapis/release-please)
