@@ -1,12 +1,24 @@
 name: Branch env map
 description: >
-  Maps branch conventions to dev/staging/prod
-  environment names. Fails if the ref doesn't match one of the
-  three, so deploy jobs can't silently no-op on an unexpected branch.
+  Maps branch conventions to environment names. By default (main/next/live
+  to dev/staging/prod) it fails if the ref doesn't match one of the three, so
+  deploy jobs can't silently no-op on an unexpected branch. With
+  single-environment, main is the only production branch and pull requests
+  map to preview.
+
+inputs:
+  single-environment:
+    description: >
+      'true' for sites with one production environment and per-PR previews
+      and no next/live branches: main maps to prod, pull_request events map to
+      preview, anything else fails. Default 'false' keeps the
+      main/next/live shape.
+    required: false
+    default: 'false'
 
 outputs:
   env:
-    description: Resolved environment name (dev, staging, or prod).
+    description: Resolved environment name (dev, staging, or prod; prod or preview in single-environment mode).
     value: ${{ steps.map.outputs.env }}
 
 runs:
@@ -16,7 +28,20 @@ runs:
       shell: bash
       env:
         REF_NAME: ${{ github.ref_name }}
+        EVENT_NAME: ${{ github.event_name }}
+        SINGLE: ${{ inputs.single-environment }}
       run: |
+        if [[ "$SINGLE" == "true" ]]; then
+          if [[ "$EVENT_NAME" == pull_request* ]]; then
+            echo "env=preview" >> "$GITHUB_OUTPUT"
+          elif [[ "$REF_NAME" == main ]]; then
+            echo "env=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Refusing to deploy unknown ref: $REF_NAME (expected main or a pull request)" >&2
+            exit 1
+          fi
+          exit 0
+        fi
         case "$REF_NAME" in
           main) echo "env=dev" >> "$GITHUB_OUTPUT" ;;
           next) echo "env=staging" >> "$GITHUB_OUTPUT" ;;
