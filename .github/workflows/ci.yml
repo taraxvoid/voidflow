@@ -20,23 +20,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install shellcheck
-        run: |
-          arch="$(uname -m)"
-          case "$arch" in
-            x86_64) sc_arch=x86_64 ;;
-            aarch64|arm64) sc_arch=aarch64 ;;
-            *) echo "::error::unsupported arch for shellcheck: $arch" >&2; exit 1 ;;
-          esac
-          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.${sc_arch}.tar.xz" -o "$RUNNER_TEMP/shellcheck.tar.xz"
-          tar -xf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/shellcheck-v0.11.0" >> "$GITHUB_PATH"
-        # don't rely on the runner image happening to ship shellcheck: actionlint
-        # auto-detects it on PATH and shellchecks run: steps in .github/workflows/*.yml,
-        # and scripts/shellcheck-actions.sh needs it directly. 
-        # arch-aware since this
-        # repo supports self-hosted runners (see README), not just amd64 ubuntu-latest.
-
       - name: actionlint
         run: |
           gh release download --repo rhysd/actionlint --pattern '*_linux_amd64.tar.gz' v1.7.12 --dir "$RUNNER_TEMP"
@@ -46,18 +29,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      # shellcheck ships on ubuntu-latest; actionlint also picks it up from PATH
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
       - name: Shellcheck composite action scripts
-        run: |
-          arch="$(uname -m)"
-          case "$arch" in
-            x86_64) yq_arch=amd64 ;;
-            aarch64|arm64) yq_arch=arm64 ;;
-            *) echo "::error::unsupported arch for yq: $arch" >&2; exit 1 ;;
-          esac
-          curl -fsSL "https://github.com/mikefarah/yq/releases/download/v4.53.6/yq_linux_${yq_arch}" -o "$RUNNER_TEMP/yq"
-          chmod +x "$RUNNER_TEMP/yq"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          ./scripts/shellcheck-actions.sh
+        run: bun scripts/shellcheck-actions.ts
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
