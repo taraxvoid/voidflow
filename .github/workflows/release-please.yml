@@ -119,7 +119,15 @@ jobs:
       - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+        run: |
+          set -euo pipefail
+          NAME=$(jq -r .name package.json)
+          VERSION=$(jq -r .version package.json)
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${NAME}@${VERSION} is already on npm, skipping."
+          else
+            npm publish
+          fi
 
       # Unscoped mirror with the same code and version. It mainly reserves the
       # bare `voidflow` name; the README is swapped for a short pointer to the
@@ -129,7 +137,12 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          VERSION=$(jq -r .version package.json)
+          if npm view "voidflow@${VERSION}" version >/dev/null 2>&1; then
+            echo "voidflow@${VERSION} is already on npm, skipping."
+            exit 0
+          fi
           npm pkg set name=voidflow
           cp scripts/mirror-readme.md README.md
-          npm publish
+          npm publish --loglevel verbose
 
