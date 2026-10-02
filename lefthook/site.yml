@@ -59,7 +59,13 @@ pre-commit:
       # so it runs when dependencies changed and fails closed.
       priority: 3
       glob: "{package.json,bun.lock,pnpm-lock.yaml}"
-      run: "{pm} run --if-present audit"
+      # Checked by hand: under bun, `run --if-present audit` falls through to
+      # the system `audit` binary (macOS /usr/sbin/audit) when the site has no
+      # audit script, and that exits non-zero.
+      run: |
+        if grep -q '"audit"' package.json; then
+          {pm} run audit
+        fi
 
 commit-msg:
   commands:

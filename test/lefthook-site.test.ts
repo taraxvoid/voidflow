@@ -37,4 +37,10 @@ describe('lefthook/site.yml', () => {
         expect(text).toContain('pnpm-lock.yaml ]; then echo pnpm; else echo bun')
         expect(text).not.toMatch(/\bbun run\b/)
     })
+
+    test('audit step only runs when the site defines an audit script', async () => {
+        const text = await Bun.file(config).text()
+        expect(text).toContain('grep -q \'"audit"\' package.json')
+        expect(text).not.toContain('--if-present audit')
+    })
 })
