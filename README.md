@@ -204,13 +204,13 @@ remotes:
     configs:
       - lefthook/site.yml
 
-# Site-specific differences override the remote by name, e.g. skip tests that
-# need a built dist/ before commit:
-pre-commit:
-  commands:
-    unit:
-      run: bun run test:unit -- --exclude 'test/build.test.ts'
 ```
+
+Lefthook merges `lefthook.yml`, then remotes, then `lefthook-local.yml`, so a
+site's own `lefthook.yml` can add commands (for example image compression) but
+cannot override ones defined here. Differences go through `package.json`
+scripts: define `test:unit:precommit` (for example excluding tests that need a
+built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
 
 Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
 set `"prepare": "lefthook install"` so `bun install` wires the hooks. `ref`
