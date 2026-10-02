@@ -1,0 +1,107 @@
+# Shared git hooks for the Astro/bun site stack. Sites pull this in as a
+# lefthook remote and call their own package.json scripts, so a script a site
+# does not define is skipped (`bun run --if-present`).
+#
+#   # lefthook.yml in the site
+#   remotes:
+#     - git_url: https://github.com/taraxvoid/voidflow
+#       ref: <commit sha>        # pin; bump deliberately
+#       configs:
+#         - lefthook/site.yml
+#
+# Anything a site needs to do differently (extra steps, test:unit excludes)
+# goes in its own lefthook.yml: local config overrides the remote by name.
+
+pre-commit:
+  skip: [merge, rebase]
+  commands:
+    deps-installed:
+      priority: 1
+      run: |
+        if [ ! -d node_modules ]; then
+          echo "pre-commit: 'node_modules' is missing, dependencies aren't installed."
+          echo "            Run 'bun install' before committing, then commit again."
+          exit 1
+        fi
+    format:
+      priority: 2
+      run: bun run --if-present format
+      stage_fixed: true
+    lint-actions:
+      priority: 3
+      run: bun run --if-present lint:actions
+    typecheck:
+      priority: 3
+      run: bun run --if-present check
+    unit:
+      priority: 3
+      run: bun run --if-present test:unit
+    licenses:
+      priority: 3
+      glob: "{package.json,bun.lock,pnpm-lock.yaml}"
+      run: bun run --if-present check:licenses
+    audit:
+      # Local only: hits a remote vulnerability database and can hang offline,
+      # so it runs when dependencies changed and fails closed.
+      priority: 3
+      glob: "{package.json,bun.lock,pnpm-lock.yaml}"
+      run: bun run --if-present audit
+
+commit-msg:
+  commands:
+    conventional-commit-hint:
+      # Advisory only: prints a nudge toward Conventional Commits, never blocks.
+      run: |
+        first_line=$(head -n1 "{1}")
+        pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+'
+        if ! printf '%s' "$first_line" | grep -Eq "$pattern"; then
+          echo ""
+          echo "commit-msg: this commit message doesn't look like a Conventional Commit."
+          echo "            (just a heads-up; the commit still went through)"
+          echo ""
+          echo '  e.g. "feat: add newsletter signup" or "fix(ical): correct dtstart offset"'
+          echo "  see https://www.conventionalcommits.org for the full format"
+          echo ""
+        fi
+        exit 0
+
+pre-push:
+  commands:
+    sync-and-test:
+      use_stdin: true
+      run: |
+        # Nothing new to push (tag push, branch delete): skip the checks.
+        has_new_commits=false
+        remote_name="{1}"
+        remote_branch=""
+        while read -r _local_ref local_sha remote_ref remote_sha; do
+          if [ "$local_sha" != "$remote_sha" ]; then has_new_commits=true; fi
+          remote_branch="${remote_ref#refs/heads/}"
+        done
+        if [ "$has_new_commits" = false ]; then
+          echo "pre-push: no new commits to push, skipping checks"
+          exit 0
+        fi
+
+        # Bail early if the remote branch has commits we don't have.
+        if [ -n "$remote_name" ] && [ -n "$remote_branch" ]; then
+          if git fetch "$remote_name" "$remote_branch" --quiet 2>/dev/null; then
+            fetch_head=$(git rev-parse FETCH_HEAD 2>/dev/null) || true
+            local_head=$(git rev-parse HEAD)
+            if [ -n "$fetch_head" ] && [ "$fetch_head" != "$local_head" ]; then
+              merge_base=$(git merge-base HEAD "$fetch_head" 2>/dev/null) || true
+              if [ -n "$merge_base" ] && [ "$merge_base" != "$fetch_head" ]; then
+                echo "pre-push: remote has commits not in local branch, pull or rebase before pushing"
+                exit 1
+              fi
+            fi
+          fi
+        fi
+
+        if [ ! -d node_modules ]; then
+          echo "pre-push: 'node_modules' is missing, dependencies aren't installed."
+          echo "          Run 'bun install' before pushing, then push again."
+          exit 1
+        fi
+
+        bun run --if-present test:push

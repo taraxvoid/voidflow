@@ -43,6 +43,33 @@ jobs:
       runner: my-hosted-runner
 ```
 
+### Single-environment sites
+
+Sites with one production environment and no `next`/`live` branches (`main`
+deploys to prod, pull requests get previews) pass `single-environment: true`,
+the same flag `resolve-env` and `branch-env-map` take:
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # <version>
+    with:
+      single-environment: true
+```
+
+`main` then gets the production test tier (`test:e2e:all`, `test:e2e:a11y`,
+`test:e2e:lighthouse`) instead of only `test:e2e:full`. Include the `push`
+trigger so a direct push to `main` is validated too; the e2e steps resolve the
+branch from the pushed ref.
+
 ### pnpm sites, build env, extra e2e paths
 
 ```yaml
@@ -154,6 +181,40 @@ managers keep three things current that Dependabot cannot see: the
 remote's `ref` tag, and tool versions in a `justfile` (annotate the line above
 with `# renovate: datasource=... depName=...`). Requires the Renovate GitHub App
 on the repo.
+
+||||||| 4041a59
+## Git hooks (lefthook)
+
+[`lefthook/site.yml`](lefthook/site.yml) is the shared hook set for the site
+stack, consumed as a lefthook remote. It calls the site's own `package.json`
+scripts (`bun run --if-present`, so a missing script is skipped):
+
+- `pre-commit`: dependency guard, `format` (formatted files are re-staged),
+  `lint:actions`, `check`, `test:unit`, and `check:licenses` / `audit` when the
+  lockfile changed.
+- `commit-msg`: advisory Conventional Commits hint (never blocks).
+- `pre-push`: bail if the remote branch is ahead, then `test:push`; skipped when
+  there is nothing new to push.
+
+```yaml
+# lefthook.yml in the site
+remotes:
+  - git_url: https://github.com/taraxvoid/voidflow
+    ref: v0.10.0 # a tag or branch; lefthook passes it to `git clone --branch`
+    configs:
+      - lefthook/site.yml
+
+# Site-specific differences override the remote by name, e.g. skip tests that
+# need a built dist/ before commit:
+pre-commit:
+  commands:
+    unit:
+      run: bun run test:unit -- --exclude 'test/build.test.ts'
+```
+
+Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
+set `"prepare": "lefthook install"` so `bun install` wires the hooks. `ref`
+cannot be a commit SHA; pin a release tag.
 
 ## Branch rulesets as code
 
