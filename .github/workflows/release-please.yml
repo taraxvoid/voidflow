@@ -1,10 +1,15 @@
 name: Release Please
 
-# Maintains a standing "chore(release): X.Y.Z" PR against main, auto-updated
-# as commits land. Merging it bumps package.json + CHANGELOG.md, pushes the
-# vX.Y.Z tag and creates the GitHub release (all by release-please itself),
-# then the publish job below pushes the tagged commit to npm. Same setup as
-# rvnflt's release-please.yml.
+# Branch-based release channels (see RELEASING.md):
+#   main         stable      npm dist-tag `latest`
+#   next         prerelease  npm dist-tag `next`  (X.Y.Z-next.N)
+#   release/N.x  maintenance npm dist-tag `release-N.x`
+#
+# On every push to one of those branches release-please maintains a standing
+# release PR using that branch's config from .release-please/. Merging it bumps
+# the version files, pushes the vX.Y.Z tag and creates the GitHub release (all
+# by release-please itself), then the publish job pushes the tagged commit to
+# npm and JSR under the channel's dist-tag.
 #
 # token is a GitHub App installation token, not the default GITHUB_TOKEN:
 # events authored by GITHUB_TOKEN don't trigger other workflows, so the
@@ -18,21 +23,63 @@ name: Release Please
 # environment so it can switch back once npm supports immutable OIDC subjects.
 on:
   push:
-    branches: [main]
+    branches: [main, next, "release/**"]
   # Manual republish of an existing release's tag (e.g. after fixing npm
   # trusted-publisher config); skips release-please and only runs `publish`.
+  # The channel comes from the branch the workflow is run from ("Use workflow
+  # from"): main for a stable tag, next for a prerelease tag, release/N.x for
+  # a maintenance tag. A tag that does not fit that channel is rejected.
   workflow_dispatch:
     inputs:
       tag:
         description: "Existing release tag to publish to npm (e.g. v0.7.0)"
         required: true
         type: string
+      dry-run:
+        description: "Run the publish steps with --dry-run (nothing is published)"
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
+# One release run per branch at a time; never cancel a run mid-publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  channel:
+    name: Resolve channel
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      kind: ${{ steps.channel.outputs.kind }}
+      dist_tag: ${{ steps.channel.outputs.dist_tag }}
+      config: ${{ steps.channel.outputs.config }}
+      manifest: ${{ steps.channel.outputs.manifest }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # Fails the run for any branch that is not a release channel.
+      - name: Resolve release channel from branch
+        id: channel
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: bun scripts/release-channel.ts "$BRANCH" >> "$GITHUB_OUTPUT"
+
   release-please:
     name: Release Please
+    needs: channel
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -42,6 +89,9 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      major: ${{ steps.release.outputs.major }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - name: Generate App token
         id: app-token
@@ -56,13 +106,13 @@ jobs:
         id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
-          target-branch: main
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          target-branch: ${{ github.ref_name }}
+          config-file: ${{ needs.channel.outputs.config }}
+          manifest-file: ${{ needs.channel.outputs.manifest }}
 
   publish:
     name: Publish to npm
-    needs: release-please
+    needs: [channel, release-please]
     if: >-
       !cancelled() &&
       (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
@@ -74,6 +124,24 @@ jobs:
       id-token: write
 
     steps:
+      # Tooling comes from the branch that triggered the run, not the tag, so
+      # republishing an old tag still gets the current channel checks.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # Abort before anything is published if the tag's version does not fit
+      # the channel (e.g. a -next.N tag on main, or a stable tag on next).
+      - name: Check tag belongs to this channel
+        env:
+          BRANCH: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: bun scripts/release-channel.ts "$BRANCH" "${TAG#v}" > /dev/null
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
@@ -84,6 +152,7 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Check package.json version matches tag
         env:
@@ -103,10 +172,14 @@ jobs:
 
       # JSR is linked to this repo so trusted publishing Just Works^TM
       - name: Publish @taraxvoid/voidflow to JSR
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          flags=()
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
           npm install --no-save --no-package-lock --ignore-scripts @playwright/test
-          npx --yes jsr publish
+          npx --yes jsr publish "${flags[@]}"
 
       # Publishes with the NPM_TOKEN secret (granular token scoped to both
       # packages, stored on the `npm` environment) as a stopgap: npm's trusted
@@ -119,14 +192,18 @@ jobs:
       - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ needs.channel.outputs.dist_tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          flags=()
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
           NAME=$(jq -r .name package.json)
           VERSION=$(jq -r .version package.json)
           if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
             echo "${NAME}@${VERSION} is already on npm, skipping."
           else
-            npm publish
+            npm publish --tag "$DIST_TAG" "${flags[@]}"
           fi
 
       # Unscoped mirror with the same code and version. It mainly reserves the
@@ -135,8 +212,12 @@ jobs:
       - name: Publish voidflow (unscoped mirror)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ needs.channel.outputs.dist_tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          flags=()
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
           VERSION=$(jq -r .version package.json)
           if npm view "voidflow@${VERSION}" version >/dev/null 2>&1; then
             echo "voidflow@${VERSION} is already on npm, skipping."
@@ -144,5 +225,5 @@ jobs:
           fi
           npm pkg set name=voidflow
           cp scripts/mirror-readme.md README.md
-          npm publish --loglevel verbose
+          npm publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}"
 
