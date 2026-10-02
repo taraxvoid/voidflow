@@ -287,7 +287,7 @@ Semver, released with [release-please](https://github.com/googleapis/release-ple
 | maintenance | `release/N.x` | `0.9.4` | `release-N.x` |
 
 release-please keeps a standing release PR open on each channel's branch, updated as commits land.
-Merging it bumps `package.json` (and [`CHANGELOG.md`](CHANGELOG.md) on stable), tags `vX.Y.Z`,
+Merging it bumps `package.json` (and [`CHANGELOG.md`](CHANGELOG.md) on stable), tags `vX.Y.Z` (`vX.Y.Z-next[.N]` on `next`),
 creates the GitHub release and publishes to npm and JSR under the channel's dist-tag. The PR is
 opened with the org's release-bot GitHub App token (`RELEASE_BOT_CLIENT_ID` /
 `RELEASE_BOT_APP_PRIVATE_KEY`) so CI runs on it.
