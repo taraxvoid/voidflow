@@ -25,7 +25,8 @@
         "provenance": true
     },
     "bin": {
-        "unlighthouse-runner": "scripts/unlighthouse/run.ts"
+        "unlighthouse-runner": "scripts/unlighthouse/run.ts",
+        "check-licenses": "scripts/check-licenses.ts"
     },
     "exports": {
         "./playwright": {
@@ -36,7 +37,8 @@
     },
     "files": [
         "playwright",
-        "scripts/unlighthouse"
+        "scripts/unlighthouse",
+        "scripts/check-licenses.ts"
     ],
     "engines": {
         "bun": ">=1.4.0"
