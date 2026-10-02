@@ -9,8 +9,10 @@
 #       configs:
 #         - lefthook/site.yml
 #
-# Anything a site needs to do differently (extra steps, test:unit excludes)
-# goes in its own lefthook.yml: local config overrides the remote by name.
+# Lefthook merges lefthook.yml < remotes < lefthook-local.yml, so a site's own
+# lefthook.yml can ADD commands (e.g. image compression) but cannot override
+# one defined here. Differences go through package.json scripts instead, e.g.
+# `test:unit:precommit` replaces `test:unit` for the pre-commit unit step.
 
 pre-commit:
   skip: [merge, rebase]
@@ -35,7 +37,14 @@ pre-commit:
       run: bun run --if-present check
     unit:
       priority: 3
-      run: bun run --if-present test:unit
+      # A site that can't run its whole suite pre-commit (e.g. tests that need
+      # a built dist/) defines `test:unit:precommit`; otherwise test:unit runs.
+      run: |
+        if grep -q '"test:unit:precommit"' package.json; then
+          bun run test:unit:precommit
+        else
+          bun run --if-present test:unit
+        fi
     licenses:
       priority: 3
       glob: "{package.json,bun.lock,pnpm-lock.yaml}"

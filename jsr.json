@@ -1,6 +1,6 @@
 {
   "name": "@taraxvoid/voidflow",
-  "version": "0.11.0-next",
+  "version": "0.11.0",
   "license": "MIT",
   "exports": {
     "./playwright": "./playwright/index.mjs"

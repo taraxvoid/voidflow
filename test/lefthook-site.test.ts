@@ -25,4 +25,10 @@ describe('lefthook/site.yml', () => {
             expect(text).toContain(`\n${hook}`)
         }
     })
+    test('pre-commit unit step prefers test:unit:precommit when a site defines it', async () => {
+        const text = await Bun.file(config).text()
+        expect(text).toContain('grep -q \'"test:unit:precommit"\' package.json')
+        expect(text).toContain('bun run test:unit:precommit')
+        expect(text).toContain('bun run --if-present test:unit')
+    })
 })
