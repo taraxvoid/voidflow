@@ -2,7 +2,8 @@ name: Validation
 
 # Validation job for sites using a Astro/bun/Playwright stack
 # for self-hosted runners pass `runner`
-# Callers need pull_request/workflow_dispatch triggers 
+# Callers need pull_request/workflow_dispatch triggers, plus push on main/next/live
+# so direct pushes are validated too
 # Caller is expected to define referenced package.json scripts
 
 on:
@@ -216,27 +217,27 @@ jobs:
         run: npx playwright install chromium
 
       - name: E2E - Dev
-        if: steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'main'
+        if: steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'main'
         run: '"$PM" run test:e2e:full'
 
       - name: E2E - Staging
-        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'next'
+        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'next'
         run: '"$PM" run test:e2e:all'
 
       - name: E2E - Accessibility (staging)
-        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'next'
+        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'next'
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Production
-        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
+        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'live'
         run: '"$PM" run test:e2e:all'
 
       - name: E2E - Accessibility (production)
-        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
+        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'live'
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Lighthouse (production)
-        if: steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && github.event.pull_request.base.ref == 'live'
+        if: steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'live'
         run: '"$PM" run test:e2e:lighthouse'
 
       - name: Upload failure reports
