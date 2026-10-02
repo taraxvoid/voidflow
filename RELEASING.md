@@ -50,7 +50,9 @@ automatic back-merge brings it into `next`.
 ## Backport to an older line
 
 1. `just cut-maintenance v0.9.3 release/0.9.x` creates the branch in a new
-   worktree with the maintenance release-please config. Push it:
+   worktree. It copies the current release workflow, CI workflow, channel script
+   and maintenance release-please config from `main` onto the old tag, because a
+   branch cut from an older tag would otherwise run that tag's workflows. Push it:
    `git -C <worktree> push -u origin release/0.9.x`.
 2. Cherry-pick the fix onto a branch from `release/0.9.x`, PR to
    `release/0.9.x`, squash-merge.
@@ -61,23 +63,26 @@ automatic back-merge brings it into `next`.
 
 Run the Release Please workflow manually (`workflow_dispatch`) from the branch
 that owns the tag's channel (`main`, `next` or `release/N.x`), give it the tag,
-and tick `dry-run` first to check without publishing. A tag that does not fit
-the branch's channel is rejected.
+and tick `dry-run` first to check without publishing. A tag is rejected unless
+its version fits the channel (`-next` versions only on `next`; only `0.9.x`
+versions on `release/0.9.x`) and its commit is on that branch.
 
 ## If the back-merge fails
 
-The job only auto-resolves `package.json`, `jsr.json`, `CHANGELOG.md` and the
-main manifest. Any other conflict fails the job on purpose. Merge by hand:
+[`scripts/back-merge.ts`](scripts/back-merge.ts) resolves version bookkeeping on
+its own: `package.json` and `jsr.json` get a real three-way merge with the version
+lines normalised (so next-only changes survive), and `CHANGELOG.md` and the main
+manifest take main's side. Any other conflict fails the job on purpose. Merge by hand:
 
 ```sh
 git switch -c backmerge/fix origin/next
-git merge origin/main     # resolve; keep main's version files
-jq --arg v "<released version>" '.["."] = $v' .release-please/next-manifest.json > /tmp/m.json
-mv /tmp/m.json .release-please/next-manifest.json
-git commit -am "chore: back-merge main into next" && git push -u origin HEAD
+git merge origin/main     # resolve the conflicts yourself
 ```
 
-then open the PR against `next` and merge it with a merge commit.
+Then set `.release-please/next-manifest.json` to the version main just released, but
+only if that is newer than what is already there. After a hotfix on an older line
+(main at `0.9.1`, next at `0.10.0-next.1`) leave it alone, or `next` would be pushed
+backwards. Commit, push, open the PR against `next` and merge it with a merge commit.
 
 ## Consuming
 

@@ -21,6 +21,8 @@ export type Channel = {
     config: string
     manifest: string
     prerelease: boolean
+    /** Maintenance only: the version line the branch serves, "0.9" or "1". */
+    line?: string
 }
 
 // release/0.9.x (minor line, pre-1.0) or release/1.x (major line).
@@ -45,6 +47,7 @@ export function resolveChannel(branch: string): Channel {
             branch,
             distTag: `release-${m[1]}.x`,
             prerelease: false,
+            line: m[1],
             ...files('maintenance'),
         }
     }
@@ -59,11 +62,14 @@ const STABLE_VERSION = /^\d+\.\d+\.\d+$/
 const PRERELEASE_VERSION = /^\d+\.\d+\.\d+-next(?:\.\d+)?$/
 
 export function assertVersionMatchesChannel(version: string, channel: Channel): void {
-    const ok =
+    const shapeOk =
         channel.kind === 'prerelease'
             ? PRERELEASE_VERSION.test(version)
             : STABLE_VERSION.test(version)
-    if (!ok) {
+    // A maintenance branch only publishes its own line, so republishing some
+    // other stable tag from it cannot land under its dist-tag.
+    const lineOk = channel.line === undefined || version.startsWith(`${channel.line}.`)
+    if (!shapeOk || !lineOk) {
         throw new Error(
             `version ${version} does not belong on the ${channel.kind} channel (branch ${channel.branch})`,
         )

@@ -70,6 +70,20 @@ describe('assertVersionMatchesChannel', () => {
         ).toThrow(/does not belong/)
     })
 
+    test('maintenance accepts only versions on its own line', () => {
+        const c = resolveChannel('release/0.9.x')
+        assertVersionMatchesChannel('0.9.0', c)
+        assertVersionMatchesChannel('0.9.12', c)
+        expect(() => assertVersionMatchesChannel('0.10.0', c)).toThrow(/does not belong/)
+        expect(() => assertVersionMatchesChannel('0.8.3', c)).toThrow(/does not belong/)
+        expect(() => assertVersionMatchesChannel('1.9.0', c)).toThrow(/does not belong/)
+
+        const major = resolveChannel('release/1.x')
+        assertVersionMatchesChannel('1.4.2', major)
+        expect(() => assertVersionMatchesChannel('2.0.0', major)).toThrow(/does not belong/)
+        expect(() => assertVersionMatchesChannel('0.9.4', major)).toThrow(/does not belong/)
+    })
+
     test('prerelease accepts release-please numbering: -next, then -next.N', () => {
         assertVersionMatchesChannel('0.10.0-next', resolveChannel('next'))
         assertVersionMatchesChannel('0.10.0-next.1', resolveChannel('next'))

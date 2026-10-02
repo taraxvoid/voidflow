@@ -28,7 +28,8 @@ on:
   # trusted-publisher config); skips release-please and only runs `publish`.
   # The channel comes from the branch the workflow is run from ("Use workflow
   # from"): main for a stable tag, next for a prerelease tag, release/N.x for
-  # a maintenance tag. A tag that does not fit that channel is rejected.
+  # a maintenance tag. A tag whose version does not fit that channel, or whose
+  # commit is not on that branch, is rejected.
   workflow_dispatch:
     inputs:
       tag:
@@ -115,6 +116,7 @@ jobs:
     needs: [channel, release-please]
     if: >-
       !cancelled() &&
+      needs.channel.result == 'success' &&
       (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -128,19 +130,29 @@ jobs:
       # republishing an old tag still gets the current channel checks.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           no-cache: true
 
-      # Abort before anything is published if the tag's version does not fit
-      # the channel (e.g. a -next.N tag on main, or a stable tag on next).
+      # Abort before anything is published unless the tag belongs to this
+      # channel: its version fits the channel (a -next tag on main, a stable
+      # tag on next, or another line's tag on release/N.x are rejected) and
+      # the tagged commit is on this branch (so a maintenance tag cannot be
+      # republished from main, or the reverse).
       - name: Check tag belongs to this channel
         env:
           BRANCH: ${{ github.ref_name }}
           TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
-        run: bun scripts/release-channel.ts "$BRANCH" "${TAG#v}" > /dev/null
+        run: |
+          set -euo pipefail
+          bun scripts/release-channel.ts "$BRANCH" "${TAG#v}" > /dev/null
+          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" HEAD; then
+            echo "::error::Tag ${TAG} is not on branch ${BRANCH}; run this workflow from the branch that owns the tag." >&2
+            exit 1
+          fi
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -198,6 +210,7 @@ jobs:
           set -euo pipefail
           flags=()
           if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
+          : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           NAME=$(jq -r .name package.json)
           VERSION=$(jq -r .version package.json)
           if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
@@ -218,6 +231,7 @@ jobs:
           set -euo pipefail
           flags=()
           if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
+          : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           VERSION=$(jq -r .version package.json)
           if npm view "voidflow@${VERSION}" version >/dev/null 2>&1; then
             echo "voidflow@${VERSION} is already on npm, skipping."
@@ -266,9 +280,9 @@ jobs:
 
   # Stable releases only: bring the release's version bump and changelog from
   # main into next so the branches do not drift. Only version bookkeeping files
-  # may conflict, and those resolve to main's side; anything else fails the job
-  # loudly so a person resolves it (see RELEASING.md). The PR must be merged
-  # with a merge commit, not squashed.
+  # may conflict and scripts/back-merge.ts resolves those; anything else fails
+  # the job loudly so a person resolves it (see RELEASING.md). The PR must be
+  # merged with a merge commit, not squashed.
   back-merge:
     name: Open main to next back-merge PR
     needs: [channel, release-please]
@@ -294,52 +308,33 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Merge main into a back-merge branch and open the PR
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # The merge and its conflict handling live in scripts/back-merge.ts (tested
+      # against real git repos); this step only supplies the release's identity.
+      - name: Merge the release into a back-merge branch
+        id: merge
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
           VERSION: ${{ needs.release-please.outputs.version }}
+          SHA: ${{ needs.release-please.outputs.sha }}
         run: |
           set -euo pipefail
           REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          BRANCH="backmerge/${TAG}"
+          bun scripts/back-merge.ts --remote "$REMOTE" --tag "$TAG" --version "$VERSION" --sha "$SHA" >> "$GITHUB_OUTPUT"
 
-          if ! git fetch "$REMOTE" next:refs/remotes/origin/next 2>/dev/null; then
-            echo "No next branch yet, nothing to back-merge."
-            exit 0
-          fi
-          git fetch "$REMOTE" main:refs/remotes/origin/main
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$BRANCH" origin/next
-
-          if ! git merge --no-ff --no-commit origin/main; then
-            while IFS= read -r f; do
-              case "$f" in
-                package.json | jsr.json | CHANGELOG.md | .release-please/main-manifest.json)
-                  git checkout --theirs -- "$f"
-                  git add -- "$f"
-                  ;;
-                *)
-                  echo "::error::Unexpected merge conflict in ${f}. Merge main into next by hand (see RELEASING.md)."
-                  exit 1
-                  ;;
-              esac
-            done < <(git diff --name-only --diff-filter=U)
-          fi
-
-          # next's prerelease numbering restarts from the stable version just released.
-          jq --arg v "$VERSION" '.["."] = $v' .release-please/next-manifest.json > "$RUNNER_TEMP/next-manifest.json"
-          cp "$RUNNER_TEMP/next-manifest.json" .release-please/next-manifest.json
-          git add .release-please/next-manifest.json
-
-          if [ -z "$(git status --porcelain)" ] && ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
-            echo "next already contains ${TAG}, nothing to back-merge."
-            exit 0
-          fi
-
-          git commit -m "chore: back-merge ${TAG} into next"
+      - name: Push the branch and open the PR
+        if: steps.merge.outputs.result == 'created'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+        run: |
+          set -euo pipefail
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}"
 
           if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

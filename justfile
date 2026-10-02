@@ -102,13 +102,21 @@ cut-maintenance tag branch:
     set -euo pipefail
     tag="{{ tag }}"
     branch="{{ branch }}"
-    case "$branch" in release/*.x) ;; *) echo "branch must look like release/0.9.x or release/1.x" >&2; exit 1 ;; esac
+    if ! bun scripts/release-channel.ts "$branch" | rg -q '^kind=maintenance$'; then
+        echo "branch must look like release/0.9.x or release/1.x" >&2
+        exit 1
+    fi
     git fetch origin main --tags --quiet
     dir="$HOME/worktrees/voidflow/${branch//\//-}"
     git worktree add -b "$branch" "$dir" "$tag"
-    mkdir -p "$dir/.release-please"
-    git show origin/main:.release-please/maintenance.json > "$dir/.release-please/maintenance.json"
+    # A branch cut from an older tag still runs that tag's workflows, so bring
+    # the current release tooling with it or releases from it would publish
+    # without dist-tags (or not run at all).
+    for f in .github/workflows/release-please.yml .github/workflows/ci.yml scripts/release-channel.ts .release-please/maintenance.json; do
+        mkdir -p "$dir/$(dirname "$f")"
+        git show "origin/main:$f" > "$dir/$f"
+    done
     jq -n --arg v "${tag#v}" '{".": $v}' > "$dir/.release-please/maintenance-manifest.json"
-    git -C "$dir" add .release-please
-    git -C "$dir" commit -q -m "chore: release-please config for ${branch}"
+    git -C "$dir" add .github scripts .release-please
+    git -C "$dir" commit -q -m "chore: release tooling and release-please config for ${branch}"
     echo "Created ${branch} at ${dir}. Review, then: git -C ${dir} push -u origin ${branch}"

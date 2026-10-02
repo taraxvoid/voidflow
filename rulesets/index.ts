@@ -205,7 +205,9 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
                 type: 'required_status_checks',
                 parameters: {
                     strict_required_status_checks_policy: false,
-                    do_not_enforce_on_create: false,
+                    // A freshly cut release/N.x has no CI statuses yet; protection
+                    // applies from the first push after creation.
+                    do_not_enforce_on_create: tier === 'maintenance',
                     required_status_checks: contexts,
                 },
             },

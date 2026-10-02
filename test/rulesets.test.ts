@@ -122,6 +122,17 @@ describe('voidflow release channels', () => {
         }
     })
 
+    test('only maintenance may be created without passing checks (a fresh release/N.x has none)', () => {
+        const create = (tier: 'main' | 'prerelease' | 'maintenance') =>
+            (
+                build(tier, cfg).rules.find((x) => x.type === 'required_status_checks')
+                    ?.parameters as { do_not_enforce_on_create: boolean }
+            ).do_not_enforce_on_create
+        expect(create('maintenance')).toBe(true)
+        expect(create('main')).toBe(false)
+        expect(create('prerelease')).toBe(false)
+    })
+
     test('voidflow manages main, prerelease and maintenance', () => {
         expect(cfg.tiers).toEqual(['main', 'prerelease', 'maintenance'])
     })
