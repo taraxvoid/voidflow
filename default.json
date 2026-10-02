@@ -1,0 +1,70 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Shared Renovate preset for the voidflow fleet. Use: { \"extends\": [\"github>taraxvoid/voidflow\"] }",
+  "extends": ["config:best-practices"],
+  "timezone": "America/Chicago",
+  "schedule": ["before 9am on monday"],
+  "semanticCommits": "enabled",
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "dependencyDashboard": true,
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 9am on the first day of the month"]
+  },
+  "vulnerabilityAlerts": {
+    "minimumReleaseAge": null,
+    "schedule": ["at any time"],
+    "labels": ["security"]
+  },
+  "packageRules": [
+    {
+      "description": "Our own package is exempt from the release-age gate (mirrors minimumReleaseAgeExcludes in bunfig.toml)",
+      "matchPackageNames": ["@taraxvoid/voidflow", "voidflow", "taraxvoid/voidflow"],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "One PR for all GitHub Actions bumps",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "matchPackageNames": ["astro", "@astrojs/**"],
+      "groupName": "astro"
+    },
+    {
+      "matchPackageNames": ["@biomejs/**"],
+      "groupName": "biome"
+    },
+    {
+      "description": "Playwright and its browsers move together",
+      "matchPackageNames": ["@playwright/test", "playwright", "playwright-core", "@axe-core/playwright"],
+      "groupName": "playwright"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "@taraxvoid/voidflow pinned inside package.json scripts (bunx --package @taraxvoid/voidflow@x.y.z ...)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)package\\.json$/"],
+      "matchStrings": ["--package (?<depName>@taraxvoid/voidflow|voidflow)@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "npm"
+    },
+    {
+      "description": "lefthook remote pinned to a voidflow release tag",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)lefthook\\.ya?ml$/"],
+      "matchStrings": ["git_url:\\s*https://github\\.com/(?<depName>taraxvoid/voidflow)\\s+ref:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
+      "datasourceTemplate": "github-tags"
+    },
+    {
+      "description": "Tool versions in a justfile: name_version := \"x.y.z\" with a `# renovate: datasource=... depName=...` comment above",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)justfile$/"],
+      "extractVersionTemplate": "^v?(?<version>.+)$",
+      "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+ := \"(?<currentValue>[^\"]+)\""]
+    }
+  ]
+}
