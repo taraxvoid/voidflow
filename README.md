@@ -182,7 +182,6 @@ remote's `ref` tag, and tool versions in a `justfile` (annotate the line above
 with `# renovate: datasource=... depName=...`). Requires the Renovate GitHub App
 on the repo.
 
-||||||| 4041a59
 ## Git hooks (lefthook)
 
 [`lefthook/site.yml`](lefthook/site.yml) is the shared hook set for the site
