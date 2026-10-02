@@ -17,6 +17,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import { noSandboxWrapper } from './chrome.ts'
 
 const { values } = parseArgs({
     options: {
@@ -94,9 +95,21 @@ const site = `http://localhost:${server.port}`
 const chrome = findPlaywrightChromium()
 const env: Record<string, string | undefined> = { ...process.env }
 if (chrome) {
-    env.CHROME_PATH = chrome
-    env.PUPPETEER_EXECUTABLE_PATH = chrome
-    console.log(`Using Chromium: ${chrome}`)
+    // CI runners (ubuntu-24.04) can't create Chrome's sandbox; see chrome.ts.
+    // Set VOIDFLOW_CHROME_SANDBOX=1 to keep the sandbox on.
+    const launcher =
+        process.platform === 'linux' &&
+        process.env.CI &&
+        !process.env.VOIDFLOW_CHROME_SANDBOX
+            ? noSandboxWrapper(chrome)
+            : chrome
+    env.CHROME_PATH = launcher
+    env.PUPPETEER_EXECUTABLE_PATH = launcher
+    console.log(
+        launcher === chrome
+            ? `Using Chromium: ${chrome}`
+            : `Using Chromium: ${chrome} (--no-sandbox for CI)`,
+    )
 } else {
     console.log('No Playwright Chromium found; relying on system Chrome lookup.')
 }
