@@ -160,6 +160,39 @@ Options: `ciPort` (required in CI), `runner` (default `bun`, e.g. `pnpm`),
 `timeout` (default 30000), `projects` (default Pixel 7 and Desktop Chrome),
 `testDir` (default `./test/e2e`). Requires `@playwright/test` in the site.
 
+## Git hooks (lefthook)
+
+[`lefthook/site.yml`](lefthook/site.yml) is the shared hook set for the site
+stack, consumed as a lefthook remote. It calls the site's own `package.json`
+scripts (`bun run --if-present`, so a missing script is skipped):
+
+- `pre-commit`: dependency guard, `format` (formatted files are re-staged),
+  `lint:actions`, `check`, `test:unit`, and `check:licenses` / `audit` when the
+  lockfile changed.
+- `commit-msg`: advisory Conventional Commits hint (never blocks).
+- `pre-push`: bail if the remote branch is ahead, then `test:push`; skipped when
+  there is nothing new to push.
+
+```yaml
+# lefthook.yml in the site
+remotes:
+  - git_url: https://github.com/taraxvoid/voidflow
+    ref: v0.10.0 # a tag or branch; lefthook passes it to `git clone --branch`
+    configs:
+      - lefthook/site.yml
+
+# Site-specific differences override the remote by name, e.g. skip tests that
+# need a built dist/ before commit:
+pre-commit:
+  commands:
+    unit:
+      run: bun run test:unit -- --exclude 'test/build.test.ts'
+```
+
+Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
+set `"prepare": "lefthook install"` so `bun install` wires the hooks. `ref`
+cannot be a commit SHA; pin a release tag.
+
 ## Branch rulesets as code
 
 Branch protection for the fleet lives in [`rulesets/index.ts`](rulesets/index.ts):
