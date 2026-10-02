@@ -1,8 +1,9 @@
 name: Resolve env
 
 # Resolves the deploy environment (dev/staging/prod) for the current branch
-# via the branch-env-map action, exposing it as a job output so callers can
-# reference it in a downstream job's `name:` (e.g. `Deploy [${{ needs.resolve-env.outputs.env }}]`).
+# using the same mapping as the branch-env-map action, exposing it as a job
+# output so callers can reference it in a downstream job's `name:` (e.g.
+# `Deploy [${{ needs.resolve-env.outputs.env }}]`).
 # Job names may use the `needs` context, but not composite action outputs
 # directly, so this indirection is what makes that possible.
 
@@ -34,10 +35,30 @@ jobs:
     outputs:
       env: ${{ steps.map.outputs.env }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+      # Same mapping as actions/branch-env-map (a test keeps them identical).
+      # Inlined because a reusable workflow can't reach `./actions/...` in its
+      # own repo: checkout gives it the caller's tree, not voidflow's.
       - id: map
-        uses: ./actions/branch-env-map
-        with:
-          single-environment: ${{ inputs.single-environment }}
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          SINGLE: ${{ inputs.single-environment }}
+        run: |
+            if [[ "$SINGLE" == "true" ]]; then
+              if [[ "$EVENT_NAME" == pull_request* ]]; then
+                echo "env=preview" >> "$GITHUB_OUTPUT"
+              elif [[ "$REF_NAME" == main ]]; then
+                echo "env=prod" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::Refusing to deploy unknown ref: $REF_NAME (expected main or a pull request)" >&2
+                exit 1
+              fi
+              exit 0
+            fi
+            case "$REF_NAME" in
+              main) echo "env=dev" >> "$GITHUB_OUTPUT" ;;
+              next) echo "env=staging" >> "$GITHUB_OUTPUT" ;;
+              live) echo "env=prod" >> "$GITHUB_OUTPUT" ;;
+              *) echo "::error::Refusing to deploy unknown branch: $REF_NAME (expected main, next, or live)" >&2; exit 1 ;;
+            esac
