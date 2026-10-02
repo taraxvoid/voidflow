@@ -39,6 +39,14 @@ describe('canonical rulesets', () => {
         expect(build('live', REPOS['taraxvoid/synthomaha']).bypass_actors).toEqual([])
     })
 
+    test('sites manage only main and retire next/live', () => {
+        for (const repo of ['queeromaha', 'soundry', 'synthomaha']) {
+            const cfg = REPOS[`taraxvoid/${repo}`]
+            expect(cfg.tiers).toEqual(['main'])
+            expect(cfg.retire).toEqual(['next (staging)', 'live (prod)'])
+        }
+    })
+
     test('names within a repo are unique', () => {
         for (const repo of Object.keys(REPOS)) {
             const names = desired(repo).map((d) => d.ruleset.name)

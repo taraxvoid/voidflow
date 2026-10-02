@@ -58,38 +58,43 @@ export type RepoConfig = {
     bypass: Partial<Record<Tier, BypassActor[]>>
     /** Existing ruleset names to adopt (rename) instead of duplicating. */
     aka: Partial<Record<Tier, string[]>>
+    /**
+     * Ruleset names that should no longer exist (e.g. next/live protection for
+     * a site that moved to a single stable main). Only deleted with --prune.
+     */
+    retire: string[]
 }
 
 const SITE_CHECK = 'validate / Validate'
 
+// Sites run a single stable `main` that deploys to prod (previews on PRs),
+// i.e. voidflow's `single-environment` mode. Multi-environment repos
+// (main/next/live) list all three tiers instead.
 const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
-    tiers: ['main', 'next', 'live'],
+    tiers: ['main'],
     netlify: true,
     checks: [SITE_CHECK],
     codeowners: true,
     bypass: {},
     aka: {},
+    retire: ['next (staging)', 'live (prod)'],
     ...over,
 })
 
-// TODO: identify what integrations 85455 and 1236702 are before deciding
-// whether they should keep bypassing. They are preserved as-is for now.
+// Integration bypasses are preserved as-is; they are believed to be the
+// Netlify/Cloudflare apps and come out once deploys run from Actions (see
+// the "Deploy via Actions" issue).
+// taraxvoid.net is private on a plan without rulesets, so it is not listed.
 export const REPOS: Record<string, RepoConfig> = {
     'taraxvoid/queeromaha': site({
-        bypass: {
-            main: [app(NETLIFY), app(85455)],
-            next: [app(NETLIFY), app(85455)],
-        },
+        bypass: { main: [app(NETLIFY), app(85455)] },
     }),
     'taraxvoid/soundry': site({
-        bypass: {
-            main: [app(85455), app(1236702)],
-            next: [app(85455)],
-        },
+        bypass: { main: [app(85455), app(1236702)] },
         aka: { main: ['main (live)'] },
     }),
     'taraxvoid/synthomaha': site({
-        bypass: { main: [app(85455)], next: [app(85455)] },
+        bypass: { main: [app(85455)] },
     }),
     'taraxvoid/voidflow': {
         tiers: ['main'],
@@ -98,6 +103,7 @@ export const REPOS: Record<string, RepoConfig> = {
         codeowners: false,
         bypass: {},
         aka: { main: ['main/prod'] },
+        retire: [],
     },
 }
 

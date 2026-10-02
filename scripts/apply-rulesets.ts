@@ -6,9 +6,11 @@
  *   bun scripts/apply-rulesets.ts --repo soundry   # plan for one repo
  *   bun scripts/apply-rulesets.ts --check          # plan, exit 1 on drift (for CI)
  *   bun scripts/apply-rulesets.ts --apply          # create/update to match
+ *   bun scripts/apply-rulesets.ts --apply --prune  # ...and delete retired rulesets
  *
  * Uses the `gh` CLI for auth, so run it as someone with admin on the repos.
- * Rulesets not described in the config are reported but never deleted.
+ * Rulesets not described in the config are reported and left alone; only the
+ * ones a repo lists under `retire` are deleted, and only with --prune.
  */
 import { parseArgs } from 'node:util'
 import { REPOS, desired, diff, normalise, type Ruleset } from '../rulesets/index.ts'
@@ -16,6 +18,7 @@ import { REPOS, desired, diff, normalise, type Ruleset } from '../rulesets/index
 const { values } = parseArgs({
     options: {
         apply: { type: 'boolean', default: false },
+        prune: { type: 'boolean', default: false },
         check: { type: 'boolean', default: false },
         repo: { type: 'string' },
     },
@@ -85,8 +88,18 @@ for (const repo of repos) {
         }
     }
 
+    const retire = new Set(REPOS[repo].retire)
     for (const r of listed.filter((r) => !matched.has(r.id))) {
-        console.log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
+        if (!retire.has(r.name)) {
+            console.log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
+            continue
+        }
+        drift++
+        console.log(`- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`)
+        if (values.apply && values.prune) {
+            await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
+            console.log('  deleted')
+        }
     }
 }
 

@@ -133,11 +133,14 @@ just rulesets-plan                  # read-only: diff every repo against the con
 just rulesets-plan --repo soundry
 just rulesets-plan --check          # exit 1 on drift, for CI
 just rulesets-apply                 # create/update rulesets to match
+just rulesets-apply --prune         # also delete rulesets a repo lists under `retire`
 ```
 
+Single-environment sites (a stable `main` that deploys to prod) manage only the
+`main` tier; their old `next`/`live` rulesets are listed under `retire`.
 Uses the `gh` CLI for auth (needs admin on the repos). Rulesets that are not in
-the config are reported and left alone, never deleted. It is repo tooling, not
-part of the published package.
+the config are reported and left alone; only `retire` entries are ever deleted,
+and only with `--prune`. It is repo tooling, not part of the published package.
 
 ## Deployments
 
