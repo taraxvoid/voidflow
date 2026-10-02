@@ -219,7 +219,8 @@ cannot be a commit SHA; pin a release tag.
 ## Branch rulesets as code
 
 Branch protection for the fleet lives in [`rulesets/index.ts`](rulesets/index.ts):
-one canonical `main` / `next` / `live` definition plus a small per-repo table
+one canonical `main` / `next` / `live` definition (plus `prerelease` and `maintenance`
+tiers for repos with release channels) and a small per-repo table
 (Netlify or not, check names, CODEOWNERS, extra bypass actors). Hand-edited
 rulesets drift, and drift is how a `next` ruleset ends up requiring a check
 name that no workflow reports any more.
@@ -233,7 +234,9 @@ just rulesets-apply --prune         # also delete rulesets a repo lists under `r
 ```
 
 Single-environment sites (a stable `main` that deploys to prod) manage only the
-`main` tier; their old `next`/`live` rulesets are listed under `retire`.
+`main` tier; their old `next`/`live` rulesets are listed under `retire`. voidflow itself
+manages `main`, `prerelease` (`next`) and `maintenance` (`release/*`) and sets
+`linearHistory: false` so `next` can be promoted into `main` with a merge commit.
 Uses the `gh` CLI for auth (needs admin on the repos). Rulesets that are not in
 the config are reported and left alone; only `retire` entries are ever deleted,
 and only with `--prune`. It is repo tooling, not part of the published package.
@@ -273,21 +276,38 @@ Sites with a single production environment and per-PR previews (no `next` or
 
 ### Versioning
 
-This project uses semver, released with [release-please](https://github.com/googleapis/release-please)
-([`release-please.yml`](.github/workflows/release-please.yml)). It keeps a standing
-`chore(main): release X.Y.Z` PR open against `main`, updated as commits land. Merging it bumps
-`package.json` and [`CHANGELOG.md`](CHANGELOG.md), tags `vX.Y.Z`, creates the GitHub release,
-and publishes to npm. The PR is opened with the org's release-bot GitHub App token
-(`RELEASE_BOT_CLIENT_ID` / `RELEASE_BOT_APP_PRIVATE_KEY`) so CI runs on it.
+Semver, released with [release-please](https://github.com/googleapis/release-please)
+([`release-please.yml`](.github/workflows/release-please.yml)) on three branch-based channels
+(full flow in [`RELEASING.md`](RELEASING.md)):
+
+| Channel | Branch | Example | npm dist-tag |
+|---|---|---|---|
+| stable | `main` | `0.10.0` | `latest` |
+| prerelease | `next` | `0.10.0-next`, `0.10.0-next.1` | `next` |
+| maintenance | `release/N.x` | `0.9.4` | `release-N.x` |
+
+release-please keeps a standing release PR open on each channel's branch, updated as commits land.
+Merging it bumps `package.json` (and [`CHANGELOG.md`](CHANGELOG.md) on stable), tags `vX.Y.Z`,
+creates the GitHub release and publishes to npm and JSR under the channel's dist-tag. The PR is
+opened with the org's release-bot GitHub App token (`RELEASE_BOT_CLIENT_ID` /
+`RELEASE_BOT_APP_PRIVATE_KEY`) so CI runs on it.
+
+Feature PRs target `next`; promotion to `main` is a merge-commit PR (`just promote`).
 
 Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org),
 enforced loosely, as an advisory `commit-msg` hint (see
 [`scripts/check-commit-msg.sh`](scripts/check-commit-msg.sh)), not a blocking check. They
 drive the version bump and generated changelog.
 
-Treat `@main` as unstable. Consumers should pin to the commit SHA of a release tag and
-keep the version in a trailing comment, e.g. `@15caea2... # v0.8.1`, so a Renovate or
-Dependabot config can bump it. There is no floating major-version tag (`@v1`) to track yet.
+Ways to consume a release:
+
+- **Floating major tag**: `@v0` follows the newest stable 0.x release. Easiest to track, and
+  mutable like any floating tag.
+- **SHA pin with a version comment**, e.g. `@15caea2... # v0.8.1`: what I use. Same hardening
+  as any third-party action, and Renovate or Dependabot can bump it.
+- **Try unreleased changes**: pin the commit SHA of a `vX.Y.Z-next` / `vX.Y.Z-next.N` prerelease tag.
+
+Treat `@main` and `@next` as unstable.
 
 ## Self-validation
 
