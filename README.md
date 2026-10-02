@@ -283,7 +283,7 @@ Semver, released with [release-please](https://github.com/googleapis/release-ple
 | Channel | Branch | Example | npm dist-tag |
 |---|---|---|---|
 | stable | `main` | `0.10.0` | `latest` |
-| prerelease | `next` | `0.10.0-next.1` | `next` |
+| prerelease | `next` | `0.10.0-next`, `0.10.0-next.1` | `next` |
 | maintenance | `release/N.x` | `0.9.4` | `release-N.x` |
 
 release-please keeps a standing release PR open on each channel's branch, updated as commits land.
@@ -305,7 +305,7 @@ Ways to consume a release:
   mutable like any floating tag.
 - **SHA pin with a version comment**, e.g. `@15caea2... # v0.8.1`: what I use. Same hardening
   as any third-party action, and Renovate or Dependabot can bump it.
-- **Try unreleased changes**: pin the commit SHA of a `vX.Y.Z-next.N` prerelease tag.
+- **Try unreleased changes**: pin the commit SHA of a `vX.Y.Z-next` / `vX.Y.Z-next.N` prerelease tag.
 
 Treat `@main` and `@next` as unstable.
 

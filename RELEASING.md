@@ -7,7 +7,7 @@ Commits ([`release-please.yml`](.github/workflows/release-please.yml)).
 | Branch | Channel | Version | npm dist-tag | GitHub release |
 |---|---|---|---|---|
 | `main` | stable | `0.10.0` | `latest` | normal |
-| `next` | prerelease | `0.10.0-next.1` | `next` | prerelease |
+| `next` | prerelease | `0.10.0-next`, then `-next.1`, `-next.2` | `next` | prerelease |
 | `release/N.x` | maintenance (patch-only) | `0.9.4` | `release-N.x` | normal |
 
 ```mermaid
@@ -15,7 +15,7 @@ gitGraph
   commit id: "release" tag: "v0.9.0"
   branch next
   commit id: "feat: a"
-  commit id: "prerelease" tag: "v0.10.0-next.1"
+  commit id: "prerelease" tag: "v0.10.0-next"
   checkout main
   merge next id: "promote"
   commit id: "stable" tag: "v0.10.0"
@@ -27,7 +27,7 @@ gitGraph
 
 1. Branch from `next`, open the PR against `next`, squash-merge it.
 2. release-please keeps a prerelease PR open on `next`. Merging it tags
-   `vX.Y.Z-next.N`, creates a GitHub prerelease and publishes to npm under
+   `vX.Y.Z-next` (then `-next.1`, `-next.2`), creates a GitHub prerelease and publishes to npm under
    `next` (and to JSR).
 3. To try it in a site, pin the prerelease tag's commit SHA, or install the
    package with `bun add @taraxvoid/voidflow@next`.

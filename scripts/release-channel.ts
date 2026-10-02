@@ -7,7 +7,7 @@
  *
  * Prints key=value lines, ready to append to $GITHUB_OUTPUT. When a version is
  * given it must fit the channel (stable and maintenance: X.Y.Z, prerelease:
- * X.Y.Z-next.N), so a mis-routed publish aborts before anything reaches npm.
+ * X.Y.Z-next or X.Y.Z-next.N), so a mis-routed publish aborts before anything reaches npm.
  * Unknown branches fail closed: there is no default channel, in particular no
  * fall-through to `latest`.
  */
@@ -54,7 +54,9 @@ export function resolveChannel(branch: string): Channel {
 }
 
 const STABLE_VERSION = /^\d+\.\d+\.\d+$/
-const PRERELEASE_VERSION = /^\d+\.\d+\.\d+-next\.\d+$/
+// release-please numbers prereleases 0.10.0-next, 0.10.0-next.1, 0.10.0-next.2:
+// the first one in a series carries no number.
+const PRERELEASE_VERSION = /^\d+\.\d+\.\d+-next(?:\.\d+)?$/
 
 export function assertVersionMatchesChannel(version: string, channel: Channel): void {
     const ok =

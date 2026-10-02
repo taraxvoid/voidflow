@@ -70,7 +70,9 @@ describe('assertVersionMatchesChannel', () => {
         ).toThrow(/does not belong/)
     })
 
-    test('prerelease accepts -next.N only', () => {
+    test('prerelease accepts release-please numbering: -next, then -next.N', () => {
+        assertVersionMatchesChannel('0.10.0-next', resolveChannel('next'))
+        assertVersionMatchesChannel('0.10.0-next.1', resolveChannel('next'))
         assertVersionMatchesChannel('0.10.0-next.3', resolveChannel('next'))
         expect(() => assertVersionMatchesChannel('0.10.0', resolveChannel('next'))).toThrow(
             /does not belong/,
