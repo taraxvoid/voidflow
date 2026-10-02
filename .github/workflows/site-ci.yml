@@ -41,6 +41,15 @@ on:
           config, package.json, lockfile, tsconfig.json and workflows.
         type: string
         default: '["wrangler.jsonc", "site.vars.json"]'
+      single-environment:
+        description: >
+          For sites with one production environment and no next/live
+          branches (same meaning as in resolve-env): `main` is production,
+          so PRs and pushes to `main` run the production test tier (all e2e,
+          accessibility, Lighthouse) instead of only `test:e2e:full`.
+          Defaults to false (main/next/live run dev/staging/prod tiers).
+        type: boolean
+        default: false
       build-env:
         description: >
           JSON object of environment variables for the build step, e.g.
@@ -216,28 +225,40 @@ jobs:
         if: steps.e2e.outputs.relevant == 'true' && !inputs.playwright-install-with-deps
         run: npx playwright install chromium
 
+      - name: Resolve test tier
+        id: tier
+        # Which branch's test tier applies: the PR base on pull requests, the
+        # pushed branch on pushes. Single-environment sites treat main as live.
+        run: |
+          target="$BASE_REF"
+          if [[ "$SINGLE" == "true" && "$target" == main ]]; then target=live; fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+        env:
+          BASE_REF: ${{ github.base_ref || github.ref_name }}
+          SINGLE: ${{ inputs.single-environment }}
+
       - name: E2E - Dev
-        if: steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'main'
+        if: steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'main'
         run: '"$PM" run test:e2e:full'
 
       - name: E2E - Staging
-        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'next'
+        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next'
         run: '"$PM" run test:e2e:all'
 
       - name: E2E - Accessibility (staging)
-        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'next'
+        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next'
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Production
-        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'live'
+        if: steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live'
         run: '"$PM" run test:e2e:all'
 
       - name: E2E - Accessibility (production)
-        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'live'
+        if: steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live'
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Lighthouse (production)
-        if: steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && (github.base_ref || github.ref_name) == 'live'
+        if: steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live'
         run: '"$PM" run test:e2e:lighthouse'
 
       - name: Upload failure reports

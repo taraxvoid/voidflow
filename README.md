@@ -43,6 +43,33 @@ jobs:
       runner: my-hosted-runner
 ```
 
+### Single-environment sites
+
+Sites with one production environment and no `next`/`live` branches (`main`
+deploys to prod, pull requests get previews) pass `single-environment: true`,
+the same flag `resolve-env` and `branch-env-map` take:
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # <version>
+    with:
+      single-environment: true
+```
+
+`main` then gets the production test tier (`test:e2e:all`, `test:e2e:a11y`,
+`test:e2e:lighthouse`) instead of only `test:e2e:full`. Include the `push`
+trigger so a direct push to `main` is validated too; the e2e steps resolve the
+branch from the pushed ref.
+
 ### pnpm sites, build env, extra e2e paths
 
 ```yaml
