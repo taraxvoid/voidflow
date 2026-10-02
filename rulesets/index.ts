@@ -43,7 +43,7 @@ export const app = (id: number): BypassActor => ({
     bypass_mode: 'always',
 })
 
-export type Tier = 'main' | 'next' | 'live'
+export type Tier = 'main' | 'next' | 'live' | 'prerelease' | 'maintenance'
 
 export type RepoConfig = {
     /** Tiers to manage; a tier not listed gets no ruleset. */
@@ -54,6 +54,11 @@ export type RepoConfig = {
     checks: string[]
     /** Require CODEOWNERS review. */
     codeowners: boolean
+    /**
+     * Require linear history on main (and so squash-only). Repos that promote
+     * a prerelease branch into main with merge commits set this to false.
+     */
+    linearHistory: boolean
     /** Extra bypass actors per tier, on top of the tier defaults. */
     bypass: Partial<Record<Tier, BypassActor[]>>
     /** Existing ruleset names to adopt (rename) instead of duplicating. */
@@ -75,6 +80,7 @@ const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     netlify: true,
     checks: [SITE_CHECK],
     codeowners: true,
+    linearHistory: true,
     bypass: {},
     aka: {},
     retire: ['next (staging)', 'live (prod)'],
@@ -97,10 +103,14 @@ export const REPOS: Record<string, RepoConfig> = {
         bypass: { main: [app(85455)] },
     }),
     'taraxvoid/voidflow': {
-        tiers: ['main'],
+        // main (stable), next (prerelease channel), release/* (maintenance).
+        // See RELEASING.md. Promotion next -> main uses merge commits, so no
+        // linear history here.
+        tiers: ['main', 'prerelease', 'maintenance'],
         netlify: false,
         checks: ['Validation', 'Unit tests'],
         codeowners: false,
+        linearHistory: false,
         bypass: {},
         aka: { main: ['main/prod'] },
         retire: [],
@@ -111,6 +121,44 @@ const NAMES: Record<Tier, string> = {
     main: 'main (prod)',
     next: 'next (staging)',
     live: 'live (prod)',
+    prerelease: 'next (prerelease)',
+    maintenance: 'release/* (maintenance)',
+}
+
+const REFS: Record<Tier, string> = {
+    main: '~DEFAULT_BRANCH',
+    next: 'refs/heads/next',
+    live: 'refs/heads/live',
+    prerelease: 'refs/heads/next',
+    maintenance: 'refs/heads/release/*',
+}
+
+function mergeMethods(tier: Tier, cfg: RepoConfig): string[] {
+    switch (tier) {
+        case 'main':
+            // Squash-only keeps history linear; repos that promote with merge
+            // commits also allow `merge` (never `rebase`).
+            return cfg.linearHistory ? ['squash'] : ['squash', 'merge']
+        case 'prerelease':
+            // Back-merges from main must be merge commits to keep shared ancestry.
+            return ['squash', 'merge']
+        case 'maintenance':
+            return ['squash']
+        default:
+            // next/live merge promotion branches with any method.
+            return ['merge', 'squash', 'rebase']
+    }
+}
+
+function bypassFor(tier: Tier, cfg: RepoConfig): BypassActor[] {
+    switch (tier) {
+        case 'next':
+            return [DEPLOY_KEY, ADMIN_ALWAYS, ...(cfg.bypass.next ?? [])]
+        case 'live':
+            return [...(cfg.bypass.live ?? [])]
+        default:
+            return [ADMIN_VIA_PR, ...(cfg.bypass[tier] ?? [])]
+    }
 }
 
 export function build(tier: Tier, cfg: RepoConfig): Ruleset {
@@ -123,28 +171,23 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
             integration_id: GITHUB_ACTIONS,
         })),
     ]
-    const main = tier === 'main'
-    const bypass = main
-        ? [ADMIN_VIA_PR, ...(cfg.bypass.main ?? [])]
-        : tier === 'next'
-          ? [DEPLOY_KEY, ADMIN_ALWAYS, ...(cfg.bypass.next ?? [])]
-          : [...(cfg.bypass.live ?? [])]
-
     return {
         name: NAMES[tier],
         target: 'branch',
         enforcement: 'active',
         conditions: {
             ref_name: {
-                include: [main ? '~DEFAULT_BRANCH' : `refs/heads/${tier}`],
+                include: [REFS[tier]],
                 exclude: [],
             },
         },
-        bypass_actors: bypass,
+        bypass_actors: bypassFor(tier, cfg),
         rules: [
             { type: 'deletion' },
             { type: 'non_fast_forward' },
-            ...(main ? [{ type: 'required_linear_history' }] : []),
+            ...(tier === 'main' && cfg.linearHistory
+                ? [{ type: 'required_linear_history' }]
+                : []),
             {
                 type: 'pull_request',
                 parameters: {
@@ -155,18 +198,16 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
                     require_last_push_approval: false,
                     required_review_thread_resolution: false,
                     require_extra_approval_for_unattributed_changes: true,
-                    // main is squash-only (linear history); next/live merge
-                    // promotion branches with any method.
-                    allowed_merge_methods: main
-                        ? ['squash']
-                        : ['merge', 'squash', 'rebase'],
+                    allowed_merge_methods: mergeMethods(tier, cfg),
                 },
             },
             {
                 type: 'required_status_checks',
                 parameters: {
                     strict_required_status_checks_policy: false,
-                    do_not_enforce_on_create: false,
+                    // A freshly cut release/N.x has no CI statuses yet; protection
+                    // applies from the first push after creation.
+                    do_not_enforce_on_create: tier === 'maintenance',
                     required_status_checks: contexts,
                 },
             },

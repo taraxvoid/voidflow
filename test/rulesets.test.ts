@@ -75,3 +75,65 @@ describe('diff', () => {
         expect(lines.some((l) => l.startsWith('+ ') && l.includes('validate / Validate'))).toBe(true)
     })
 })
+
+describe('voidflow release channels', () => {
+    const cfg = REPOS['taraxvoid/voidflow']
+    const mergeMethods = (r: ReturnType<typeof build>) =>
+        r.rules.find((x) => x.type === 'pull_request')?.parameters
+            ?.allowed_merge_methods as string[]
+
+    test('main drops linear history and allows merge commits for promotion, no rebase', () => {
+        const r = build('main', cfg)
+        expect(r.rules.map((x) => x.type)).not.toContain('required_linear_history')
+        expect(mergeMethods(r)).toEqual(['squash', 'merge'])
+    })
+
+    test('sites are byte-for-byte unchanged: linear history, squash only', () => {
+        for (const repo of ['queeromaha', 'soundry', 'synthomaha']) {
+            const r = build('main', REPOS[`taraxvoid/${repo}`])
+            expect(r.rules.map((x) => x.type)).toContain('required_linear_history')
+            expect(mergeMethods(r)).toEqual(['squash'])
+        }
+    })
+
+    test('prerelease protects next, allows merge commits for back-merges, no linear history', () => {
+        const r = build('prerelease', cfg)
+        expect(r.name).toBe('next (prerelease)')
+        expect(r.conditions.ref_name.include).toEqual(['refs/heads/next'])
+        expect(mergeMethods(r)).toEqual(['squash', 'merge'])
+        expect(r.rules.map((x) => x.type)).not.toContain('required_linear_history')
+    })
+
+    test('maintenance protects release/* and is squash only', () => {
+        const r = build('maintenance', cfg)
+        expect(r.name).toBe('release/* (maintenance)')
+        expect(r.conditions.ref_name.include).toEqual(['refs/heads/release/*'])
+        expect(mergeMethods(r)).toEqual(['squash'])
+    })
+
+    test('release branches block deletion and force-push, require the repo checks, no deploy-key bypass', () => {
+        for (const tier of ['main', 'prerelease', 'maintenance'] as const) {
+            const r = build(tier, cfg)
+            const types = r.rules.map((x) => x.type)
+            expect(types).toContain('deletion')
+            expect(types).toContain('non_fast_forward')
+            expect(statusChecks(r)).toEqual(['Validation', 'Unit tests'])
+            expect(r.bypass_actors.some((a) => a.actor_type === 'DeployKey')).toBe(false)
+        }
+    })
+
+    test('only maintenance may be created without passing checks (a fresh release/N.x has none)', () => {
+        const create = (tier: 'main' | 'prerelease' | 'maintenance') =>
+            (
+                build(tier, cfg).rules.find((x) => x.type === 'required_status_checks')
+                    ?.parameters as { do_not_enforce_on_create: boolean }
+            ).do_not_enforce_on_create
+        expect(create('maintenance')).toBe(true)
+        expect(create('main')).toBe(false)
+        expect(create('prerelease')).toBe(false)
+    })
+
+    test('voidflow manages main, prerelease and maintenance', () => {
+        expect(cfg.tiers).toEqual(['main', 'prerelease', 'maintenance'])
+    })
+})

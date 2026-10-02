@@ -86,3 +86,37 @@ rulesets-plan *args:
 # Create/update branch rulesets to match rulesets/index.ts (needs repo admin via gh)
 rulesets-apply *args:
     bun scripts/apply-rulesets.ts --apply {{ args }}
+
+# Open the next -> main promotion PR; merge it with a merge commit, not a squash
+promote:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git fetch origin main next --quiet
+    gh pr create --base main --head next \
+        --title "chore: promote next to main" \
+        --body "$(printf 'Commits promoted from next:\n\n%s\n\nMerge with a merge commit so each Conventional Commit reaches release-please.\n' "$(git log --format='- %s' origin/main..origin/next)")"
+
+# Cut release/N.x from a stable tag in a new worktree (e.g. v0.9.3 release/0.9.x); push it yourself
+cut-maintenance tag branch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag="{{ tag }}"
+    branch="{{ branch }}"
+    if ! bun scripts/release-channel.ts "$branch" | rg -q '^kind=maintenance$'; then
+        echo "branch must look like release/0.9.x or release/1.x" >&2
+        exit 1
+    fi
+    git fetch origin main --tags --quiet
+    dir="$HOME/worktrees/voidflow/${branch//\//-}"
+    git worktree add -b "$branch" "$dir" "$tag"
+    # A branch cut from an older tag still runs that tag's workflows, so bring
+    # the current release tooling with it or releases from it would publish
+    # without dist-tags (or not run at all).
+    for f in .github/workflows/release-please.yml .github/workflows/ci.yml scripts/release-channel.ts .release-please/maintenance.json; do
+        mkdir -p "$dir/$(dirname "$f")"
+        git show "origin/main:$f" > "$dir/$f"
+    done
+    jq -n --arg v "${tag#v}" '{".": $v}' > "$dir/.release-please/maintenance-manifest.json"
+    git -C "$dir" add .github scripts .release-please
+    git -C "$dir" commit -q -m "chore: release tooling and release-please config for ${branch}"
+    echo "Created ${branch} at ${dir}. Review, then: git -C ${dir} push -u origin ${branch}"

@@ -1,10 +1,15 @@
 name: Release Please
 
-# Maintains a standing "chore(release): X.Y.Z" PR against main, auto-updated
-# as commits land. Merging it bumps package.json + CHANGELOG.md, pushes the
-# vX.Y.Z tag and creates the GitHub release (all by release-please itself),
-# then the publish job below pushes the tagged commit to npm. Same setup as
-# rvnflt's release-please.yml.
+# Branch-based release channels (see RELEASING.md):
+#   main         stable      npm dist-tag `latest`
+#   next         prerelease  npm dist-tag `next`  (X.Y.Z-next.N)
+#   release/N.x  maintenance npm dist-tag `release-N.x`
+#
+# On every push to one of those branches release-please maintains a standing
+# release PR using that branch's config from .release-please/. Merging it bumps
+# the version files, pushes the vX.Y.Z tag and creates the GitHub release (all
+# by release-please itself), then the publish job pushes the tagged commit to
+# npm and JSR under the channel's dist-tag.
 #
 # token is a GitHub App installation token, not the default GITHUB_TOKEN:
 # events authored by GITHUB_TOKEN don't trigger other workflows, so the
@@ -18,21 +23,64 @@ name: Release Please
 # environment so it can switch back once npm supports immutable OIDC subjects.
 on:
   push:
-    branches: [main]
+    branches: [main, next, "release/**"]
   # Manual republish of an existing release's tag (e.g. after fixing npm
   # trusted-publisher config); skips release-please and only runs `publish`.
+  # The channel comes from the branch the workflow is run from ("Use workflow
+  # from"): main for a stable tag, next for a prerelease tag, release/N.x for
+  # a maintenance tag. A tag whose version does not fit that channel, or whose
+  # commit is not on that branch, is rejected.
   workflow_dispatch:
     inputs:
       tag:
         description: "Existing release tag to publish to npm (e.g. v0.7.0)"
         required: true
         type: string
+      dry-run:
+        description: "Run the publish steps with --dry-run (nothing is published)"
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
+# One release run per branch at a time; never cancel a run mid-publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  channel:
+    name: Resolve channel
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      kind: ${{ steps.channel.outputs.kind }}
+      dist_tag: ${{ steps.channel.outputs.dist_tag }}
+      config: ${{ steps.channel.outputs.config }}
+      manifest: ${{ steps.channel.outputs.manifest }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # Fails the run for any branch that is not a release channel.
+      - name: Resolve release channel from branch
+        id: channel
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: bun scripts/release-channel.ts "$BRANCH" >> "$GITHUB_OUTPUT"
+
   release-please:
     name: Release Please
+    needs: channel
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -42,6 +90,9 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      major: ${{ steps.release.outputs.major }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - name: Generate App token
         id: app-token
@@ -56,15 +107,16 @@ jobs:
         id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
-          target-branch: main
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          target-branch: ${{ github.ref_name }}
+          config-file: ${{ needs.channel.outputs.config }}
+          manifest-file: ${{ needs.channel.outputs.manifest }}
 
   publish:
     name: Publish to npm
-    needs: release-please
+    needs: [channel, release-please]
     if: >-
       !cancelled() &&
+      needs.channel.result == 'success' &&
       (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -74,6 +126,34 @@ jobs:
       id-token: write
 
     steps:
+      # Tooling comes from the branch that triggered the run, not the tag, so
+      # republishing an old tag still gets the current channel checks.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # Abort before anything is published unless the tag belongs to this
+      # channel: its version fits the channel (a -next tag on main, a stable
+      # tag on next, or another line's tag on release/N.x are rejected) and
+      # the tagged commit is on this branch (so a maintenance tag cannot be
+      # republished from main, or the reverse).
+      - name: Check tag belongs to this channel
+        env:
+          BRANCH: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          bun scripts/release-channel.ts "$BRANCH" "${TAG#v}" > /dev/null
+          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" HEAD; then
+            echo "::error::Tag ${TAG} is not on branch ${BRANCH}; run this workflow from the branch that owns the tag." >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
@@ -84,6 +164,7 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Check package.json version matches tag
         env:
@@ -103,10 +184,14 @@ jobs:
 
       # JSR is linked to this repo so trusted publishing Just Works^TM
       - name: Publish @taraxvoid/voidflow to JSR
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          flags=()
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
           npm install --no-save --no-package-lock --ignore-scripts @playwright/test
-          npx --yes jsr publish
+          npx --yes jsr publish "${flags[@]}"
 
       # Publishes with the NPM_TOKEN secret (granular token scoped to both
       # packages, stored on the `npm` environment) as a stopgap: npm's trusted
@@ -119,14 +204,19 @@ jobs:
       - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ needs.channel.outputs.dist_tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          flags=()
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
+          : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           NAME=$(jq -r .name package.json)
           VERSION=$(jq -r .version package.json)
           if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
             echo "${NAME}@${VERSION} is already on npm, skipping."
           else
-            npm publish
+            npm publish --tag "$DIST_TAG" "${flags[@]}"
           fi
 
       # Unscoped mirror with the same code and version. It mainly reserves the
@@ -135,8 +225,13 @@ jobs:
       - name: Publish voidflow (unscoped mirror)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ needs.channel.outputs.dist_tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
           set -euo pipefail
+          flags=()
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
+          : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           VERSION=$(jq -r .version package.json)
           if npm view "voidflow@${VERSION}" version >/dev/null 2>&1; then
             echo "voidflow@${VERSION} is already on npm, skipping."
@@ -144,5 +239,109 @@ jobs:
           fi
           npm pkg set name=voidflow
           cp scripts/mirror-readme.md README.md
-          npm publish --loglevel verbose
+          npm publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}"
+
+  # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
+  # release. Prereleases and maintenance releases never move it. Immutable
+  # vX.Y.Z tags are untouched.
+  floating-tag:
+    name: Move floating major tag
+    needs: [channel, release-please]
+    if: >-
+      needs.release-please.outputs.release_created == 'true' &&
+      needs.channel.outputs.kind == 'stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Point v<major> at the release commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MAJOR: ${{ needs.release-please.outputs.major }}
+          SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          set -euo pipefail
+          TAG="v${MAJOR}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" -f sha="$SHA" -F force=true
+          else
+            # First stable release on this major: the tag does not exist yet.
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="$SHA"
+          fi
+          echo "${TAG} -> ${SHA}"
+
+  # Stable releases only: bring the release's version bump and changelog from
+  # main into next so the branches do not drift. Only version bookkeeping files
+  # may conflict and scripts/back-merge.ts resolves those; anything else fails
+  # the job loudly so a person resolves it (see RELEASING.md). The PR must be
+  # merged with a merge commit, not squashed.
+  back-merge:
+    name: Open main to next back-merge PR
+    needs: [channel, release-please]
+    if: >-
+      needs.release-please.outputs.release_created == 'true' &&
+      needs.channel.outputs.kind == 'stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # The merge and its conflict handling live in scripts/back-merge.ts (tested
+      # against real git repos); this step only supplies the release's identity.
+      - name: Merge the release into a back-merge branch
+        id: merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+          SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          set -euo pipefail
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          bun scripts/back-merge.ts --remote "$REMOTE" --tag "$TAG" --version "$VERSION" --sha "$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Push the branch and open the PR
+        if: steps.merge.outputs.result == 'created'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+        run: |
+          set -euo pipefail
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}"
+
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Back-merge PR for ${BRANCH} already exists."
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base next --head "$BRANCH" \
+              --title "chore: back-merge ${TAG} into next" \
+              --body "Brings the ${TAG} version bump and changelog from main into next. Merge with a merge commit, not a squash, so the branches share history."
+          fi
 
