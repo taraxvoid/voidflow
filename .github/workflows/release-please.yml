@@ -227,3 +227,126 @@ jobs:
           cp scripts/mirror-readme.md README.md
           npm publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}"
 
+  # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
+  # release. Prereleases and maintenance releases never move it. Immutable
+  # vX.Y.Z tags are untouched.
+  floating-tag:
+    name: Move floating major tag
+    needs: [channel, release-please]
+    if: >-
+      needs.release-please.outputs.release_created == 'true' &&
+      needs.channel.outputs.kind == 'stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Point v<major> at the release commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MAJOR: ${{ needs.release-please.outputs.major }}
+          SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          set -euo pipefail
+          TAG="v${MAJOR}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" -f sha="$SHA" -F force=true
+          else
+            # First stable release on this major: the tag does not exist yet.
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="$SHA"
+          fi
+          echo "${TAG} -> ${SHA}"
+
+  # Stable releases only: bring the release's version bump and changelog from
+  # main into next so the branches do not drift. Only version bookkeeping files
+  # may conflict, and those resolve to main's side; anything else fails the job
+  # loudly so a person resolves it (see RELEASING.md). The PR must be merged
+  # with a merge commit, not squashed.
+  back-merge:
+    name: Open main to next back-merge PR
+    needs: [channel, release-please]
+    if: >-
+      needs.release-please.outputs.release_created == 'true' &&
+      needs.channel.outputs.kind == 'stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Merge main into a back-merge branch and open the PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          BRANCH="backmerge/${TAG}"
+
+          if ! git fetch "$REMOTE" next:refs/remotes/origin/next 2>/dev/null; then
+            echo "No next branch yet, nothing to back-merge."
+            exit 0
+          fi
+          git fetch "$REMOTE" main:refs/remotes/origin/main
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH" origin/next
+
+          if ! git merge --no-ff --no-commit origin/main; then
+            while IFS= read -r f; do
+              case "$f" in
+                package.json | jsr.json | CHANGELOG.md | .release-please/main-manifest.json)
+                  git checkout --theirs -- "$f"
+                  git add -- "$f"
+                  ;;
+                *)
+                  echo "::error::Unexpected merge conflict in ${f}. Merge main into next by hand (see RELEASING.md)."
+                  exit 1
+                  ;;
+              esac
+            done < <(git diff --name-only --diff-filter=U)
+          fi
+
+          # next's prerelease numbering restarts from the stable version just released.
+          jq --arg v "$VERSION" '.["."] = $v' .release-please/next-manifest.json > "$RUNNER_TEMP/next-manifest.json"
+          cp "$RUNNER_TEMP/next-manifest.json" .release-please/next-manifest.json
+          git add .release-please/next-manifest.json
+
+          if [ -z "$(git status --porcelain)" ] && ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+            echo "next already contains ${TAG}, nothing to back-merge."
+            exit 0
+          fi
+
+          git commit -m "chore: back-merge ${TAG} into next"
+          git push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}"
+
+          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Back-merge PR for ${BRANCH} already exists."
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base next --head "$BRANCH" \
+              --title "chore: back-merge ${TAG} into next" \
+              --body "Brings the ${TAG} version bump and changelog from main into next. Merge with a merge commit, not a squash, so the branches share history."
+          fi
+
