@@ -160,6 +160,29 @@ Options: `ciPort` (required in CI), `runner` (default `bun`, e.g. `pnpm`),
 `timeout` (default 30000), `projects` (default Pixel 7 and Desktop Chrome),
 `testDir` (default `./test/e2e`). Requires `@playwright/test` in the site.
 
+## Dependency updates (Renovate)
+
+[`default.json`](default.json) is the shared Renovate preset. Sites add a
+`renovate.json`:
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>taraxvoid/voidflow"]
+}
+```
+
+It builds on `config:best-practices` (which pins GitHub Action digests), holds
+updates for 3 days like `minimumReleaseAge` in `bunfig.toml` (except our own
+package and security alerts), uses `chore(deps):` Conventional Commits, groups
+actions, astro, biome and playwright, and runs on Monday mornings. Custom
+managers keep three things current that Dependabot cannot see: the
+`@taraxvoid/voidflow@x.y.z` pin inside `package.json` scripts, a lefthook
+remote's `ref` tag, and tool versions in a `justfile` (annotate the line above
+with `# renovate: datasource=... depName=...`). Requires the Renovate GitHub App
+on the repo.
+
+||||||| 4041a59
 ## Git hooks (lefthook)
 
 [`lefthook/site.yml`](lefthook/site.yml) is the shared hook set for the site
