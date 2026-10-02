@@ -170,7 +170,7 @@ jobs:
         id: scripts
         # Fail open: a check whose script the caller doesn't define is skipped, not failed.
         run: |
-          for name in lint check build test:unit check:licenses test:e2e:full test:e2e:all test:e2e:a11y test:e2e:lighthouse; do
+          for name in lint lint:migrate:check check build test:unit check:licenses test:e2e:full test:e2e:all test:e2e:a11y test:e2e:lighthouse; do
             if jq -e --arg n "$name" '.scripts // {} | has($n)' package.json >/dev/null; then
               echo "${name//:/_}=true" >> "$GITHUB_OUTPUT"
             else
@@ -185,6 +185,10 @@ jobs:
             | bash -s -- 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
         shell: bash
+
+      - name: Check biome.json is migrated
+        if: steps.scripts.outputs.lint_migrate_check == 'true'
+        run: '"$PM" run lint:migrate:check'
 
       - name: Lint Code
         if: steps.scripts.outputs.lint == 'true'
