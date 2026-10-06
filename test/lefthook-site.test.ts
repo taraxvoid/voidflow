@@ -28,7 +28,19 @@ describe('lefthook/site.yml', () => {
     test('pre-commit unit step prefers test:unit:precommit when a site defines it', async () => {
         const text = await Bun.file(config).text()
         expect(text).toContain('grep -q \'"test:unit:precommit"\' package.json')
-        expect(text).toContain('bun run test:unit:precommit')
-        expect(text).toContain('bun run --if-present test:unit')
+        expect(text).toContain('{pm} run test:unit:precommit')
+        expect(text).toContain('{pm} run --if-present test:unit')
+    })
+
+    test('picks the package manager from the lockfile instead of hardcoding bun', async () => {
+        const text = await Bun.file(config).text()
+        expect(text).toContain('pnpm-lock.yaml ]; then echo pnpm; else echo bun')
+        expect(text).not.toMatch(/\bbun run\b/)
+    })
+
+    test('audit step only runs when the site defines an audit script', async () => {
+        const text = await Bun.file(config).text()
+        expect(text).toContain('grep -q \'"audit"\' package.json')
+        expect(text).not.toContain('--if-present audit')
     })
 })
