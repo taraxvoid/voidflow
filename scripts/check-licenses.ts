@@ -2,7 +2,7 @@
 /**
  * Shared license policy check for the Astro/bun site stack: fail on GPL kudzu.
  *
- * Runs `license-checker` against the current working directory (the caller's
+ * Runs `license-checker-rseidelsohn` against the current working directory (the caller's
  * repo root) and exits non-zero if any installed package carries a blocked
  * license.
  *
@@ -43,13 +43,13 @@ export const FAIL_ON = [
 
 const result = spawnSync(
     'bunx',
-    ['license-checker', '--summary', '--failOn', FAIL_ON],
+    ['license-checker-rseidelsohn', '--summary', '--failOn', FAIL_ON],
     { cwd: process.cwd(), stdio: 'inherit' },
 )
 
 if (result.error) {
     console.error(
-        `\ncheck:licenses failed - could not run license-checker: ${result.error.message}`,
+        `\ncheck:licenses failed - could not run license-checker-rseidelsohn: ${result.error.message}`,
     )
     process.exit(1)
 }
