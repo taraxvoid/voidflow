@@ -1,0 +1,42 @@
+name: Bun install
+description: >
+  Runs `bun install --frozen-lockfile`. By default it leaves out the
+  install-time security scanner set in bunfig.toml (`[install.security]
+  scanner`, e.g. Socket's), which calls a third-party API on every install and
+  can fail a build for reasons outside the repo. The scanner still runs on
+  local installs; set socket-scanner to 'true' to run it in CI as well.
+
+inputs:
+  socket-scanner:
+    description: >
+      'true' runs the bunfig.toml security scanner during the CI install.
+      Default 'false' installs with a copy of bunfig.toml minus the scanner
+      (every other setting, e.g. minimumReleaseAge, still applies).
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      env:
+        SOCKET_SCANNER: ${{ inputs.socket-scanner }}
+      run: |
+        # Lines that set the scanner: `scanner = ...` under [install.security],
+        # or the dotted `security.scanner` / `install.security.scanner` forms.
+        scanner_re='^[[:space:]]*((install\.)?security\.)?scanner[[:space:]]*='
+        if [[ "$SOCKET_SCANNER" != "true" ]] && [[ -f bunfig.toml ]] && grep -v '^[[:space:]]*#' bunfig.toml | grep -q 'scanner'; then
+          config="$RUNNER_TEMP/bunfig.toml"
+          grep -Ev "$scanner_re" bunfig.toml > "$config" || true
+          # Fail closed if the scanner is set some other way (e.g. an inline
+          # table) rather than silently running it, or silently not.
+          if grep -v '^[[:space:]]*#' "$config" | grep -q 'scanner'; then
+            echo "::error file=bunfig.toml::Could not remove the security scanner from bunfig.toml; set it as 'scanner = \"...\"' under [install.security]." >&2
+            exit 1
+          fi
+          echo "::notice file=bunfig.toml::Security scanner skipped in CI. Pass socket-scanner: true to run it here; it still runs on local installs."
+          bun install --frozen-lockfile --config="$config"
+        else
+          bun install --frozen-lockfile
+        fi

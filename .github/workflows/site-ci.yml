@@ -58,6 +58,15 @@ on:
           (inputs are visible in logs).
         type: string
         default: '{}'
+      socket-scanner:
+        description: >
+          Run the bunfig.toml install-time security scanner (`[install.security]
+          scanner`, e.g. Socket's) during the CI install. Defaults to false: it
+          calls a third-party API on every install and can fail a build for
+          reasons outside the repo. It still runs on local installs. Bun only;
+          ignored for pnpm.
+        type: boolean
+        default: false
     secrets:
       GITLEAKS_LICENSE:
         description: >
@@ -187,8 +196,37 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-
 
-      - name: Install NPM Dependencies
-        run: '"$PM" install --frozen-lockfile'
+      # Same script as actions/bun-install (a test keeps them identical).
+      # Inlined because a reusable workflow can't reach `./actions/...` in its
+      # own repo: checkout gives it the caller's tree, not voidflow's.
+      - name: Install NPM Dependencies (bun)
+        id: install
+        if: inputs.package-manager == 'bun'
+        shell: bash
+        env:
+          SOCKET_SCANNER: ${{ inputs.socket-scanner }}
+        run: |
+          # Lines that set the scanner: `scanner = ...` under [install.security],
+          # or the dotted `security.scanner` / `install.security.scanner` forms.
+          scanner_re='^[[:space:]]*((install\.)?security\.)?scanner[[:space:]]*='
+          if [[ "$SOCKET_SCANNER" != "true" ]] && [[ -f bunfig.toml ]] && grep -v '^[[:space:]]*#' bunfig.toml | grep -q 'scanner'; then
+            config="$RUNNER_TEMP/bunfig.toml"
+            grep -Ev "$scanner_re" bunfig.toml > "$config" || true
+            # Fail closed if the scanner is set some other way (e.g. an inline
+            # table) rather than silently running it, or silently not.
+            if grep -v '^[[:space:]]*#' "$config" | grep -q 'scanner'; then
+              echo "::error file=bunfig.toml::Could not remove the security scanner from bunfig.toml; set it as 'scanner = \"...\"' under [install.security]." >&2
+              exit 1
+            fi
+            echo "::notice file=bunfig.toml::Security scanner skipped in CI. Pass socket-scanner: true to run it here; it still runs on local installs."
+            bun install --frozen-lockfile --config="$config"
+          else
+            bun install --frozen-lockfile
+          fi
+
+      - name: Install NPM Dependencies (pnpm)
+        if: inputs.package-manager == 'pnpm'
+        run: pnpm install --frozen-lockfile
 
       - name: Detect package scripts
         id: scripts
