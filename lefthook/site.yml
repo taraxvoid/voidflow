@@ -1,6 +1,7 @@
-# Shared git hooks for the Astro/bun site stack. Sites pull this in as a
-# lefthook remote and call their own package.json scripts, so a script a site
-# does not define is skipped (`bun run --if-present`).
+# Shared git hooks for the Astro site stack (bun, or pnpm when the repo has a
+# pnpm-lock.yaml). Sites pull this in as a lefthook remote and call their own
+# package.json scripts, so a script a site does not define is skipped
+# (`<pm> run --if-present`).
 #
 #   # lefthook.yml in the site
 #   remotes:
@@ -14,6 +15,10 @@
 # one defined here. Differences go through package.json scripts instead, e.g.
 # `test:unit:precommit` replaces `test:unit` for the pre-commit unit step.
 
+templates:
+  # Package manager: pnpm when the repo is a pnpm project, bun otherwise.
+  pm: "$(if [ -f pnpm-lock.yaml ]; then echo pnpm; else echo bun; fi)"
+
 pre-commit:
   skip: [merge, rebase]
   commands:
@@ -22,39 +27,45 @@ pre-commit:
       run: |
         if [ ! -d node_modules ]; then
           echo "pre-commit: 'node_modules' is missing, dependencies aren't installed."
-          echo "            Run 'bun install' before committing, then commit again."
+          echo "            Run '{pm} install' before committing, then commit again."
           exit 1
         fi
     format:
       priority: 2
-      run: bun run --if-present format
+      run: "{pm} run --if-present format"
       stage_fixed: true
     lint-actions:
       priority: 3
-      run: bun run --if-present lint:actions
+      run: "{pm} run --if-present lint:actions"
     typecheck:
       priority: 3
-      run: bun run --if-present check
+      run: "{pm} run --if-present check"
     unit:
       priority: 3
       # A site that can't run its whole suite pre-commit (e.g. tests that need
       # a built dist/) defines `test:unit:precommit`; otherwise test:unit runs.
       run: |
         if grep -q '"test:unit:precommit"' package.json; then
-          bun run test:unit:precommit
+          {pm} run test:unit:precommit
         else
-          bun run --if-present test:unit
+          {pm} run --if-present test:unit
         fi
     licenses:
       priority: 3
       glob: "{package.json,bun.lock,pnpm-lock.yaml}"
-      run: bun run --if-present check:licenses
+      run: "{pm} run --if-present check:licenses"
     audit:
       # Local only: hits a remote vulnerability database and can hang offline,
       # so it runs when dependencies changed and fails closed.
       priority: 3
       glob: "{package.json,bun.lock,pnpm-lock.yaml}"
-      run: bun run --if-present audit
+      # Checked by hand: under bun, `--if-present` falls through to
+      # the system `audit` binary (macOS /usr/sbin/audit) when the site has no
+      # audit script, and that exits non-zero.
+      run: |
+        if grep -q '"audit"' package.json; then
+          {pm} run audit
+        fi
 
 commit-msg:
   commands:
@@ -109,8 +120,8 @@ pre-push:
 
         if [ ! -d node_modules ]; then
           echo "pre-push: 'node_modules' is missing, dependencies aren't installed."
-          echo "          Run 'bun install' before pushing, then push again."
+          echo "          Run '{pm} install' before pushing, then push again."
           exit 1
         fi
 
-        bun run --if-present test:push
+        {pm} run --if-present test:push

@@ -195,7 +195,8 @@ on the repo.
 
 [`lefthook/site.yml`](lefthook/site.yml) is the shared hook set for the site
 stack, consumed as a lefthook remote. It calls the site's own `package.json`
-scripts (`bun run --if-present`, so a missing script is skipped):
+scripts (`<pm> run --if-present`, so a missing script is skipped; `<pm>` is pnpm
+when the repo has a `pnpm-lock.yaml`, bun otherwise):
 
 - `pre-commit`: dependency guard, `format` (formatted files are re-staged),
   `lint:actions`, `check`, `test:unit`, and `check:licenses` / `audit` when the
