@@ -5,7 +5,7 @@
 #   # lefthook.yml in the site
 #   remotes:
 #     - git_url: https://github.com/taraxvoid/voidflow
-#       ref: <commit sha>        # pin; bump deliberately
+#       ref: <release tag>       # a tag or branch (not a SHA); bump deliberately
 #       configs:
 #         - lefthook/site.yml
 #
