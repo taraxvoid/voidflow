@@ -107,10 +107,11 @@ static directory on a free port and runs
 [Unlighthouse](https://unlighthouse.dev/) against it, reusing Playwright's
 Chromium. It exits non-zero if a category budget in the site's config fails.
 
-In the site's `package.json` (pin the tag):
+Add `@taraxvoid/voidflow` as a devDependency and call the bin from the site's
+`package.json`:
 
 ```json
-"test:e2e:lighthouse": "bun run build && bunx --package @taraxvoid/voidflow@0.8.1 unlighthouse-runner --dir dist"
+"test:e2e:lighthouse": "bun run build && unlighthouse-runner --dir dist"
 ```
 
 Options: `--dir` (default `dist`, use `dist/client` for Cloudflare adapter
@@ -126,11 +127,19 @@ change. Sites implement that script with the shared check, which runs
 `license-checker` in the site's repo root and fails on GPL, AGPL, SSPL and
 similar copyleft licenses (LGPL is allowed).
 
-In the site's `package.json` (pin the tag):
+With `@taraxvoid/voidflow` as a devDependency, call the bin from the site's
+`package.json`:
 
 ```json
-"check:licenses": "bunx --package @taraxvoid/voidflow@<version> check-licenses"
+"check:licenses": "check-licenses"
 ```
+
+Don't use `bunx --package @taraxvoid/voidflow@<version> ...` for these. It
+duplicates the version pin outside the lockfile and Renovate, and `bunx` reads
+the global `~/.bunfig.toml` rather than the site's, so a global
+`minimumReleaseAge` that doesn't exclude `@taraxvoid/voidflow` blocks it
+locally (including in the pre-commit hook) for 3 days after every release.
+The devDependency's bins are installed under the site's own `bunfig.toml`.
 
 ### Playwright preview config
 
