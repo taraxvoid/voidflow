@@ -31,6 +31,8 @@ async function install(script: string, opts: { bunfig?: string; scanner: boolean
     writeFileSync(
         join(bin, 'bun'),
         `#!/usr/bin/env bash
+# the script's own \`bun -e\` (the TOML check) runs on the real bun; --config=/dev/null keeps the repo bunfig.toml out of it
+if [[ " $* " == *" -e "* ]]; then exec ${JSON.stringify(process.execPath)} "$@"; fi
 printf '%s\\n' "$@" > ${JSON.stringify(log)}
 for a in "$@"; do [[ "$a" == --config=* ]] && cp "\${a#--config=}" ${JSON.stringify(log + '.config')}; done
 exit 0
@@ -90,8 +92,7 @@ describe.each([
         expect(r.args?.[0]).toBe('install')
         expect(r.args).toContain('--frozen-lockfile')
         expect(r.args?.some((a) => a.startsWith('--config='))).toBe(true)
-        expect(r.config).not.toContain('scanner')
-        expect(r.config).toContain('minimumReleaseAge = 259200')
+        expect(Bun.TOML.parse(r.config!)).toEqual({ install: { minimumReleaseAge: 259200, security: {} } })
         expect(r.stdout).toContain('::notice')
         // the checkout's bunfig.toml is left untouched
         expect(r.bunfigAfter).toBe(socketBunfig)
@@ -119,17 +120,37 @@ describe.each([
     ])('off strips the dotted form: %s', async (_label, bunfig) => {
         const r = await install(script, { bunfig, scanner: false })
         expect(r.code).toBe(0)
-        expect(r.config).not.toContain('scanner')
+        expect(Bun.TOML.parse(r.config!).install?.security?.scanner).toBeUndefined()
     })
 
     test.each([
         ['an inline table', '[install]\nsecurity = { scanner = "x" }\n'],
-        ['a strippable line plus an inline one', '[install.security]\nscanner = "x"\n\n[other]\nfoo = { scanner = "y" }\n'],
-    ])('off fails closed on a scanner it cannot strip: %s', async (_label, bunfig) => {
+        ['a `scanner` key in another table too', '[install.security]\nscanner = "x"\n\n[other]\nscanner = "y"\n'],
+        ['invalid TOML', '[install.security\nscanner = "x"\n'],
+    ])('off fails closed when it cannot remove the scanner cleanly: %s', async (_label, bunfig) => {
         const r = await install(script, { bunfig, scanner: false })
         expect(r.code).toBe(1)
-        expect(r.stderr).toContain('::error')
+        expect(r.stdout).toContain('::error')
         expect(r.args).toBeNull()
+    })
+
+    test('off only touches the scanner key, not other values that mention "scanner"', async () => {
+        const bunfig = `[install]
+minimumReleaseAge = 259200
+minimumReleaseAgeExcludes = ["foo-scanner"]
+
+[install.security]
+scanner = "@socketsecurity/bun-security-scanner"
+
+[other]
+tool = { scanner = "y" }
+`
+        const r = await install(script, { bunfig, scanner: false })
+        expect(r.code).toBe(0)
+        expect(Bun.TOML.parse(r.config!)).toEqual({
+            install: { minimumReleaseAge: 259200, minimumReleaseAgeExcludes: ['foo-scanner'], security: {} },
+            other: { tool: { scanner: 'y' } },
+        })
     })
 })
 

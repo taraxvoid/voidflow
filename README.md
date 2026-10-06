@@ -115,9 +115,11 @@ the composite action:
   # with: { socket-scanner: 'true' }
 ```
 
-The scanner must be set as a plain `scanner = "..."` line (or the dotted
-`security.scanner` form); any other form fails the install rather than run or
-skip it silently. pnpm sites are unaffected.
+The copy is checked by parsing both files: it must equal your `bunfig.toml`
+with only `install.security.scanner` removed. Set the scanner as a plain
+`scanner = "..."` line (or the dotted `security.scanner` form); if it can't be
+removed cleanly, e.g. an inline table, the install fails rather than run or
+skip the scanner silently. pnpm sites are unaffected.
 
 ## Workflow Types
 
