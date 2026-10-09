@@ -124,8 +124,10 @@ and add `.unlighthouse/` to the site's `.gitignore`.
 
 `site-ci.yml` runs `bun run check:licenses` when the lockfile or `scripts/`
 change. Sites implement that script with the shared check, which runs
-`license-checker` in the site's repo root and fails on GPL, AGPL, SSPL and
-similar copyleft licenses (LGPL is allowed).
+`license-checker-rseidelsohn` in the site's repo root and fails on GPL, AGPL,
+SSPL and similar copyleft licenses (LGPL is allowed). The site needs
+`license-checker-rseidelsohn` as a devDependency so the bin resolves from its
+own `node_modules`.
 
 With `@taraxvoid/voidflow` as a devDependency, call the bin from the site's
 `package.json`:
