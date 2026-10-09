@@ -1,0 +1,64 @@
+name: Bun install
+description: >
+  Runs `bun install --frozen-lockfile`. By default it leaves out the
+  install-time security scanner set in bunfig.toml (`[install.security]
+  scanner`, e.g. Socket's), which calls a third-party API on every install and
+  can fail a build for reasons outside the repo. The scanner still runs on
+  local installs; set socket-scanner to 'true' to run it in CI as well.
+
+inputs:
+  socket-scanner:
+    description: >
+      'true' runs the bunfig.toml security scanner during the CI install.
+      Default 'false' installs with a copy of bunfig.toml minus the scanner
+      (every other setting, e.g. minimumReleaseAge, still applies).
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      env:
+        SOCKET_SCANNER: ${{ inputs.socket-scanner }}
+      run: |
+        # Removes the scanner line as text, then checks the result with a real
+        # TOML parse: it must equal the original minus install.security.scanner.
+        # Anything that can't be removed that way fails the install instead of
+        # running the scanner, or skipping it, silently.
+        # shellcheck disable=SC2016 # JS source; the ${...} in it is for bun, not bash
+        strip_scanner='
+        const src = await Bun.file("bunfig.toml").text()
+        const parse = (text) => { try { return Bun.TOML.parse(text) } catch (e) { console.log(`::error file=bunfig.toml::Could not parse bunfig.toml: ${e.message}`); process.exit(1) } }
+        const original = parse(src)
+        if (original.install?.security?.scanner === undefined) process.exit(10)
+        const key = /^\s*((install\.)?security\.)?("scanner"|scanner)\s*=/
+        const stripped = src.split("\n").filter((line) => !key.test(line)).join("\n")
+        // empty tables left behind by the removal count as absent
+        const prune = (cfg) => {
+          delete cfg.install?.security?.scanner
+          if (cfg.install?.security && Object.keys(cfg.install.security).length === 0) delete cfg.install.security
+          if (cfg.install && Object.keys(cfg.install).length === 0) delete cfg.install
+          return cfg
+        }
+        const after = parse(stripped)
+        if (after.install?.security?.scanner !== undefined || !Bun.deepEquals(prune(after), prune(structuredClone(original)))) {
+          console.log("::error file=bunfig.toml::Could not remove the security scanner from bunfig.toml cleanly; set it as `scanner = \"...\"` under [install.security].")
+          process.exit(1)
+        }
+        await Bun.write(process.env.BUNFIG_OUT, stripped)
+        '
+        if [[ "$SOCKET_SCANNER" != "true" ]] && [[ -f bunfig.toml ]]; then
+          config="$RUNNER_TEMP/bunfig.toml"
+          rc=0
+          BUNFIG_OUT="$config" bun --config=/dev/null -e "$strip_scanner" || rc=$?
+          if [[ $rc -eq 0 ]]; then
+            echo "::notice file=bunfig.toml::Security scanner skipped in CI. Pass socket-scanner: true to run it here; it still runs on local installs."
+            bun install --frozen-lockfile --config="$config"
+            exit
+          elif [[ $rc -ne 10 ]]; then
+            exit "$rc"
+          fi
+        fi
+        bun install --frozen-lockfile

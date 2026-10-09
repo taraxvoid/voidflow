@@ -87,6 +87,40 @@ or `engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
 follows the package manager. `build-env` is a JSON object, visible in logs, so
 no secrets.
 
+### Install-time security scanner (Socket)
+
+A bun site can set a security scanner in `bunfig.toml`, which checks every
+package on install:
+
+```toml
+[install.security]
+scanner = "@socketsecurity/bun-security-scanner"
+```
+
+CI skips it by default. The scanner calls a third-party API on every install,
+so a network blip or an API change could fail a build that otherwise passes,
+and rerunning the same commit could give a different result. `site-ci.yml`
+installs with a copy of `bunfig.toml` minus the scanner line (every other
+setting, e.g. `minimumReleaseAge`, still applies) and leaves a notice in the
+run. Local `bun install` reads `bunfig.toml` as is, so the scanner still runs
+on your machine.
+
+To run it in CI too, pass `socket-scanner: true` to `site-ci.yml`. A workflow
+that installs on its own (outside `site-ci.yml`) gets the same default from
+the composite action:
+
+```yaml
+- uses: oven-sh/setup-bun@<sha> # <version>
+- uses: taraxvoid/voidflow/actions/bun-install@<sha> # <version>
+  # with: { socket-scanner: 'true' }
+```
+
+The copy is checked by parsing both files: it must equal your `bunfig.toml`
+with only `install.security.scanner` removed. Set the scanner as a plain
+`scanner = "..."` line (or the dotted `security.scanner` form); if it can't be
+removed cleanly, e.g. an inline table, the install fails rather than run or
+skip the scanner silently. pnpm sites are unaffected.
+
 ## Workflow Types
 
 ### Validation / Checks
