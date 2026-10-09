@@ -224,8 +224,17 @@ scripts: define `test:unit:precommit` (for example excluding tests that need a
 built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
 
 Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
-set `"prepare": "lefthook install"` so `bun install` wires the hooks. `ref`
-cannot be a commit SHA; pin a release tag.
+set the `prepare` script so `bun install` wires the hooks, but make it tolerate a
+missing binary:
+
+```json
+"prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'"
+```
+
+A bare `lefthook install` fails the whole install step (exit 127) on any runner
+without the `lefthook` binary, which includes GitHub-hosted and self-hosted CI
+images, and CI never runs git hooks anyway. `ref` cannot be a commit SHA; pin a
+release tag.
 
 ## Branch rulesets as code
 

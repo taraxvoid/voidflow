@@ -15,9 +15,7 @@
     "schedule": ["before 9am on the first day of the month"]
   },
   "vulnerabilityAlerts": {
-    "minimumReleaseAge": null,
-    "schedule": ["at any time"],
-    "labels": ["security"]
+    "enabled": false
   },
   "packageRules": [
     {
