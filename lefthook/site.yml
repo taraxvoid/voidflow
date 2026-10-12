@@ -20,10 +20,6 @@ templates:
   # Package manager: pnpm when the repo is a pnpm project, bun otherwise.
   pm: "$(if [ -f pnpm-lock.yaml ]; then echo pnpm; else echo bun; fi)"
 
-templates:
-  # Package manager: pnpm when the repo is a pnpm project, bun otherwise.
-  pm: "$(if [ -f pnpm-lock.yaml ]; then echo pnpm; else echo bun; fi)"
-
 pre-commit:
   skip: [merge, rebase]
   commands:

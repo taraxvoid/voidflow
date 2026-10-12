@@ -287,11 +287,6 @@ the site's `lefthook.yml`: it applies to the merged hook, so every step,
 including the shared ones, starts at once and their `priority` order is ignored
 (tests that share a database or build output can then time out).
 
-Hook-level options merge too. Don't set `parallel: true` under `pre-commit:` in
-the site's `lefthook.yml`: it applies to the merged hook, so every step,
-including the shared ones, starts at once and their `priority` order is ignored
-(tests that share a database or build output can then time out).
-
 Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
 set the `prepare` script so `bun install` wires the hooks, but make it tolerate a
 missing binary:
