@@ -45,6 +45,14 @@ gitGraph
    never squash: a squash leaves main's commits out of next's history, so the
    following back-merge conflicts on the same lines again.
 
+Check the stable release PR's version before merging it. release-please walks
+`main` newest-first by commit date and stops at the last release commit, so a
+`feat` on `next` dated before the latest stable release (e.g. a hotfix released
+while the feature waited on `next`) is never counted and the PR proposes a
+patch bump. Fix it with a squash-merged PR to `main` whose body ends with a
+`Release-As: X.Y.Z` footer (the squash commit message is the PR body), then
+add the missed entries to the release PR's `CHANGELOG.md` by hand.
+
 ## Hotfix
 
 Fix on a branch off `main`, PR to `main`, squash-merge, release as above. The
