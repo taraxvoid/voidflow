@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { REPOS, build, desired, diff, normalise } from '../rulesets/index.ts'
+import { REPOS, build, desired, diff, normalise, tool } from '../rulesets/index.ts'
 
 const statusChecks = (r: ReturnType<typeof build>) =>
     (
@@ -135,5 +135,30 @@ describe('voidflow release channels', () => {
 
     test('voidflow manages main, prerelease and maintenance', () => {
         expect(cfg.tiers).toEqual(['main', 'prerelease', 'maintenance'])
+    })
+})
+
+describe('tool()', () => {
+    const cfg = tool()
+
+    test('is a main-only repo requiring tool-ci and CODEOWNERS', () => {
+        expect(cfg).toEqual({
+            tiers: ['main'],
+            netlify: false,
+            checks: ['validate / Validate'],
+            codeowners: true,
+            linearHistory: true,
+            bypass: {},
+            aka: {},
+            retire: [],
+        })
+    })
+
+    test('main ruleset: no Netlify check, code owner review, squash only', () => {
+        const r = build('main', cfg)
+        expect(statusChecks(r)).toEqual(['validate / Validate'])
+        const pr = r.rules.find((x) => x.type === 'pull_request')
+        expect(pr?.parameters?.require_code_owner_review).toBe(true)
+        expect(pr?.parameters?.allowed_merge_methods).toEqual(['squash'])
     })
 })

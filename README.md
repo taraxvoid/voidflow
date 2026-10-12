@@ -356,7 +356,10 @@ release tag.
 Branch protection for the fleet lives in [`rulesets/index.ts`](rulesets/index.ts):
 one canonical `main` / `next` / `live` definition (plus `prerelease` and `maintenance`
 tiers for repos with release channels) and a small per-repo table
-(Netlify or not, check names, CODEOWNERS, extra bypass actors). Hand-edited
+(Netlify or not, check names, CODEOWNERS, extra bypass actors). Sites use
+`site()` and tools use `tool()` (main only, no Netlify, requires
+`validate / Validate` from `tool-ci.yml`). Private repos are left out: on a
+plan without rulesets for private repos, the API returns 403. Hand-edited
 rulesets drift, and drift is how a `next` ruleset ends up requiring a check
 name that no workflow reports any more.
 
