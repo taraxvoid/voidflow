@@ -141,7 +141,12 @@ jobs:
       # channel: its version fits the channel (a -next tag on main, a stable
       # tag on next, or another line's tag on release/N.x are rejected) and
       # the tagged commit is on this branch (so a maintenance tag cannot be
-      # republished from main, or the reverse).
+      # republished from main, or the reverse). Compare against the branch tip
+      # (origin/<branch>, fetched by the checkout above), not HEAD: release-please
+      # tags the branch as it is when it runs, so if the release PR merges while
+      # an earlier push's run is in flight, that run tags a commit newer than its
+      # own checkout. Checking HEAD rejected it, and the release PR's own run then
+      # saw the release as already created and skipped publishing (v0.12.2).
       - name: Check tag belongs to this channel
         env:
           BRANCH: ${{ github.ref_name }}
@@ -149,7 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           bun scripts/release-channel.ts "$BRANCH" "${TAG#v}" > /dev/null
-          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" HEAD; then
+          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" "refs/remotes/origin/${BRANCH}"; then
             echo "::error::Tag ${TAG} is not on branch ${BRANCH}; run this workflow from the branch that owns the tag." >&2
             exit 1
           fi

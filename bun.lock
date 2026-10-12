@@ -14,6 +14,9 @@
       "peerDependencies": {
         "@playwright/test": ">=1.40",
       },
+      "optionalPeers": [
+        "@playwright/test",
+      ],
     },
   },
   "packages": {
