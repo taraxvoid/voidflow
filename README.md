@@ -297,9 +297,18 @@ the repo's `lefthook.yml`: it applies to the merged hook, so every step,
 including the shared ones, starts at once and their `priority` order is ignored
 (tests that share a database or build output can then time out).
 
-Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
-set the `prepare` script so `bun install` wires the hooks, but make it tolerate a
-missing binary:
+Install the binaries through mise. A starter `mise.toml` for a repo using
+these hooks and voidflow CI:
+
+```toml
+[tools]
+lefthook = "2.2.1"
+gitleaks = "8.30.1"
+actionlint = "1.7.12"
+```
+
+Renovate bumps `mise.toml` natively. Set the `prepare` script so `bun install`
+wires the hooks, but make it tolerate a missing binary:
 
 ```json
 "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'"
@@ -415,8 +424,8 @@ This repo validates its own workflows and composite actions (`.github/workflows/
 ### Local dev setup
 
 ```sh
-brew install just lefthook actionlint shellcheck bun act uv
-lefthook install
+mise install   # tools pinned in mise.toml
+bun install    # its prepare script runs `lefthook install`
 ```
 
 - `just validate`: run everything CI runs, locally
