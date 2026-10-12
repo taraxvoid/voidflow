@@ -40,7 +40,10 @@ gitGraph
 3. release-please opens or updates the stable release PR on `main`. Merging it
    publishes under `latest`, moves the floating `v0` tag, and opens a
    `main` to `next` back-merge PR.
-4. Merge the back-merge PR with a merge commit too.
+4. The back-merge PR auto-merges with a merge commit once checks pass. If you
+   ever merge one by hand (e.g. after resolving conflicts), use a merge commit,
+   never squash: a squash leaves main's commits out of next's history, so the
+   following back-merge conflicts on the same lines again.
 
 ## Hotfix
 

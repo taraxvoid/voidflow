@@ -286,8 +286,8 @@ jobs:
   # Stable releases only: bring the release's version bump and changelog from
   # main into next so the branches do not drift. Only version bookkeeping files
   # may conflict and scripts/back-merge.ts resolves those; anything else fails
-  # the job loudly so a person resolves it (see RELEASING.md). The PR must be
-  # merged with a merge commit, not squashed.
+  # the job loudly so a person resolves it (see RELEASING.md). The PR is set to
+  # auto-merge with a merge commit, never a squash, so the branches share history.
   back-merge:
     name: Open main to next back-merge PR
     needs: [channel, release-please]
@@ -347,6 +347,11 @@ jobs:
           else
             gh pr create --repo "$GITHUB_REPOSITORY" --base next --head "$BRANCH" \
               --title "chore: back-merge ${TAG} into next" \
-              --body "Brings the ${TAG} version bump and changelog from main into next. Merge with a merge commit, not a squash, so the branches share history."
+              --body "Brings the ${TAG} version bump and changelog from main into next. Auto-merges with a merge commit once checks pass; do not squash it, or main's commits never become ancestors of next and the next back-merge conflicts on the same lines again."
           fi
+
+          # The next ruleset allows squash for feature PRs, so a person clicking
+          # merge here would default to squash (v0.12.0 to v0.12.4 all were).
+          # Auto-merge pins the method to a real merge commit.
+          gh pr merge "$BRANCH" --repo "$GITHUB_REPOSITORY" --auto --merge
 
