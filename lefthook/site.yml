@@ -13,7 +13,8 @@
 # Lefthook merges lefthook.yml < remotes < lefthook-local.yml, so a site's own
 # lefthook.yml can ADD commands (e.g. image compression) but cannot override
 # one defined here. Differences go through package.json scripts instead, e.g.
-# `test:unit:precommit` replaces `test:unit` for the pre-commit unit step.
+# `test:unit:precommit` replaces `test:unit` for the pre-commit unit step, and
+# `check:precommit` replaces `check` for the typecheck step.
 
 templates:
   # Package manager: pnpm when the repo is a pnpm project, bun otherwise.
@@ -39,7 +40,15 @@ pre-commit:
       run: "{pm} run --if-present lint:actions"
     typecheck:
       priority: 3
-      run: "{pm} run --if-present check"
+      # A site that can check less than everything pre-commit (e.g. only the
+      # workspace packages a commit touches) defines `check:precommit`;
+      # otherwise check runs. CI keeps calling `check` directly.
+      run: |
+        if grep -q '"check:precommit"' package.json; then
+          {pm} run check:precommit
+        else
+          {pm} run --if-present check
+        fi
     unit:
       priority: 3
       # A site that can't run its whole suite pre-commit (e.g. tests that need

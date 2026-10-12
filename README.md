@@ -270,6 +270,17 @@ site's own `lefthook.yml` can add commands (for example image compression) but
 cannot override ones defined here. Differences go through `package.json`
 scripts: define `test:unit:precommit` (for example excluding tests that need a
 built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
+Likewise, define `check:precommit` and the typecheck step runs it instead of
+`check`. CI keeps calling the full scripts, so these only narrow what runs
+locally. Common uses:
+
+- bun: `"test:unit:precommit": "bun test --changed"` runs only the test files
+  whose imports reach an uncommitted change.
+- pnpm workspace: `pnpm -r --filter '...[HEAD]' run <script>` runs only the
+  changed packages and their dependents. Fall back to the full run when a
+  root-level file (lockfile, shared tsconfig) changed, since those don't
+  belong to any package. If the root `package.json` defines the same script
+  as a recursive run, add `--filter '!{.}'` so it doesn't recurse.
 
 Hook-level options merge too. Don't set `parallel: true` under `pre-commit:` in
 the site's `lefthook.yml`: it applies to the merged hook, so every step,
@@ -360,7 +371,7 @@ Semver, released with [release-please](https://github.com/googleapis/release-ple
 | maintenance | `release/N.x` | `0.9.4` | `release-N.x` |
 
 release-please keeps a standing release PR open on each channel's branch, updated as commits land.
-Merging it bumps `package.json` (and [`CHANGELOG.md`](CHANGELOG.md) on stable), tags `vX.Y.Z`,
+Merging it bumps `package.json` (and [`CHANGELOG.md`](CHANGELOG.md) on stable), tags `vX.Y.Z` (`vX.Y.Z-next[.N]` on `next`),
 creates the GitHub release and publishes to npm and JSR under the channel's dist-tag. The PR is
 opened with the org's release-bot GitHub App token (`RELEASE_BOT_CLIENT_ID` /
 `RELEASE_BOT_APP_PRIVATE_KEY`) so CI runs on it.
