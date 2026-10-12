@@ -1,6 +1,6 @@
 # voidflow
 
-Shared CI and deploy pipeline for a small fleet of Astro sites on Cloudflare Workers. One set of reusable GitHub Actions workflows and composite actions keeps lint, type checks, license policy, Playwright and axe-core accessibility tests, Unlighthouse budgets, and deploys identical across every site.
+Shared CI and deploy pipeline for a small fleet of Astro sites on Cloudflare Workers, and the bun tools around them. One set of reusable GitHub Actions workflows and composite actions keeps lint, type checks, license policy, Playwright and axe-core accessibility tests, Unlighthouse budgets, and deploys identical across every site.
 
 - **SHA-pinned.** Every third-party action in this repo is pinned to a full commit SHA with a version comment.
 - **Audited.** Workflows are checked with [zizmor](https://github.com/zizmorcore/zizmor), [actionlint](https://github.com/rhysd/actionlint), check-jsonschema and shellcheck on every change (see [Self-validation](#self-validation)).
@@ -145,6 +145,38 @@ Runs lint, typecheck, check for GPL licenses, e2e with Playwright.
 `test:e2e:all` (PRs into `next` and `live`), `test:e2e:a11y` (`next` and
 `live`), and `test:e2e:lighthouse` (`live`). A script the site does not define
 is skipped with a notice, so none of them is required.
+
+### Tool validation
+
+`tool-ci.yml` is the validation job for bun tools and libraries (CLIs, TUIs,
+packages): gitleaks over the full history, install (with the same Socket
+scanner handling as `site-ci.yml`), tools from the repo's `mise.toml` when it
+has one, then whichever of `lint`, `check`, `build` and `test` `package.json`
+defines, and `check:licenses` when dependencies or `scripts/` changed. When
+workflows change it also runs actionlint and
+[zizmor](https://github.com/zizmorcore/zizmor). The bun version comes from
+`.bun-version` when present.
+
+```yaml
+name: CI
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<release SHA> # vX.Y.Z
+```
+
+The job reports as `validate / Validate`, the check the `tool()` entry in
+[`rulesets/index.ts`](#branch-rulesets-as-code) requires.
 
 ### Unlighthouse (performance / SEO budgets)
 
