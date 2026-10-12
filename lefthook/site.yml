@@ -1,0 +1,23 @@
+# Renamed to lefthook/base.yml. Change the voidflow remote's `configs` entry
+# in your lefthook.yml:
+#
+#   configs:
+#     - lefthook/base.yml
+#
+# This stub stays because a `ref` bump (e.g. Renovate's) leaves `configs`
+# untouched, and lefthook skips a missing remote config without a warning, so
+# a plain rename would turn every hook off silently. Instead, commits and
+# pushes fail with the fix until the entry is updated.
+
+pre-commit:
+  commands:
+    voidflow-site-yml-renamed:
+      run: &renamed |
+        echo "voidflow: lefthook/site.yml was renamed to lefthook/base.yml." >&2
+        echo "          Change the voidflow remote's configs entry in lefthook.yml to lefthook/base.yml." >&2
+        exit 1
+
+pre-push:
+  commands:
+    voidflow-site-yml-renamed:
+      run: *renamed

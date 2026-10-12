@@ -305,7 +305,9 @@ remotes:
 
 Upgrading from `lefthook/site.yml` (v0.13 and earlier): change the `configs`
 entry to `lefthook/base.yml` when you bump `ref`. The hooks are otherwise the
-same.
+same. `lefthook/site.yml` is now a stub whose `pre-commit` and `pre-push` fail
+with that instruction, so a `ref` bump (for example from Renovate) that leaves
+`configs` alone stops commits instead of turning the hooks off silently.
 
 Lefthook merges `lefthook.yml`, then remotes, then `lefthook-local.yml`, so a
 repo's own `lefthook.yml` can add commands (for example image compression) but
