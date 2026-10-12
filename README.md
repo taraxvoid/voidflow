@@ -220,6 +220,17 @@ site's own `lefthook.yml` can add commands (for example image compression) but
 cannot override ones defined here. Differences go through `package.json`
 scripts: define `test:unit:precommit` (for example excluding tests that need a
 built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
+Likewise, define `check:precommit` and the typecheck step runs it instead of
+`check`. CI keeps calling the full scripts, so these only narrow what runs
+locally. Common uses:
+
+- bun: `"test:unit:precommit": "bun test --changed"` runs only the test files
+  whose imports reach an uncommitted change.
+- pnpm workspace: `pnpm -r --filter '...[HEAD]' run <script>` runs only the
+  changed packages and their dependents. Fall back to the full run when a
+  root-level file (lockfile, shared tsconfig) changed, since those don't
+  belong to any package. If the root `package.json` defines the same script
+  as a recursive run, add `--filter '!{.}'` so it doesn't recurse.
 
 Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
 set the `prepare` script so `bun install` wires the hooks, but make it tolerate a
