@@ -271,6 +271,11 @@ cannot override ones defined here. Differences go through `package.json`
 scripts: define `test:unit:precommit` (for example excluding tests that need a
 built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
 
+Hook-level options merge too. Don't set `parallel: true` under `pre-commit:` in
+the site's `lefthook.yml`: it applies to the merged hook, so every step,
+including the shared ones, starts at once and their `priority` order is ignored
+(tests that share a database or build output can then time out).
+
 Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
 set the `prepare` script so `bun install` wires the hooks, but make it tolerate a
 missing binary:
