@@ -14,6 +14,19 @@ It is semi-opinionated: the defaults match how my own sites are built (bun, Astr
 - [Queer Omaha](https://queeromaha.net), [Synth Omaha](https://synthomaha.net) and [Soundry](https://soundryomaha.net), free community sites for Omaha's queer and music scenes
 - [ravenflight.io](https://ravenflight.io), RavenFlight's marketing site
 
+### Show you use it
+
+Optional. Paste this into your site's README. It follows light and dark mode.
+
+```html
+<a href="https://github.com/taraxvoid/voidflow">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/CI-voidflow-8b8fd9?labelColor=2b2d3a&style=flat">
+    <img alt="CI: voidflow" src="https://img.shields.io/badge/CI-voidflow-5a5fb8?labelColor=3a3d4d&style=flat">
+  </picture>
+</a>
+```
+
 ## Usage
 
 Point `uses` in your configuration at a workflow, e.g. in your `.github/workflows/ci.yml`. Pin to a release commit SHA with the version in a comment, the same way you would any third-party action (see [Versioning](#versioning)).
