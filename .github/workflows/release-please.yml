@@ -205,7 +205,7 @@ jobs:
       # npm/cli#9969 (immutable OIDC subjects), but the scoped package has
       # exchanged fine with this repo's immutable subject on every release; from
       # 0.8.3 on only the unscoped mirror failed, with "404 package not found",
-      # which means its trusted publisher entry on npmjs.com does not match.
+      # because its trusted publisher entry on npmjs.com was removed (re-add it).
       # Once both packages show "GitHub Actions <npm-oidc-no-reply@github.com>"
       # as publisher, delete the NPM_TOKEN secret and these NODE_AUTH_TOKEN lines.
       - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
