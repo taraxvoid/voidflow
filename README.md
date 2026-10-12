@@ -243,10 +243,11 @@ on the repo.
 
 ## Git hooks (lefthook)
 
-[`lefthook/site.yml`](lefthook/site.yml) is the shared hook set for the site
-stack, consumed as a lefthook remote. It calls the site's own `package.json`
-scripts (`<pm> run --if-present`, so a missing script is skipped; `<pm>` is pnpm
-when the repo has a `pnpm-lock.yaml`, bun otherwise):
+[`lefthook/base.yml`](lefthook/base.yml) is the shared hook set for any bun
+(or pnpm) repo, sites and tools alike, consumed as a lefthook remote. It calls
+the repo's own `package.json` scripts (`<pm> run --if-present`, so a missing
+script is skipped; `<pm>` is pnpm when the repo has a `pnpm-lock.yaml`, bun
+otherwise):
 
 - `pre-commit`: dependency guard, `format` (formatted files are re-staged),
   `lint:actions`, `check`, `test:unit`, and `check:licenses` / `audit` when the
@@ -255,18 +256,27 @@ when the repo has a `pnpm-lock.yaml`, bun otherwise):
 - `pre-push`: bail if the remote branch is ahead, then `test:push`; skipped when
   there is nothing new to push.
 
+Before `test:unit` and `test:push`, the hooks unset the variables git exports to
+hooks (`GIT_DIR`, `GIT_INDEX_FILE`, ...; the list comes from
+`git rev-parse --local-env-vars`). Without that, a test that runs
+`git -C <tmpdir> commit` operates on, and commits into, the repo being hooked.
+
 ```yaml
-# lefthook.yml in the site
+# lefthook.yml in the repo
 remotes:
   - git_url: https://github.com/taraxvoid/voidflow
     ref: v0.10.0 # a tag or branch; lefthook passes it to `git clone --branch`
     configs:
-      - lefthook/site.yml
+      - lefthook/base.yml
 
 ```
 
+Upgrading from `lefthook/site.yml` (v0.13 and earlier): change the `configs`
+entry to `lefthook/base.yml` when you bump `ref`. The hooks are otherwise the
+same.
+
 Lefthook merges `lefthook.yml`, then remotes, then `lefthook-local.yml`, so a
-site's own `lefthook.yml` can add commands (for example image compression) but
+repo's own `lefthook.yml` can add commands (for example image compression) but
 cannot override ones defined here. Differences go through `package.json`
 scripts: define `test:unit:precommit` (for example excluding tests that need a
 built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
@@ -283,7 +293,7 @@ locally. Common uses:
   as a recursive run, add `--filter '!{.}'` so it doesn't recurse.
 
 Hook-level options merge too. Don't set `parallel: true` under `pre-commit:` in
-the site's `lefthook.yml`: it applies to the merged hook, so every step,
+the repo's `lefthook.yml`: it applies to the merged hook, so every step,
 including the shared ones, starts at once and their `priority` order is ignored
 (tests that share a database or build output can then time out).
 

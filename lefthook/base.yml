@@ -1,20 +1,24 @@
-# Shared git hooks for the Astro site stack (bun, or pnpm when the repo has a
-# pnpm-lock.yaml). Sites pull this in as a lefthook remote and call their own
-# package.json scripts, so a script a site does not define is skipped
+# Shared git hooks for any bun repo (or pnpm, when the repo has a
+# pnpm-lock.yaml). Repos pull this in as a lefthook remote and call their own
+# package.json scripts, so a script a repo does not define is skipped
 # (`<pm> run --if-present`).
 #
-#   # lefthook.yml in the site
+#   # lefthook.yml in the repo
 #   remotes:
 #     - git_url: https://github.com/taraxvoid/voidflow
 #       ref: <release tag>       # a tag or branch (not a SHA); bump deliberately
 #       configs:
-#         - lefthook/site.yml
+#         - lefthook/base.yml
 #
-# Lefthook merges lefthook.yml < remotes < lefthook-local.yml, so a site's own
+# Lefthook merges lefthook.yml < remotes < lefthook-local.yml, so a repo's own
 # lefthook.yml can ADD commands (e.g. image compression) but cannot override
 # one defined here. Differences go through package.json scripts instead, e.g.
 # `test:unit:precommit` replaces `test:unit` for the pre-commit unit step, and
 # `check:precommit` replaces `check` for the typecheck step.
+#
+# Git exports GIT_DIR, GIT_INDEX_FILE and others to hooks. Steps that run tests
+# unset them first (git lists them itself), so tests that spawn git in a temp
+# repo don't act on this one.
 
 templates:
   # Package manager: pnpm when the repo is a pnpm project, bun otherwise.
@@ -40,7 +44,7 @@ pre-commit:
       run: "{pm} run --if-present lint:actions"
     typecheck:
       priority: 3
-      # A site that can check less than everything pre-commit (e.g. only the
+      # A repo that can check less than everything pre-commit (e.g. only the
       # workspace packages a commit touches) defines `check:precommit`;
       # otherwise check runs. CI keeps calling `check` directly.
       run: |
@@ -51,9 +55,10 @@ pre-commit:
         fi
     unit:
       priority: 3
-      # A site that can't run its whole suite pre-commit (e.g. tests that need
+      # A repo that can't run its whole suite pre-commit (e.g. tests that need
       # a built dist/) defines `test:unit:precommit`; otherwise test:unit runs.
       run: |
+        unset $(git rev-parse --local-env-vars)
         if grep -q '"test:unit:precommit"' package.json; then
           {pm} run test:unit:precommit
         else
@@ -133,4 +138,5 @@ pre-push:
           exit 1
         fi
 
+        unset $(git rev-parse --local-env-vars)
         {pm} run --if-present test:push
