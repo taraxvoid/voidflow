@@ -14,6 +14,19 @@ It is semi-opinionated: the defaults match how my own sites are built (bun, Astr
 - [Queer Omaha](https://queeromaha.net), [Synth Omaha](https://synthomaha.net) and [Soundry](https://soundryomaha.net), free community sites for Omaha's queer and music scenes
 - [ravenflight.io](https://ravenflight.io), RavenFlight's marketing site
 
+### Show you use it
+
+Optional. Paste this into your site's README. It follows light and dark mode.
+
+```html
+<a href="https://github.com/taraxvoid/voidflow">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/CI-voidflow-8b8fd9?labelColor=2b2d3a&style=flat">
+    <img alt="CI: voidflow" src="https://img.shields.io/badge/CI-voidflow-5a5fb8?labelColor=3a3d4d&style=flat">
+  </picture>
+</a>
+```
+
 ## Usage
 
 Point `uses` in your configuration at a workflow, e.g. in your `.github/workflows/ci.yml`. Pin to a release commit SHA with the version in a comment, the same way you would any third-party action (see [Versioning](#versioning)).
@@ -87,6 +100,40 @@ or `engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
 follows the package manager. `build-env` is a JSON object, visible in logs, so
 no secrets.
 
+### Install-time security scanner (Socket)
+
+A bun site can set a security scanner in `bunfig.toml`, which checks every
+package on install:
+
+```toml
+[install.security]
+scanner = "@socketsecurity/bun-security-scanner"
+```
+
+CI skips it by default. The scanner calls a third-party API on every install,
+so a network blip or an API change could fail a build that otherwise passes,
+and rerunning the same commit could give a different result. `site-ci.yml`
+installs with a copy of `bunfig.toml` minus the scanner line (every other
+setting, e.g. `minimumReleaseAge`, still applies) and leaves a notice in the
+run. Local `bun install` reads `bunfig.toml` as is, so the scanner still runs
+on your machine.
+
+To run it in CI too, pass `socket-scanner: true` to `site-ci.yml`. A workflow
+that installs on its own (outside `site-ci.yml`) gets the same default from
+the composite action:
+
+```yaml
+- uses: oven-sh/setup-bun@<sha> # <version>
+- uses: taraxvoid/voidflow/actions/bun-install@<sha> # <version>
+  # with: { socket-scanner: 'true' }
+```
+
+The copy is checked by parsing both files: it must equal your `bunfig.toml`
+with only `install.security.scanner` removed. Set the scanner as a plain
+`scanner = "..."` line (or the dotted `security.scanner` form); if it can't be
+removed cleanly, e.g. an inline table, the install fails rather than run or
+skip the scanner silently. pnpm sites are unaffected.
+
 ## Workflow Types
 
 ### Validation / Checks
@@ -124,8 +171,11 @@ and add `.unlighthouse/` to the site's `.gitignore`.
 
 `site-ci.yml` runs `bun run check:licenses` when the lockfile or `scripts/`
 change. Sites implement that script with the shared check, which runs
-`license-checker` in the site's repo root and fails on GPL, AGPL, SSPL and
-similar copyleft licenses (LGPL is allowed).
+`license-checker-rseidelsohn` in the site's repo root and fails on GPL, AGPL,
+SSPL and similar copyleft licenses (LGPL is allowed). Voidflow pins the
+checker to an exact version as its own dependency, so sites don't need to
+install it and every site runs the same version (sites that added
+`license-checker-rseidelsohn` as a devDependency for 0.12.2 can drop it).
 
 With `@taraxvoid/voidflow` as a devDependency, call the bin from the site's
 `package.json`:
