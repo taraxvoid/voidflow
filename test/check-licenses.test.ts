@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -42,6 +42,16 @@ async function run(cwd: string) {
 }
 
 describe('check-licenses', () => {
+    test('runs an exact-pinned checker from voidflow, not bunx', () => {
+        const pkg = JSON.parse(
+            readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+        )
+        expect(pkg.dependencies['license-checker-rseidelsohn']).toMatch(
+            /^\d+\.\d+\.\d+$/,
+        )
+        expect(readFileSync(script, 'utf8')).not.toContain("'bunx'")
+    })
+
     test('passes when every dependency is permissively licensed', async () => {
         const { code, stdout } = await run(project('MIT'))
         expect(code).toBe(0)
