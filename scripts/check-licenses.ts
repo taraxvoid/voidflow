@@ -2,14 +2,18 @@
 /**
  * Shared license policy check for the Astro/bun site stack: fail on GPL kudzu.
  *
- * Runs `license-checker` against the current working directory (the caller's
+ * Runs `license-checker-rseidelsohn` against the current working directory (the caller's
  * repo root) and exits non-zero if any installed package carries a blocked
- * license.
+ * license. The checker is voidflow's own exact-pinned dependency, resolved from
+ * voidflow's install rather than `bunx`, so every site runs the same version
+ * and nothing is fetched at check time.
  *
  * Usage: bun check-licenses.ts
  */
 
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 export const FAIL_ON = [
     'GPL-1.0',
@@ -41,15 +45,26 @@ export const FAIL_ON = [
     // modifying/statically linking the library, not on depending on it as-is.
 ].join(';')
 
+const checkerPkg = Bun.resolveSync(
+    'license-checker-rseidelsohn/package.json',
+    import.meta.dir,
+)
+const checkerBin = join(
+    dirname(checkerPkg),
+    JSON.parse(readFileSync(checkerPkg, 'utf8')).bin[
+        'license-checker-rseidelsohn'
+    ],
+)
+
 const result = spawnSync(
-    'bunx',
-    ['license-checker', '--summary', '--failOn', FAIL_ON],
+    process.execPath,
+    [checkerBin, '--summary', '--failOn', FAIL_ON],
     { cwd: process.cwd(), stdio: 'inherit' },
 )
 
 if (result.error) {
     console.error(
-        `\ncheck:licenses failed - could not run license-checker: ${result.error.message}`,
+        `\ncheck:licenses failed - could not run license-checker-rseidelsohn: ${result.error.message}`,
     )
     process.exit(1)
 }
