@@ -1,6 +1,6 @@
 {
     "name": "@taraxvoid/voidflow",
-    "version": "0.12.3",
+    "version": "0.12.4",
     "description": "Shared workflows, actions and tooling for @taraxvoid sites",
     "license": "MIT",
     "keywords": [
