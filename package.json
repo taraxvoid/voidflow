@@ -1,7 +1,7 @@
 {
     "name": "@taraxvoid/voidflow",
-    "version": "0.13.0-next.1",
-    "description": "Shared workflows, hooks and tooling for @taraxvoid repos",
+    "version": "0.13.0",
+    "description": "Shared workflows, actions and tooling for @taraxvoid sites",
     "license": "MIT",
     "keywords": [
         "github-actions",
@@ -58,8 +58,8 @@
         }
     },
     "devDependencies": {
-        "@playwright/test": "^1.40.0",
-        "@socketsecurity/bun-security-scanner": "^1.1.3"
+        "@playwright/test": "1.64.0",
+        "@socketsecurity/bun-security-scanner": "1.1.3"
     },
     "dependencies": {
         "license-checker-rseidelsohn": "5.0.1"
