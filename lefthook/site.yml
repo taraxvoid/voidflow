@@ -99,13 +99,20 @@ pre-push:
     sync-and-test:
       use_stdin: true
       run: |
-        # Nothing new to push (tag push, branch delete): skip the checks.
+        # Nothing new to push (branch delete, or a tag or branch pointing at
+        # commits the remote already has): skip the checks. A commit counts
+        # as new when no ref of the remote contains it.
         has_new_commits=false
         remote_name="{1}"
         remote_branch=""
-        while read -r _local_ref local_sha remote_ref remote_sha; do
-          if [ "$local_sha" != "$remote_sha" ]; then has_new_commits=true; fi
-          remote_branch="${remote_ref#refs/heads/}"
+        while read -r _local_ref local_sha remote_ref _remote_sha; do
+          # An all-zero local sha is a delete.
+          case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+          if [ -z "$(git rev-list -n 1 "$local_sha" --not --remotes="$remote_name" 2>/dev/null)" ]; then
+            continue
+          fi
+          has_new_commits=true
+          case "$remote_ref" in refs/heads/*) remote_branch="${remote_ref#refs/heads/}" ;; esac
         done
         if [ "$has_new_commits" = false ]; then
           echo "pre-push: no new commits to push, skipping checks"
