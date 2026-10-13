@@ -253,7 +253,8 @@ when the repo has a `pnpm-lock.yaml`, bun otherwise):
   lockfile changed.
 - `commit-msg`: advisory Conventional Commits hint (never blocks).
 - `pre-push`: bail if the remote branch is ahead, then `test:push`; skipped when
-  there is nothing new to push.
+  the push carries no commit the remote lacks (branch deletes, and tags or
+  branches at already-pushed commits).
 
 ```yaml
 # lefthook.yml in the site
