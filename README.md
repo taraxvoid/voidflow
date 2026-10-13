@@ -191,6 +191,11 @@ the global `~/.bunfig.toml` rather than the site's, so a global
 locally (including in the pre-commit hook) for 3 days after every release.
 The devDependency's bins are installed under the site's own `bunfig.toml`.
 
+Both bins (`check-licenses`, `unlighthouse-runner`) are TypeScript run by Bun
+(`#!/usr/bin/env bun`), so `bun` must be on `PATH` even when the site uses
+npm or pnpm. The `@taraxvoid/voidflow/playwright` export is plain ESM and runs
+on Node 22+ without Bun.
+
 ### Playwright preview config
 
 Shared `playwright.config` for Astro sites that run e2e against
