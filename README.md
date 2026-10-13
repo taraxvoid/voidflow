@@ -95,8 +95,8 @@ jobs:
       build-env: ${{ format('{{"PUBLIC_SITE_URL":"https://example.com","GIT_SHA":"{0}"}}', github.sha) }}
 ```
 
-With `pnpm`, the pnpm version comes from `packageManager` and Node from `volta`
-or `engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
+With `pnpm`, the pnpm version comes from `packageManager` and Node from 
+`engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
 follows the package manager. `build-env` is a JSON object, visible in logs, so
 no secrets.
 
