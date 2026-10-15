@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { REPOS, build, desired, diff, normalise, tool } from '../rulesets/index.ts'
+import { NETLIFY, REPOS, build, desired, diff, isPlanGated, normalise, tool } from '../rulesets/index.ts'
 
 const statusChecks = (r: ReturnType<typeof build>) =>
     (
@@ -160,5 +160,29 @@ describe('tool()', () => {
         const pr = r.rules.find((x) => x.type === 'pull_request')
         expect(pr?.parameters?.require_code_owner_review).toBe(true)
         expect(pr?.parameters?.allowed_merge_methods).toEqual(['squash'])
+    })
+})
+
+describe('taraxvoid.net', () => {
+    test('deploys via voidflow: no Netlify check and no app bypass', () => {
+        const r = build('main', REPOS['taraxvoid/taraxvoid.net'])
+        expect(JSON.stringify(r)).not.toContain(String(NETLIFY))
+        expect(r.bypass_actors.some((a) => a.actor_type === 'Integration')).toBe(false)
+        expect(statusChecks(r)).toEqual(['validate / Validate'])
+    })
+})
+
+describe('isPlanGated', () => {
+    test('recognises the 403 GitHub returns for rulesets on a private repo without Pro', () => {
+        expect(
+            isPlanGated(
+                'gh api repos/taraxvoid/trailguide/rulesets: {"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)',
+            ),
+        ).toBe(true)
+    })
+
+    test('does not swallow other errors, including other 403s', () => {
+        expect(isPlanGated('gh: Resource not accessible by integration (HTTP 403)')).toBe(false)
+        expect(isPlanGated('gh: Not Found (HTTP 404)')).toBe(false)
     })
 })

@@ -17,10 +17,11 @@ name: Release Please
 # RELEASE_BOT_APP_PRIVATE_KEY are org-level secrets shared with the sibling
 # repos.
 #
-# npm publishing currently uses an NPM_TOKEN secret, not trusted publishing
-# (see the publish steps); the trusted publisher entries on npmjs.com should
-# still name this repo, this workflow file (release-please.yml) and the `npm`
-# environment so it can switch back once npm supports immutable OIDC subjects.
+# npm publishing uses trusted publishing (OIDC), with an NPM_TOKEN secret as a
+# fallback (see the publish steps). The trusted publisher entries on npmjs.com
+# must name this repo, this workflow file (release-please.yml) and the `npm`
+# environment for both packages; a version that fell back to the token shows
+# as a "trust downgrade" on npmx.dev.
 on:
   push:
     branches: [main, next, "release/**"]
@@ -198,14 +199,15 @@ jobs:
           npm install --no-save --no-package-lock --ignore-scripts @playwright/test
           npx --yes jsr publish "${flags[@]}"
 
-      # Publishes with the NPM_TOKEN secret (granular token scoped to both
-      # packages, stored on the `npm` environment) as a stopgap: npm's trusted
-      # publishing rejects GitHub's immutable OIDC subject claims, which this
-      # repo can't opt out of (npm/cli#9969). Provenance still works via
-      # id-token: write. Once npm fixes that, delete the NPM_TOKEN secret and
-      # these NODE_AUTH_TOKEN lines to fall back to pure OIDC; the trusted
-      # publisher entries (this repo, release-please.yml, `npm` environment)
-      # are already configured on both packages.
+      # npm (>= 11.5.1) tries the OIDC token exchange first and only uses
+      # NODE_AUTH_TOKEN (granular token scoped to both packages, stored on the
+      # `npm` environment) if the exchange fails. The token was added for
+      # npm/cli#9969 (immutable OIDC subjects), but the scoped package has
+      # exchanged fine with this repo's immutable subject on every release; from
+      # 0.8.3 on only the unscoped mirror failed, with "404 package not found",
+      # because its trusted publisher entry on npmjs.com was removed (re-add it).
+      # Once both packages show "GitHub Actions <npm-oidc-no-reply@github.com>"
+      # as publisher, delete the NPM_TOKEN secret and these NODE_AUTH_TOKEN lines.
       - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -245,6 +247,28 @@ jobs:
           npm pkg set name=voidflow
           cp scripts/mirror-readme.md README.md
           npm publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}"
+
+      # A token-fallback publish still succeeds, so flag it here rather than
+      # finding out from npmx.dev's "trust downgrade" banner. Warns only: the
+      # version is already published either way.
+      - name: Check both packages were trusted-published
+        if: inputs.dry-run != true
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version package.json)
+          for pkg in "@taraxvoid/voidflow" voidflow; do
+            publisher=""
+            for _ in 1 2 3 4 5 6; do
+              publisher=$(npm view "${pkg}@${VERSION}" _npmUser.email 2>/dev/null || true)
+              [ -n "$publisher" ] && break
+              sleep 10
+            done
+            if [ "$publisher" = "npm-oidc-no-reply@github.com" ]; then
+              echo "${pkg}@${VERSION}: trusted publishing"
+            else
+              echo "::warning::${pkg}@${VERSION} was not trusted-published (publisher: ${publisher:-unknown}); check its trusted publisher entry on npmjs.com."
+            fi
+          done
 
   # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
   # release. Prereleases and maintenance releases never move it. Immutable

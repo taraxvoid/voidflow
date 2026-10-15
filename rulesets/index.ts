@@ -105,8 +105,8 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
 // Integration bypasses are preserved as-is; they are believed to be the
 // Netlify/Cloudflare apps and come out once deploys run from Actions (see
 // the "Deploy via Actions" issue).
-// taraxvoid.net and trailguide are private on a plan without rulesets, so they
-// are not listed (the API returns 403 and aborts the whole run). trailguide
+// Private repos can be listed: on a plan without rulesets for private repos
+// the API returns 403 and the script skips them (see isPlanGated). trailguide
 // gets `tool()` if it goes public.
 export const REPOS: Record<string, RepoConfig> = {
     'taraxvoid/queeromaha': site({
@@ -119,6 +119,9 @@ export const REPOS: Record<string, RepoConfig> = {
     'taraxvoid/synthomaha': site({
         bypass: { main: [app(85455)] },
     }),
+    // Deploys to Cloudflare through voidflow, so no Netlify check and no
+    // deploy app bypass. Private, so skipped until rulesets are available.
+    'taraxvoid/taraxvoid.net': site({ netlify: false }),
     'taraxvoid/voidflow': {
         // main (stable), next (prerelease channel), release/* (maintenance).
         // See RELEASING.md. Promotion next -> main uses merge commits, so no
@@ -295,4 +298,16 @@ export function diff(have: unknown, want: unknown): string[] {
         ...[...h].filter((l) => !w.has(l)).map((l) => `- ${l}`),
         ...[...w].filter((l) => !h.has(l)).map((l) => `+ ${l}`),
     ]
+}
+
+// ---- plan gating ------------------------------------------------------------
+
+/**
+ * True when a `gh api` error is GitHub refusing rulesets because the repo is
+ * private on a plan without them (free personal accounts). That is a property
+ * of the plan, not drift, so the script skips the repo instead of failing.
+ * Other errors, including other 403s, still abort the run.
+ */
+export function isPlanGated(message: string): boolean {
+    return /\(HTTP 403\)/.test(message) && /Upgrade to GitHub Pro|make this repository public/.test(message)
 }
