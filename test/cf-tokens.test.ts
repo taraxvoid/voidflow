@@ -7,7 +7,10 @@ import {
     expiresOn,
     plan,
     policies,
+    repoAccounts,
+    retireTargets,
     tokenName,
+    type RepoConfig,
     type Policy,
     type Token,
 } from '../cloudflare/tokens.ts'
@@ -74,6 +77,49 @@ describe('policies', () => {
             cfg.envs.map((e) => tokenName(repo, e.env)),
         )
         expect(new Set(names).size).toBe(names.length)
+    })
+})
+
+describe('accounts', () => {
+    // dev/staging in one account, prod in another (ravenflight's shape).
+    const split: RepoConfig = {
+        account: 'proddd',
+        envs: [
+            { env: 'dev', worker: 'api-dev', zones: [], account: 'devvv' },
+            { env: 'prod', worker: 'api', zones: [] },
+        ],
+        retire: ['old-prod', { account: 'devvv', name: 'old-dev' }],
+    }
+    const ids0 = { scriptTag: 'tag', zoneIds: {} }
+
+    test("an env's policies name its own account, else the repo's", () => {
+        const [dev, prod] = split.envs.map(
+            (e) => Object.keys(policies(split, e, ids0)[0].resources)[0],
+        )
+        expect(dev).toBe('com.cloudflare.api.account.devvv')
+        expect(prod).toBe('com.cloudflare.api.account.proddd')
+    })
+
+    test("a fallback stays inside the env's account", () => {
+        const dev = {
+            ...split.envs[0],
+            fallback: { reason: 'custom-domain', since: '2026-10-15' },
+        }
+        const wide = policies(split, dev, ids0).at(-1)
+        expect(wide?.resources).toEqual({
+            'com.cloudflare.api.account.devvv': '*',
+        })
+    })
+
+    test("bare retire names resolve to the repo's account", () => {
+        expect(retireTargets(split)).toEqual([
+            { account: 'proddd', name: 'old-prod' },
+            { account: 'devvv', name: 'old-dev' },
+        ])
+    })
+
+    test('a repo touches each account once', () => {
+        expect(repoAccounts(split).sort()).toEqual(['devvv', 'proddd'])
     })
 })
 

@@ -329,12 +329,17 @@ and only with `--prune`. It is repo tooling, not part of the published package.
 
 Deploy tokens for the fleet live in [`cloudflare/tokens.ts`](cloudflare/tokens.ts):
 per repo and GitHub environment, the Worker it deploys and the zones of its
-custom domains. Each token is account-owned and scoped to that one Worker (the
+custom domains. An env can set its own `account` (say dev/staging in a
+separate account from prod); otherwise it uses the repo's. Each token is owned
+by its env's account and scoped to that one Worker (the
 Workers Editor role on it), plus Workers Routes Write on those zones only, with
 a 90-day expiry.
 
-The targets need `CF_TOKEN_ADMIN`: a token with Account API Tokens Edit, Workers
-Scripts Read and Zone Read, with a short expiry and an IP filter. It can mint
+The targets need `CF_TOKEN_ADMIN`: a user-owned token (account-owned tokens
+reach only their own account) that includes every account in the config, with
+Account API Tokens Edit, Workers Scripts Read and Zone Read on each, a short
+expiry and an IP filter. Adding a repo in a new account means adding that
+account to this token. It can mint
 deploy tokens, so it stays on a maintainer's machine and never goes into CI.
 [fnox](https://github.com/jdx/fnox) supplies it: the committed
 [`fnox.toml`](fnox.toml) declares the secret and a provider name, `cf-admin`,

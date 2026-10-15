@@ -6,7 +6,8 @@
  * the repo's GitHub environment secret. Tokens it did not create are left
  * alone unless a repo lists them under `retire` (deleted only with --prune).
  *
- * Each token is account-owned and scoped to one Worker (Workers Editor on that
+ * Each token is owned by its env's account (dev/staging and prod can live in
+ * different accounts) and scoped to one Worker (Workers Editor on that
  * Worker), plus Workers Routes Write on the zones of its custom domains.
  * Custom Domains do not support per-Worker roles yet; when a deploy proves the
  * zone grant is not enough, record a `fallback` and the token also gets
@@ -27,14 +28,20 @@ export type EnvConfig = {
     worker: string
     /** Zones of the Worker's routes and custom domains, by name. */
     zones: string[]
+    /** Account the Worker and token live in, when not the repo's `account`. */
+    account?: string
     fallback?: Fallback
 }
 
+/** An old token to retire; a bare name means the repo's `account`. */
+export type Retire = string | { account: string; name: string }
+
 export type RepoConfig = {
+    /** Default account for the repo's envs and `retire` names. */
     account: string
     envs: EnvConfig[]
     /** Pre-voidflow token names to delete with --prune once cut over. */
-    retire: string[]
+    retire: Retire[]
 }
 
 export type Resources = Record<string, string | Record<string, string>>
@@ -98,6 +105,24 @@ export const REPOS: Record<string, RepoConfig> = {
 export const tokenName = (repo: string, env: string) =>
     `${TAG}:${repo}:${env}`
 
+/** The account an env's Worker and token live in. */
+export const envAccount = (cfg: RepoConfig, env: EnvConfig) =>
+    env.account ?? cfg.account
+
+/** `retire` entries with their accounts filled in. */
+export const retireTargets = (cfg: RepoConfig) =>
+    cfg.retire.map((r) =>
+        typeof r === 'string' ? { account: cfg.account, name: r } : r,
+    )
+
+/** Every account a repo's envs and `retire` entries touch. */
+export const repoAccounts = (cfg: RepoConfig) => [
+    ...new Set([
+        ...cfg.envs.map((e) => envAccount(cfg, e)),
+        ...retireTargets(cfg).map((r) => r.account),
+    ]),
+]
+
 const account = (id: string) => `com.cloudflare.api.account.${id}`
 
 /**
@@ -110,12 +135,13 @@ export function policies(
     env: EnvConfig,
     ids: { scriptTag: string; zoneIds: Record<string, string> },
 ): Policy[] {
+    const acct = account(envAccount(cfg, env))
     const out: Policy[] = [
         {
             effect: 'allow',
             permission_groups: WORKER_EDITOR.map((id) => ({ id })),
             resources: {
-                [account(cfg.account)]: {
+                [acct]: {
                     [`com.cloudflare.edge.worker.script.${ids.scriptTag}`]:
                         '*',
                 },
@@ -139,7 +165,7 @@ export function policies(
         out.push({
             effect: 'allow',
             permission_groups: [{ id: WORKERS_SCRIPTS_WRITE }],
-            resources: { [account(cfg.account)]: '*' },
+            resources: { [acct]: '*' },
         })
     }
     return out

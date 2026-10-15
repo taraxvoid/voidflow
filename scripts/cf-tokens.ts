@@ -11,9 +11,10 @@
  *   bun scripts/cf-tokens.ts --apply --prune    # ...and delete the repo's `retire` tokens
  *   bun scripts/cf-tokens.ts --groups           # live names of the permission group ids used
  *
- * Needs CF_TOKEN_ADMIN: a token with Account API Tokens Edit, Workers Scripts
- * Read (Worker tags) and Zone Read (zone ids). Keep it local; never put it in
- * CI. GitHub writes go through the `gh` CLI. New token values are piped
+ * Needs CF_TOKEN_ADMIN: a user-owned token covering every account in the
+ * config (envs can sit in different accounts, e.g. dev/staging apart from
+ * prod), with Account API Tokens Edit, Workers Scripts Read (Worker tags) and
+ * Zone Read (zone ids) on each. Keep it local; never put it in CI. GitHub writes go through the `gh` CLI. New token values are piped
  * straight into `gh secret set` and never printed.
  */
 import { parseArgs } from 'node:util'
@@ -22,9 +23,12 @@ import {
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
     WORKER_EDITOR,
+    envAccount,
     expiresOn,
     plan,
     policies,
+    repoAccounts,
+    retireTargets,
     tokenName,
     type Action,
     type EnvConfig,
@@ -105,7 +109,7 @@ async function gh(args: string[], stdin?: string): Promise<string> {
 // ---- --groups ---------------------------------------------------------------
 
 if (values.groups) {
-    const accounts = [...new Set(Object.values(REPOS).map((c) => c.account))]
+    const accounts = [...new Set(Object.values(REPOS).flatMap(repoAccounts))]
     const used = new Map<string, string[]>()
     const note = (id: string, where: string) =>
         used.set(id, [...(used.get(id) ?? []), where])
@@ -143,26 +147,26 @@ const now = new Date()
 let pending = 0
 let failed = 0
 
-async function lookups(cfg: RepoConfig, env: EnvConfig) {
+async function lookups(acct: string, env: EnvConfig) {
     const scripts = await cfAll<{ id: string; tag: string }>(
-        `/accounts/${cfg.account}/workers/scripts`,
+        `/accounts/${acct}/workers/scripts`,
     )
     const script = scripts.find((s) => s.id === env.worker)
     if (!script) {
         // Per-Worker grants apply only to Workers that exist; creating one
         // needs product-level Workers Admin, which no deploy token gets.
         throw new Error(
-            `Worker "${env.worker}" does not exist yet: deploy it once with an admin token, then re-run`,
+            `Worker "${env.worker}" does not exist in account ${acct} yet: deploy it once with an admin token, then re-run`,
         )
     }
     const zoneIds: Record<string, string> = {}
     for (const name of env.zones) {
         const [zone] = await cf<Array<{ id: string }>>(
             'GET',
-            `/zones?name=${encodeURIComponent(name)}&account.id=${cfg.account}`,
+            `/zones?name=${encodeURIComponent(name)}&account.id=${acct}`,
         )
         if (!zone) {
-            throw new Error(`zone ${name} not found in account ${cfg.account}`)
+            throw new Error(`zone ${name} not found in account ${acct}`)
         }
         zoneIds[name] = zone.id
     }
@@ -190,17 +194,17 @@ async function syncFallbackVar(repo: string, env: EnvConfig) {
     }
 }
 
-function create(cfg: RepoConfig, name: string, want: Policy[]) {
+function create(acct: string, name: string, want: Policy[]) {
     return cf<Token & { value: string }>(
         'POST',
-        `/accounts/${cfg.account}/tokens`,
+        `/accounts/${acct}/tokens`,
         { name, policies: want, expires_on: expiresOn(now) },
     )
 }
 
 async function act(
     repo: string,
-    cfg: RepoConfig,
+    acct: string,
     env: EnvConfig,
     name: string,
     want: Policy[],
@@ -215,10 +219,10 @@ async function act(
     const sign = { create: '+', update: '~', rotate: '@', delete: '-' }[a.kind]
     console.log(`${sign} ${a.kind} ${label}: ${a.reason}`)
     if (!values.apply) return
-    const path = `/accounts/${cfg.account}/tokens`
+    const path = `/accounts/${acct}/tokens`
     switch (a.kind) {
         case 'create': {
-            const t = await create(cfg, name, want)
+            const t = await create(acct, name, want)
             await setSecret(repo, env.env, t.value)
             console.log(`  created ${t.id}, secret set in ${repo} env ${env.env}`)
             return
@@ -235,7 +239,7 @@ async function act(
         case 'rotate': {
             // New token, then the secret, then delete the old token, so a
             // deploy in between still has a working token.
-            const t = await create(cfg, name, want)
+            const t = await create(acct, name, want)
             await setSecret(repo, env.env, t.value)
             await cf('DELETE', `${path}/${a.token.id}`)
             console.log(`  rotated ${a.token.id} to ${t.id}, secret set`)
@@ -251,17 +255,16 @@ async function run(
     repo: string,
     cfg: RepoConfig,
     env: EnvConfig,
-    tokens: Token[],
+    tokens: Map<string, Token[]>,
 ) {
+    const acct = envAccount(cfg, env)
     const name = tokenName(repo, env.env)
-    const want = policies(cfg, env, await lookups(cfg, env))
+    const want = policies(cfg, env, await lookups(acct, env))
     // The list endpoint omits policies; fetch each match in full.
     const have = await Promise.all(
-        tokens
+        (tokens.get(acct) ?? [])
             .filter((t) => t.name === name)
-            .map((t) =>
-                cf<Token>('GET', `/accounts/${cfg.account}/tokens/${t.id}`),
-            ),
+            .map((t) => cf<Token>('GET', `/accounts/${acct}/tokens/${t.id}`)),
     )
     if (env.fallback) {
         console.log(
@@ -269,7 +272,7 @@ async function run(
         )
     }
     for (const a of plan(want, have, now, { rotate: values.rotate })) {
-        await act(repo, cfg, env, name, want, a)
+        await act(repo, acct, env, name, want, a)
     }
     if (values.apply) await syncFallbackVar(repo, env)
 }
@@ -277,7 +280,10 @@ async function run(
 for (const repo of repos) {
     const cfg = REPOS[repo]
     console.log(`\n== ${repo}`)
-    const tokens = await cfAll<Token>(`/accounts/${cfg.account}/tokens`)
+    const tokens = new Map<string, Token[]>()
+    for (const acct of repoAccounts(cfg)) {
+        tokens.set(acct, await cfAll<Token>(`/accounts/${acct}/tokens`))
+    }
     let envsOk = true
     for (const env of cfg.envs) {
         try {
@@ -288,8 +294,14 @@ for (const repo of repos) {
             console.error(`  x ${env.env}: ${(e as Error).message}`)
         }
     }
-    // Retire old tokens only once every env has its replacement.
-    for (const t of tokens.filter((t) => cfg.retire.includes(t.name))) {
+    // Retire old tokens only once every env, in every account, has its
+    // replacement.
+    const old = retireTargets(cfg).flatMap(({ account, name }) =>
+        (tokens.get(account) ?? [])
+            .filter((t) => t.name === name)
+            .map((t) => ({ account, t })),
+    )
+    for (const { account, t } of old) {
         pending++
         const note = !values.prune
             ? ' (needs --prune)'
@@ -298,7 +310,7 @@ for (const repo of repos) {
               : ' (skipped: an env failed above)'
         console.log(`- retire "${t.name}" (${t.id})${note}`)
         if (values.apply && values.prune && envsOk) {
-            await cf('DELETE', `/accounts/${cfg.account}/tokens/${t.id}`)
+            await cf('DELETE', `/accounts/${account}/tokens/${t.id}`)
             console.log('  deleted')
         }
     }
