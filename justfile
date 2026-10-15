@@ -87,6 +87,8 @@ doctor:
     @command -v lefthook >/dev/null && echo "lefthook:  $(lefthook version)" || echo "lefthook:  NOT FOUND (needed to run git hooks - run 'just doctor' then 'lefthook install')"
     @command -v gitleaks >/dev/null && echo "gitleaks:  $(gitleaks version)" || echo "gitleaks:  NOT FOUND (needed for 'just lint')"
     @command -v act >/dev/null && echo "act:  $(act --version)" || echo "act:  NOT FOUND (needed for local dry-run - not a blocker to commit/push)"
+    @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (holds CF_TOKEN_ADMIN for 'just cf-tokens-*'; see README)"
+    @command -v fnox >/dev/null && { fnox check >/dev/null 2>&1 && echo "CF_TOKEN_ADMIN:  resolvable via fnox" || echo "CF_TOKEN_ADMIN:  not resolvable (run 'fnox check'; see README)"; } || true
 
 # Show how each repo's branch rulesets differ from rulesets/index.ts (read-only)
 rulesets-plan *args:
@@ -96,17 +98,20 @@ rulesets-plan *args:
 rulesets-apply *args:
     bun scripts/apply-rulesets.ts --apply {{ args }}
 
+# CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
+cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
+
 # Show how each repo's Cloudflare deploy tokens differ from cloudflare/tokens.ts (read-only; needs CF_TOKEN_ADMIN)
 cf-tokens-plan *args:
-    bun scripts/cf-tokens.ts {{ args }}
+    {{ cf_admin }} bun scripts/cf-tokens.ts {{ args }}
 
 # Create/update/rotate deploy tokens and set each repo's env secret (needs CF_TOKEN_ADMIN and gh)
 cf-tokens-apply *args:
-    bun scripts/cf-tokens.ts --apply {{ args }}
+    {{ cf_admin }} bun scripts/cf-tokens.ts --apply {{ args }}
 
 # Print the live names of the permission group ids in cloudflare/tokens.ts
 cf-tokens-groups:
-    bun scripts/cf-tokens.ts --groups
+    {{ cf_admin }} bun scripts/cf-tokens.ts --groups
 
 # Open the next -> main promotion PR; merge it with a merge commit, not a squash
 promote:
