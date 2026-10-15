@@ -11,7 +11,7 @@ It is semi-opinionated: the defaults match how my own sites are built (bun, Astr
 ## Used by
 
 - [taraxvoid.net](https://taraxvoid.net), my portfolio
-- [Queer Omaha](https://queeromaha.net), [Synth Omaha](https://synthomaha.net) and [Soundry](https://soundryomaha.net), free community sites for Omaha's queer and music scenes
+- [Queer Omaha](https://queeromaha.net), [Synth Omaha](https://synthomaha.net) and [Soundry](https://soundryomaha.org), free community sites for Omaha's queer and music scenes
 - [ravenflight.io](https://ravenflight.io), RavenFlight's marketing site
 
 ### Show you use it
@@ -95,8 +95,8 @@ jobs:
       build-env: ${{ format('{{"PUBLIC_SITE_URL":"https://example.com","GIT_SHA":"{0}"}}', github.sha) }}
 ```
 
-With `pnpm`, the pnpm version comes from `packageManager` and Node from `volta`
-or `engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
+With `pnpm`, the pnpm version comes from `packageManager` and Node from 
+`engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
 follows the package manager. `build-env` is a JSON object, visible in logs, so
 no secrets.
 
@@ -191,6 +191,11 @@ the global `~/.bunfig.toml` rather than the site's, so a global
 locally (including in the pre-commit hook) for 3 days after every release.
 The devDependency's bins are installed under the site's own `bunfig.toml`.
 
+Both bins (`check-licenses`, `unlighthouse-runner`) are TypeScript run by Bun
+(`#!/usr/bin/env bun`), so `bun` must be on `PATH` even when the site uses
+npm or pnpm. The `@taraxvoid/voidflow/playwright` export is plain ESM and runs
+on Node 22+ without Bun.
+
 ### Playwright preview config
 
 Shared `playwright.config` for Astro sites that run e2e against
@@ -253,7 +258,8 @@ when the repo has a `pnpm-lock.yaml`, bun otherwise):
   lockfile changed.
 - `commit-msg`: advisory Conventional Commits hint (never blocks).
 - `pre-push`: bail if the remote branch is ahead, then `test:push`; skipped when
-  there is nothing new to push.
+  the push carries no commit the remote lacks (branch deletes, and tags or
+  branches at already-pushed commits).
 
 ```yaml
 # lefthook.yml in the site
