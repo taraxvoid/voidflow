@@ -70,7 +70,15 @@ async function runHook(snippet: string, stdin = '') {
     mkdirSync(repo)
     // Clean env: if bun test itself runs inside a git hook, an inherited
     // GIT_DIR would point this init at the wrong repo.
-    Bun.spawnSync(['git', 'init', '-q', repo], { env: { PATH: process.env.PATH, HOME: root } })
+    const cleanEnv = { PATH: process.env.PATH, HOME: root }
+    Bun.spawnSync(['git', 'init', '-q', repo], { env: cleanEnv })
+    // A real commit, so pre-push's "is this commit new to the remote" check
+    // (`git rev-list ... --not --remotes`) can resolve the pushed sha.
+    Bun.spawnSync(
+        ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'x'],
+        { cwd: repo, env: cleanEnv },
+    )
+    const head = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repo, env: cleanEnv }).stdout.toString().trim()
     mkdirSync(join(repo, 'node_modules'))
     writeFileSync(join(repo, 'package.json'), '{"scripts":{"test:unit":"x","test:push":"x"}}')
     const out = join(root, 'out')
@@ -89,7 +97,7 @@ async function runHook(snippet: string, stdin = '') {
             GIT_INDEX_FILE: join(repo, '.git', 'index'),
             GIT_WORK_TREE: repo,
         },
-        stdin: new Blob([stdin]),
+        stdin: new Blob([stdin.replaceAll('{head}', head)]),
         stdout: 'pipe',
         stderr: 'pipe',
     })
@@ -105,7 +113,8 @@ async function runHook(snippet: string, stdin = '') {
 describe('git env cleanup before tests', () => {
     // A pushed branch with a new commit, so sync-and-test doesn't take the
     // "nothing new to push" exit. `{1}` (remote) is empty, so no fetch.
-    const pushStdin = `refs/heads/x ${'1'.repeat(40)} refs/heads/x ${'0'.repeat(40)}\n`
+    // `{head}` is the temp repo's real commit (see runHook).
+    const pushStdin = `refs/heads/x {head} refs/heads/x ${'0'.repeat(40)}\n`
 
     test.each([
         ['pre-commit unit', unitRun, ''],
