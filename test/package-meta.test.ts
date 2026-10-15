@@ -26,7 +26,7 @@ describe('mise.toml', () => {
     test('pins every contributor tool to an exact version', () => {
         expect(existsSync(new URL('../mise.toml', import.meta.url))).toBe(true)
         const tools = Bun.TOML.parse(read('mise.toml')).tools as Record<string, string>
-        for (const t of ['just', 'lefthook', 'actionlint', 'shellcheck', 'bun', 'act', 'uv']) {
+        for (const t of ['just', 'lefthook', 'jactionlint', 'shellcheck', 'bun', 'act', 'uv']) {
             expect(tools[t]).toMatch(/^\d+\.\d+\.\d+$/)
         }
     })
