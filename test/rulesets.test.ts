@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { REPOS, build, desired, diff, isPlanGated, normalise } from '../rulesets/index.ts'
+import { NETLIFY, REPOS, build, desired, diff, isPlanGated, normalise } from '../rulesets/index.ts'
 
 const statusChecks = (r: ReturnType<typeof build>) =>
     (
@@ -135,6 +135,15 @@ describe('voidflow release channels', () => {
 
     test('voidflow manages main, prerelease and maintenance', () => {
         expect(cfg.tiers).toEqual(['main', 'prerelease', 'maintenance'])
+    })
+})
+
+describe('taraxvoid.net', () => {
+    test('deploys via voidflow: no Netlify check and no app bypass', () => {
+        const r = build('main', REPOS['taraxvoid/taraxvoid.net'])
+        expect(JSON.stringify(r)).not.toContain(String(NETLIFY))
+        expect(r.bypass_actors.some((a) => a.actor_type === 'Integration')).toBe(false)
+        expect(statusChecks(r)).toEqual(['validate / Validate'])
     })
 })
 

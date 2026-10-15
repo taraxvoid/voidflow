@@ -103,6 +103,9 @@ export const REPOS: Record<string, RepoConfig> = {
     'taraxvoid/synthomaha': site({
         bypass: { main: [app(85455)] },
     }),
+    // Deploys to Cloudflare through voidflow, so no Netlify check and no
+    // deploy app bypass. Private, so skipped until rulesets are available.
+    'taraxvoid/taraxvoid.net': site({ netlify: false }),
     'taraxvoid/voidflow': {
         // main (stable), next (prerelease channel), release/* (maintenance).
         // See RELEASING.md. Promotion next -> main uses merge commits, so no
