@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Shellchecks the `run:` blocks inside composite action.yml files.
-// actionlint already shellchecks .github/workflows/*.yml; it doesn't touch action.yml.
+// jactionlint already shellchecks .github/workflows/*.yml; it doesn't touch action.yml.
 import { $ } from 'bun'
 
 type Doc = { runs?: { steps?: Array<{ shell?: string; run?: string }> } }

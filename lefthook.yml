@@ -1,7 +1,7 @@
 pre-commit:
   parallel: true
   commands:
-    actionlint:
+    jactionlint:
       glob: ".github/workflows/*.{yml,yaml}"
       run: just lint-workflows
     schema-validation:

@@ -1,0 +1,3 @@
+# actionlint's checks only for now; the default profile's extra rules are
+# tracked in a follow-up issue.
+profile: correctness

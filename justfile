@@ -2,8 +2,8 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # renovate: datasource=github-releases depName=zizmorcore/zizmor
 zizmor_version := "1.30.1"
-# renovate: datasource=github-releases depName=rhysd/actionlint
-actionlint_version := "1.7.12"
+# renovate: datasource=github-releases depName=jdx/jactionlint
+jactionlint_version := "2.1.0"
 # renovate: datasource=pypi depName=check-jsonschema
 check_jsonschema_version := "0.38.0"
 
@@ -22,12 +22,21 @@ gitleaks:
 lint-workflows:
     #!/usr/bin/env bash
     set -euo pipefail
-    if command -v actionlint >/dev/null; then
-        actionlint -color
+    # `jactionlint --version`, not `command -v`: a mise shim with no version set is on PATH but fails.
+    if jactionlint --version >/dev/null 2>&1; then
+        jactionlint --color
     else
-        curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
-            | bash -s -- {{ actionlint_version }} /tmp
-        /tmp/actionlint -color
+        dir="${TMPDIR:-/tmp}/jactionlint-{{ jactionlint_version }}"
+        if [[ ! -x "$dir/jactionlint" ]]; then
+            os=$(uname -s | tr '[:upper:]' '[:lower:]')
+            case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; esac
+            tarball="jactionlint_{{ jactionlint_version }}_${os}_${arch}.tar.gz"
+            mkdir -p "$dir"
+            gh release download --repo jdx/jactionlint --pattern "$tarball" "v{{ jactionlint_version }}" --dir "$dir" --clobber
+            gh attestation verify -R jdx/jactionlint "$dir/$tarball"
+            tar xf "$dir/$tarball" -C "$dir" jactionlint
+        fi
+        "$dir/jactionlint" --color
     fi
 
 # Validate actions/**/action.yml and workflow schemas against SchemaStore
@@ -74,7 +83,7 @@ install-hooks:
 
 # Verify required tools are installed
 doctor:
-    @command -v shellcheck >/dev/null && echo "shellcheck:  $(shellcheck --version | sed -n 2p)" || echo "shellcheck:  NOT FOUND (needed for actionlint)"
+    @command -v shellcheck >/dev/null && echo "shellcheck:  $(shellcheck --version | sed -n 2p)" || echo "shellcheck:  NOT FOUND (needed for jactionlint)"
     @command -v lefthook >/dev/null && echo "lefthook:  $(lefthook version)" || echo "lefthook:  NOT FOUND (needed to run git hooks - run 'just doctor' then 'lefthook install')"
     @command -v gitleaks >/dev/null && echo "gitleaks:  $(gitleaks version)" || echo "gitleaks:  NOT FOUND (needed for 'just lint')"
     @command -v act >/dev/null && echo "act:  $(act --version)" || echo "act:  NOT FOUND (needed for local dry-run - not a blocker to commit/push)"
