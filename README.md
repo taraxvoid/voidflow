@@ -329,7 +329,11 @@ manages `main`, `prerelease` (`next`) and `maintenance` (`release/*`) and sets
 `linearHistory: false` so `next` can be promoted into `main` with a merge commit.
 Uses the `gh` CLI for auth (needs admin on the repos). Rulesets that are not in
 the config are reported and left alone; only `retire` entries are ever deleted,
-and only with `--prune`. It is repo tooling, not part of the published package.
+and only with `--prune`. Private repos on a plan without rulesets (GitHub answers
+403, e.g. a free personal account) are skipped and listed at the end rather than
+failing the run, so `--check` stays green and they pick up their rulesets once the
+repo goes public or the plan changes. It is repo tooling, not part of the published
+package.
 
 ## Deployments
 
