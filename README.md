@@ -3,7 +3,7 @@
 Shared CI and deploy pipeline for a small fleet of Astro sites on Cloudflare Workers, and the bun tools around them. One set of reusable GitHub Actions workflows and composite actions keeps lint, type checks, license policy, Playwright and axe-core accessibility tests, Unlighthouse budgets, and deploys identical across every site.
 
 - **SHA-pinned.** Every third-party action in this repo is pinned to a full commit SHA with a version comment.
-- **Audited.** Workflows are checked with [zizmor](https://github.com/zizmorcore/zizmor), [actionlint](https://github.com/rhysd/actionlint), check-jsonschema and shellcheck on every change (see [Self-validation](#self-validation)).
+- **Audited.** Workflows are checked with [zizmor](https://github.com/zizmorcore/zizmor), [jactionlint](https://github.com/jdx/jactionlint), check-jsonschema and shellcheck on every change (see [Self-validation](#self-validation)).
 - **In production.** It runs the pipelines for the sites listed under [Used by](#used-by), including the marketing site for [RavenFlight Industries, LLC](https://rvnflt.com/github).
 
 It is semi-opinionated: the defaults match how my own sites are built (bun, Astro, Playwright).
@@ -153,7 +153,8 @@ packages): gitleaks over the full history, install (with the same Socket
 scanner handling as `site-ci.yml`), tools from the repo's `mise.toml` when it
 has one, then whichever of `lint`, `check`, `build` and `test` `package.json`
 defines, and `check:licenses` when dependencies or `scripts/` changed. When
-workflows change it also runs actionlint and
+workflows change it also runs jactionlint (same profile handling as
+`site-ci.yml`) and
 [zizmor](https://github.com/zizmorcore/zizmor). The bun version comes from
 `.bun-version` when present.
 
@@ -344,7 +345,7 @@ these hooks and voidflow CI:
 [tools]
 lefthook = "2.2.1"
 gitleaks = "8.30.1"
-actionlint = "1.7.12"
+jactionlint = "2.1.0"
 ```
 
 Renovate bumps `mise.toml` natively. Set the `prepare` script so `bun install`
@@ -463,9 +464,9 @@ Treat `@main` and `@next` as unstable.
 
 This repo validates its own workflows and composite actions (`.github/workflows/ci.yml`):
 
-- **actionlint**: workflow schema/logic; also shellchecks `run:` steps in `.github/workflows/*.yml` automatically (`shellcheck` ships on `ubuntu-latest`)
+- **jactionlint**: workflow schema/logic; also shellchecks `run:` steps in `.github/workflows/*.yml` automatically (`shellcheck` ships on `ubuntu-latest`)
 - **check-jsonschema**: schema-checks `actions/**/action.yml` and the workflow files against [SchemaStore](https://www.schemastore.org/)'s `github-action.json` / `github-workflow.json`
-- **shellcheck** (`scripts/shellcheck-actions.ts`): checks `run:` steps inside `actions/**/action.yml`, which actionlint doesn't reach
+- **shellcheck** (`scripts/shellcheck-actions.ts`): checks `run:` steps inside `actions/**/action.yml`, which jactionlint doesn't reach
 - **zizmor**: security audit (unpinned refs, script injection via `${{ }}` in `run:`, excess permissions, etc.)
 
 ### Local dev setup
