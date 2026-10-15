@@ -1,7 +1,7 @@
 {
     "name": "@taraxvoid/voidflow",
     "version": "0.13.0",
-    "description": "Shared workflows, actions and tooling for @taraxvoid sites",
+    "description": "Shared workflows, hooks and tooling for @taraxvoid repos",
     "license": "MIT",
     "keywords": [
         "github-actions",
