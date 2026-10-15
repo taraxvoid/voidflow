@@ -96,6 +96,18 @@ rulesets-plan *args:
 rulesets-apply *args:
     bun scripts/apply-rulesets.ts --apply {{ args }}
 
+# Show how each repo's Cloudflare deploy tokens differ from cloudflare/tokens.ts (read-only; needs CF_TOKEN_ADMIN)
+cf-tokens-plan *args:
+    bun scripts/cf-tokens.ts {{ args }}
+
+# Create/update/rotate deploy tokens and set each repo's env secret (needs CF_TOKEN_ADMIN and gh)
+cf-tokens-apply *args:
+    bun scripts/cf-tokens.ts --apply {{ args }}
+
+# Print the live names of the permission group ids in cloudflare/tokens.ts
+cf-tokens-groups:
+    bun scripts/cf-tokens.ts --groups
+
 # Open the next -> main promotion PR; merge it with a merge commit, not a squash
 promote:
     #!/usr/bin/env bash

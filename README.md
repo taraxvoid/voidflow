@@ -325,6 +325,51 @@ Uses the `gh` CLI for auth (needs admin on the repos). Rulesets that are not in
 the config are reported and left alone; only `retire` entries are ever deleted,
 and only with `--prune`. It is repo tooling, not part of the published package.
 
+## Cloudflare deploy tokens as code
+
+Deploy tokens for the fleet live in [`cloudflare/tokens.ts`](cloudflare/tokens.ts):
+per repo and GitHub environment, the Worker it deploys and the zones of its
+custom domains. Each token is account-owned and scoped to that one Worker (the
+Workers Editor role on it), plus Workers Routes Write on those zones only, with
+a 90-day expiry.
+
+```sh
+export CF_TOKEN_ADMIN=...           # Account API Tokens Edit, Workers Scripts Read, Zone Read; local only
+just cf-tokens-plan                 # read-only: diff every repo's tokens against the config
+just cf-tokens-plan --check         # exit 1 on drift or a token within 14 days of expiry
+just cf-tokens-apply                # create/update, rotate tokens due, set CLOUDFLARE_API_TOKEN per env
+just cf-tokens-apply --rotate       # rotate every token now
+just cf-tokens-apply --prune        # also delete the old tokens a repo lists under `retire`
+just cf-tokens-groups               # live names of the permission group ids the config uses
+```
+
+New values go straight from the API into `gh secret set CLOUDFLARE_API_TOKEN
+--env <env>` and are never printed. A rotation creates the new token, sets the
+secret, then deletes the old token, so a deploy in between still works. Policy
+drift is fixed in place without changing the value.
+
+Limits worth knowing:
+
+- Per-Worker grants apply only to Workers that exist. A Worker's first deploy
+  needs an admin token; the tool refuses to plan for a Worker it cannot find.
+- Custom Domains do not support per-Worker roles yet. If a deploy fails on the
+  domain with only the zone grant, add `fallback: { reason, since }` to that
+  env. Its token then also gets account-wide Workers Scripts Write, every plan
+  prints it, and `apply` sets the env variable `CF_TOKEN_FALLBACK`. Pass that
+  to the deploy action so every deploy warns:
+
+  ```yaml
+  - uses: taraxvoid/voidflow/actions/cloudflare-deploy@<sha> # <version>
+    with:
+      env: ${{ needs.resolve-env.outputs.env }}
+      cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      token-fallback: ${{ vars.CF_TOKEN_FALLBACK }}
+  ```
+
+Cut over one repo at a time: `just cf-tokens-apply --repo <name>`, deploy, then
+`just cf-tokens-apply --repo <name> --prune` to delete its old token. Repo
+tooling, not part of the published package.
+
 ## Deployments
 
 Example deployment job added to your workflow above. `resolve-env` maps the
