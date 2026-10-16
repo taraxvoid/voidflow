@@ -70,7 +70,8 @@ export type RepoConfig = {
     retire: string[]
 }
 
-const SITE_CHECK = 'validate / Validate'
+// Reported by both site-ci.yml and tool-ci.yml when the caller job is `validate`.
+const VALIDATE_CHECK = 'validate / Validate'
 
 // Sites run a single stable `main` that deploys to prod (previews on PRs),
 // i.e. voidflow's `single-environment` mode. Multi-environment repos
@@ -78,12 +79,26 @@ const SITE_CHECK = 'validate / Validate'
 const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     tiers: ['main'],
     netlify: true,
-    checks: [SITE_CHECK],
+    checks: [VALIDATE_CHECK],
     codeowners: true,
     linearHistory: true,
     bypass: {},
     aka: {},
     retire: ['next (staging)', 'live (prod)'],
+    ...over,
+})
+
+// Tools (CLIs, libraries) run a single `main` validated by tool-ci.yml, with
+// no Netlify deploy and nothing to retire.
+export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
+    tiers: ['main'],
+    netlify: false,
+    checks: [VALIDATE_CHECK],
+    codeowners: true,
+    linearHistory: true,
+    bypass: {},
+    aka: {},
+    retire: [],
     ...over,
 })
 

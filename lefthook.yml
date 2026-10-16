@@ -1,7 +1,7 @@
 pre-commit:
   parallel: true
   commands:
-    actionlint:
+    jactionlint:
       glob: ".github/workflows/*.{yml,yaml}"
       run: just lint-workflows
     schema-validation:
@@ -17,6 +17,9 @@ commit-msg:
       run: scripts/check-commit-msg.sh {1}
 
 pre-push:
+  parallel: true
   commands:
     zizmor:
       run: just security
+    test:
+      run: bun test

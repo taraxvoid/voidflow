@@ -1,143 +1,23 @@
-# Shared git hooks for the Astro site stack (bun, or pnpm when the repo has a
-# pnpm-lock.yaml). Sites pull this in as a lefthook remote and call their own
-# package.json scripts, so a script a site does not define is skipped
-# (`<pm> run --if-present`).
+# Renamed to lefthook/base.yml. Change the voidflow remote's `configs` entry
+# in your lefthook.yml:
 #
-#   # lefthook.yml in the site
-#   remotes:
-#     - git_url: https://github.com/taraxvoid/voidflow
-#       ref: <release tag>       # a tag or branch (not a SHA); bump deliberately
-#       configs:
-#         - lefthook/site.yml
+#   configs:
+#     - lefthook/base.yml
 #
-# Lefthook merges lefthook.yml < remotes < lefthook-local.yml, so a site's own
-# lefthook.yml can ADD commands (e.g. image compression) but cannot override
-# one defined here. Differences go through package.json scripts instead, e.g.
-# `test:unit:precommit` replaces `test:unit` for the pre-commit unit step, and
-# `check:precommit` replaces `check` for the typecheck step.
-
-templates:
-  # Package manager: pnpm when the repo is a pnpm project, bun otherwise.
-  pm: "$(if [ -f pnpm-lock.yaml ]; then echo pnpm; else echo bun; fi)"
+# This stub stays because a `ref` bump (e.g. Renovate's) leaves `configs`
+# untouched, and lefthook skips a missing remote config without a warning, so
+# a plain rename would turn every hook off silently. Instead, commits and
+# pushes fail with the fix until the entry is updated.
 
 pre-commit:
-  skip: [merge, rebase]
   commands:
-    deps-installed:
-      priority: 1
-      run: |
-        if [ ! -d node_modules ]; then
-          echo "pre-commit: 'node_modules' is missing, dependencies aren't installed."
-          echo "            Run '{pm} install' before committing, then commit again."
-          exit 1
-        fi
-    format:
-      priority: 2
-      run: "{pm} run --if-present format"
-      stage_fixed: true
-    lint-actions:
-      priority: 3
-      run: "{pm} run --if-present lint:actions"
-    typecheck:
-      priority: 3
-      # A site that can check less than everything pre-commit (e.g. only the
-      # workspace packages a commit touches) defines `check:precommit`;
-      # otherwise check runs. CI keeps calling `check` directly.
-      run: |
-        if grep -q '"check:precommit"' package.json; then
-          {pm} run check:precommit
-        else
-          {pm} run --if-present check
-        fi
-    unit:
-      priority: 3
-      # A site that can't run its whole suite pre-commit (e.g. tests that need
-      # a built dist/) defines `test:unit:precommit`; otherwise test:unit runs.
-      run: |
-        if grep -q '"test:unit:precommit"' package.json; then
-          {pm} run test:unit:precommit
-        else
-          {pm} run --if-present test:unit
-        fi
-    licenses:
-      priority: 3
-      glob: "{package.json,bun.lock,pnpm-lock.yaml}"
-      run: "{pm} run --if-present check:licenses"
-    audit:
-      # Local only: hits a remote vulnerability database and can hang offline,
-      # so it runs when dependencies changed and fails closed.
-      priority: 3
-      glob: "{package.json,bun.lock,pnpm-lock.yaml}"
-      # Checked by hand: under bun, `--if-present` falls through to
-      # the system `audit` binary (macOS /usr/sbin/audit) when the site has no
-      # audit script, and that exits non-zero.
-      run: |
-        if grep -q '"audit"' package.json; then
-          {pm} run audit
-        fi
-
-commit-msg:
-  commands:
-    conventional-commit-hint:
-      # Advisory only: prints a nudge toward Conventional Commits, never blocks.
-      run: |
-        first_line=$(head -n1 "{1}")
-        pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+'
-        if ! printf '%s' "$first_line" | grep -Eq "$pattern"; then
-          echo ""
-          echo "commit-msg: this commit message doesn't look like a Conventional Commit."
-          echo "            (just a heads-up; the commit still went through)"
-          echo ""
-          echo '  e.g. "feat: add newsletter signup" or "fix(ical): correct dtstart offset"'
-          echo "  see https://www.conventionalcommits.org for the full format"
-          echo ""
-        fi
-        exit 0
+    voidflow-site-yml-renamed:
+      run: &renamed |
+        echo "voidflow: lefthook/site.yml was renamed to lefthook/base.yml." >&2
+        echo "          Change the voidflow remote's configs entry in lefthook.yml to lefthook/base.yml." >&2
+        exit 1
 
 pre-push:
   commands:
-    sync-and-test:
-      use_stdin: true
-      run: |
-        # Nothing new to push (branch delete, or a tag or branch pointing at
-        # commits the remote already has): skip the checks. A commit counts
-        # as new when no ref of the remote contains it.
-        has_new_commits=false
-        remote_name="{1}"
-        remote_branch=""
-        while read -r _local_ref local_sha remote_ref _remote_sha; do
-          # An all-zero local sha is a delete.
-          case "$local_sha" in *[!0]*) ;; *) continue ;; esac
-          if [ -z "$(git rev-list -n 1 "$local_sha" --not --remotes="$remote_name" 2>/dev/null)" ]; then
-            continue
-          fi
-          has_new_commits=true
-          case "$remote_ref" in refs/heads/*) remote_branch="${remote_ref#refs/heads/}" ;; esac
-        done
-        if [ "$has_new_commits" = false ]; then
-          echo "pre-push: no new commits to push, skipping checks"
-          exit 0
-        fi
-
-        # Bail early if the remote branch has commits we don't have.
-        if [ -n "$remote_name" ] && [ -n "$remote_branch" ]; then
-          if git fetch "$remote_name" "$remote_branch" --quiet 2>/dev/null; then
-            fetch_head=$(git rev-parse FETCH_HEAD 2>/dev/null) || true
-            local_head=$(git rev-parse HEAD)
-            if [ -n "$fetch_head" ] && [ "$fetch_head" != "$local_head" ]; then
-              merge_base=$(git merge-base HEAD "$fetch_head" 2>/dev/null) || true
-              if [ -n "$merge_base" ] && [ "$merge_base" != "$fetch_head" ]; then
-                echo "pre-push: remote has commits not in local branch, pull or rebase before pushing"
-                exit 1
-              fi
-            fi
-          fi
-        fi
-
-        if [ ! -d node_modules ]; then
-          echo "pre-push: 'node_modules' is missing, dependencies aren't installed."
-          echo "          Run '{pm} install' before pushing, then push again."
-          exit 1
-        fi
-
-        {pm} run --if-present test:push
+    voidflow-site-yml-renamed:
+      run: *renamed
