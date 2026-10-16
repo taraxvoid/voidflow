@@ -5,7 +5,7 @@ zizmor_version := "1.30.1"
 # renovate: datasource=github-releases depName=jdx/jactionlint
 jactionlint_version := "2.1.0"
 # renovate: datasource=pypi depName=check-jsonschema
-check_jsonschema_version := "0.38.0"
+check_jsonschema_version := "0.38.2"
 
 # List available recipes
 default:

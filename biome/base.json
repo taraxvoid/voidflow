@@ -1,0 +1,63 @@
+{
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+    "assist": {
+        "enabled": true,
+        "actions": {
+            "source": {
+                "organizeImports": "on"
+            }
+        }
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineEnding": "lf",
+        "lineWidth": 80,
+        "useEditorconfig": true
+    },
+    "javascript": {
+        "formatter": {
+            "arrowParentheses": "always",
+            "jsxQuoteStyle": "double",
+            "quoteProperties": "asNeeded",
+            "quoteStyle": "single",
+            "semicolons": "asNeeded",
+            "trailingCommas": "all"
+        }
+    },
+    "html": {
+        "formatter": {
+            "indentScriptAndStyle": false,
+            "selfCloseVoidElements": "always"
+        }
+    },
+    "css": {
+        "linter": {
+            "enabled": false
+        }
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended"
+        }
+    },
+    "overrides": [
+        {
+            "includes": ["**/*.astro"],
+            "linter": {
+                "rules": {
+                    "correctness": {
+                        "noUnusedImports": "off",
+                        "noUnusedVariables": "off"
+                    }
+                }
+            }
+        }
+    ]
+}

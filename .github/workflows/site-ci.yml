@@ -176,7 +176,7 @@ jobs:
 
       - name: Setup Node (pnpm)
         if: inputs.package-manager == 'pnpm'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json # reads `volta` / `engines`
           cache: pnpm
@@ -287,6 +287,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: 2.1.0
 
+      - name: Check Biome version
+        if: steps.scripts.outputs.lint == 'true'
+        # Advisory only: Biome 1.x can't extend the shared config
+        # (@taraxvoid/voidflow/biome).
+        run: |
+          v=$(jq -r '.version // empty' node_modules/@biomejs/biome/package.json 2>/dev/null || true)
+          if [[ "$v" == 1.* ]]; then
+            echo "::warning file=package.json::Biome $v is installed. voidflow's shared config (@taraxvoid/voidflow/biome) needs Biome 2."
+          fi
+        shell: bash
+
       - name: Lint Code
         if: steps.scripts.outputs.lint == 'true'
         run: '"$PM" run lint'
@@ -354,7 +365,7 @@ jobs:
 
       - name: Upload failure reports
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-reports
           path: |

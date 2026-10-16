@@ -1,15 +1,17 @@
 {
     "name": "@taraxvoid/voidflow",
-    "version": "0.13.0",
-    "description": "Shared workflows, actions and tooling for @taraxvoid sites",
+    "version": "0.13.1",
+    "description": "Shared workflows, hooks and tooling for @taraxvoid repos",
     "license": "MIT",
     "keywords": [
         "github-actions",
         "ci",
         "reusable-workflows",
+        "lefthook",
+        "renovate",
+        "bun",
         "playwright",
         "unlighthouse",
-        "astro",
         "cloudflare"
     ],
     "homepage": "https://github.com/taraxvoid/voidflow#readme",
@@ -33,17 +35,21 @@
             "types": "./playwright/index.d.mts",
             "default": "./playwright/index.mjs"
         },
+        "./biome": "./biome/base.json",
         "./package.json": "./package.json"
     },
     "files": [
+        "biome",
         "playwright",
         "scripts/unlighthouse",
         "scripts/check-licenses.ts"
     ],
     "engines": {
-        "bun": ">=1.4.0"
+        "bun": ">=1.4.0",
+        "node": ">=22"
     },
     "scripts": {
+        "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
         "test": "bun test"
     },
     "peerDependencies": {
@@ -55,6 +61,7 @@
         }
     },
     "devDependencies": {
+        "@biomejs/biome": "2.5.14",
         "@playwright/test": "1.64.0",
         "@socketsecurity/bun-security-scanner": "1.1.3"
     },

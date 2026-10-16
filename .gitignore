@@ -17,6 +17,10 @@ node_modules/
 .superpowers
 docs/superpowers
 
+# mise state from runs with HOME at the repo root
+/.cache/
+/.local/
+
 # OS
 .DS_Store
 Thumbs.db
