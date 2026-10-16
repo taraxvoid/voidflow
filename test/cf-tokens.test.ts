@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
     REPOS,
+    checkRepos,
+    loadRepos,
     RENEW_DAYS,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
@@ -183,5 +188,107 @@ describe('plan', () => {
             ['delete', 'old'],
             ['ok', 'new'],
         ])
+    })
+})
+
+describe('checkRepos', () => {
+    const DEV = '189861042e47aa72c52e44fe4d18e723'
+    const PROD = 'e632b9f816f9f2a62ed9571d352fd4ae'
+    const good = {
+        'ravenflight/site': {
+            account: PROD,
+            envs: [
+                { env: 'dev', worker: 'site-dev', zones: [], account: DEV },
+                { env: 'prod', worker: 'site', zones: ['example.com'] },
+            ],
+            retire: ['old', { account: DEV, name: 'old-dev' }],
+        },
+    }
+
+    test('accepts the built-in config and a split-account one', () => {
+        expect(checkRepos(REPOS)).toBe(REPOS)
+        expect(checkRepos(good)).toBe(good)
+    })
+
+    test('names every problem by its path', () => {
+        const bad = {
+            nope: { account: PROD, envs: [], retire: [] },
+            'a/b': {
+                account: 'not-hex',
+                envs: [
+                    { env: 'prod', zones: 'example.com', account: 'x' },
+                    {
+                        env: 'prod',
+                        worker: 'w',
+                        zones: [],
+                        fallback: { reason: 'custom-domain' },
+                    },
+                ],
+                retire: [{ name: 'old' }],
+            },
+        }
+        let msg = ''
+        try {
+            checkRepos(bad)
+        } catch (e) {
+            msg = (e as Error).message
+        }
+        for (const want of [
+            '"nope": key is not owner/name',
+            '"nope".envs: empty',
+            '"a/b".account: not a 32-hex account id',
+            '"a/b".envs[0].worker: missing',
+            '"a/b".envs[0].zones: not a list of zone names',
+            '"a/b".envs[0].account: not a 32-hex account id',
+            '"a/b".envs[1].env: duplicate "prod"',
+            '"a/b".envs[1].fallback: needs reason and since',
+            '"a/b".retire[0]: a name or { account, name }',
+        ]) {
+            expect(msg).toContain(want)
+        }
+    })
+
+    test('rejects a config that is not an object of repos', () => {
+        expect(() => checkRepos(undefined)).toThrow('not an object')
+        expect(() => checkRepos([])).toThrow('not an object')
+    })
+})
+
+describe('loadRepos', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cf-tokens-'))
+    const cfg = {
+        'ravenflight/site': {
+            account: 'e632b9f816f9f2a62ed9571d352fd4ae',
+            envs: [{ env: 'prod', worker: 'site', zones: [] }],
+            retire: [],
+        },
+    }
+    writeFileSync(
+        join(dir, 'named.ts'),
+        `export const REPOS = ${JSON.stringify(cfg)}`,
+    )
+    writeFileSync(
+        join(dir, 'default.ts'),
+        `export default ${JSON.stringify(cfg)}`,
+    )
+    writeFileSync(join(dir, 'empty.ts'), 'export const other = 1')
+
+    test('without a path, the built-in config', async () => {
+        expect(await loadRepos(undefined, dir)).toBe(REPOS)
+    })
+
+    test('a REPOS or default export, relative to the base dir', async () => {
+        expect(await loadRepos('named.ts', dir)).toEqual(cfg)
+        expect(await loadRepos(join(dir, 'default.ts'), '/')).toEqual(cfg)
+    })
+
+    test('names the file when it has no config or a bad one', async () => {
+        await expect(loadRepos('empty.ts', dir)).rejects.toThrow(
+            `${join(dir, 'empty.ts')}: no REPOS or default export`,
+        )
+        writeFileSync(join(dir, 'bad.ts'), 'export const REPOS = { x: 1 }')
+        await expect(loadRepos('bad.ts', dir)).rejects.toThrow(
+            `${join(dir, 'bad.ts')}: `,
+        )
     })
 })

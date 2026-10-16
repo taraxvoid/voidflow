@@ -14,6 +14,8 @@
  * account-wide Workers Scripts Write. Every plan and every deploy says so.
  */
 
+import { resolve } from 'node:path'
+
 export type Fallback = {
     /** Why the narrow token was not enough, e.g. 'custom-domain'. */
     reason: string
@@ -122,6 +124,88 @@ export const repoAccounts = (cfg: RepoConfig) => [
         ...retireTargets(cfg).map((r) => r.account),
     ]),
 ]
+
+// ---- config from elsewhere --------------------------------------------------
+
+/**
+ * Check an untyped config (another repo's `--config` module) and throw with
+ * every problem, by path. Returns the config unchanged.
+ */
+export function checkRepos(x: unknown): Record<string, RepoConfig> {
+    const isObj = (v: unknown): v is Record<string, unknown> =>
+        typeof v === 'object' && v !== null && !Array.isArray(v)
+    const isStr = (v: unknown): v is string =>
+        typeof v === 'string' && v !== ''
+    const isAcct = (v: unknown) =>
+        typeof v === 'string' && /^[0-9a-f]{32}$/.test(v)
+    if (!isObj(x)) throw new Error('config is not an object of repos')
+    const errs: string[] = []
+    const bad = (path: string, why: string) => errs.push(`${path}: ${why}`)
+    for (const [repo, cfg] of Object.entries(x)) {
+        const at = JSON.stringify(repo)
+        if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) bad(at, 'key is not owner/name')
+        if (!isObj(cfg)) {
+            bad(at, 'not an object')
+            continue
+        }
+        if (!isAcct(cfg.account)) bad(`${at}.account`, 'not a 32-hex account id')
+        if (!Array.isArray(cfg.envs)) bad(`${at}.envs`, 'not a list')
+        else if (cfg.envs.length === 0) bad(`${at}.envs`, 'empty')
+        const seen = new Set<string>()
+        for (const [i, env] of (Array.isArray(cfg.envs) ? cfg.envs : []).entries()) {
+            const e = `${at}.envs[${i}]`
+            if (!isObj(env)) {
+                bad(e, 'not an object')
+                continue
+            }
+            if (!isStr(env.env)) bad(`${e}.env`, 'missing')
+            else if (seen.has(env.env)) bad(`${e}.env`, `duplicate "${env.env}"`)
+            else seen.add(env.env)
+            if (!isStr(env.worker)) bad(`${e}.worker`, 'missing')
+            if (!Array.isArray(env.zones) || !env.zones.every(isStr))
+                bad(`${e}.zones`, 'not a list of zone names')
+            if (env.account !== undefined && !isAcct(env.account))
+                bad(`${e}.account`, 'not a 32-hex account id')
+            if (
+                env.fallback !== undefined &&
+                !(
+                    isObj(env.fallback) &&
+                    isStr(env.fallback.reason) &&
+                    isStr(env.fallback.since)
+                )
+            )
+                bad(`${e}.fallback`, 'needs reason and since')
+        }
+        if (!Array.isArray(cfg.retire)) bad(`${at}.retire`, 'not a list')
+        for (const [i, r] of (Array.isArray(cfg.retire) ? cfg.retire : []).entries()) {
+            if (!(isStr(r) || (isObj(r) && isAcct(r.account) && isStr(r.name))))
+                bad(`${at}.retire[${i}]`, 'a name or { account, name }')
+        }
+    }
+    if (errs.length) throw new Error(errs.join('\n'))
+    return x as Record<string, RepoConfig>
+}
+
+/**
+ * The repos to manage: REPOS above, or the `REPOS` (or default) export of
+ * the module at `path`, resolved against `base`. Lets another org keep its
+ * fleet map in its own (private) repo and run this script against it.
+ */
+export async function loadRepos(
+    path: string | undefined,
+    base: string,
+): Promise<Record<string, RepoConfig>> {
+    if (!path) return REPOS
+    const file = resolve(base, path)
+    const mod = (await import(file)) as { REPOS?: unknown; default?: unknown }
+    const cfg = mod.REPOS ?? mod.default
+    if (cfg === undefined) throw new Error(`${file}: no REPOS or default export`)
+    try {
+        return checkRepos(cfg)
+    } catch (e) {
+        throw new Error(`${file}: ${(e as Error).message}`)
+    }
+}
 
 const account = (id: string) => `com.cloudflare.api.account.${id}`
 

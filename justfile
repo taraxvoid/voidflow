@@ -100,18 +100,20 @@ rulesets-apply *args:
 
 # CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
 cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
+# So a relative --config resolves from where `just` was run, not this directory.
+cf_tokens := cf_admin + " env CF_TOKENS_BASE=" + quote(invocation_directory()) + " bun scripts/cf-tokens.ts"
 
 # Show how each repo's Cloudflare deploy tokens differ from cloudflare/tokens.ts (read-only; needs CF_TOKEN_ADMIN)
 cf-tokens-plan *args:
-    {{ cf_admin }} bun scripts/cf-tokens.ts {{ args }}
+    {{ cf_tokens }} {{ args }}
 
 # Create/update/rotate deploy tokens and set each repo's env secret (needs CF_TOKEN_ADMIN and gh)
 cf-tokens-apply *args:
-    {{ cf_admin }} bun scripts/cf-tokens.ts --apply {{ args }}
+    {{ cf_tokens }} --apply {{ args }}
 
 # Print the live names of the permission group ids in cloudflare/tokens.ts
-cf-tokens-groups:
-    {{ cf_admin }} bun scripts/cf-tokens.ts --groups
+cf-tokens-groups *args:
+    {{ cf_tokens }} --groups {{ args }}
 
 # Open the next -> main promotion PR; merge it with a merge commit, not a squash
 promote:

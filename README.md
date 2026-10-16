@@ -394,6 +394,37 @@ Cut over one repo at a time: `just cf-tokens-apply --repo <name>`, deploy, then
 `just cf-tokens-apply --repo <name> --prune` to delete its old token. Repo
 tooling, not part of the published package.
 
+The built-in config covers taraxvoid repos only. Another org keeps its fleet
+map in its own (private) repo, as a module that exports `REPOS` (or a default)
+of the same shape, and passes it with `--config`:
+
+```ts
+// ravenflight/infra: cf-tokens.ts
+import type { RepoConfig } from '../voidflow/cloudflare/tokens.ts' // optional
+
+const DEV = '<dev account id>' // dev and staging
+const PROD = '<prod account id>'
+
+export const REPOS: Record<string, RepoConfig> = {
+    'ravenflight/site': {
+        account: PROD,
+        envs: [
+            { env: 'dev', worker: 'site-dev', zones: [], account: DEV },
+            { env: 'prod', worker: 'site', zones: ['example.com'] },
+        ],
+        retire: [],
+    },
+}
+```
+
+```sh
+just -f ../voidflow/justfile cf-tokens-plan --config cf-tokens.ts
+```
+
+A relative path resolves from the directory `just` runs in. The config is
+checked before any API call, and every problem is reported by its path.
+`CF_TOKEN_ADMIN` then needs to cover that org's accounts.
+
 ## Deployments
 
 Example deployment job added to your workflow above. `resolve-env` maps the

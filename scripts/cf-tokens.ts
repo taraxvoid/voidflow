@@ -10,6 +10,12 @@
  *   bun scripts/cf-tokens.ts --apply --rotate   # ...and rotate every token now
  *   bun scripts/cf-tokens.ts --apply --prune    # ...and delete the repo's `retire` tokens
  *   bun scripts/cf-tokens.ts --groups           # live names of the permission group ids used
+ *   bun scripts/cf-tokens.ts --config ../infra/cf-tokens.ts   # another fleet's config
+ *
+ * The config is REPOS in cloudflare/tokens.ts unless --config names a module
+ * exporting `REPOS` (or a default) of the same shape. A relative path resolves
+ * against CF_TOKENS_BASE (the just recipes set it to the directory `just` was
+ * run from), else the current directory.
  *
  * Needs CF_TOKEN_ADMIN: a user-owned token covering every account in the
  * config (envs can sit in different accounts, e.g. dev/staging apart from
@@ -19,12 +25,12 @@
  */
 import { parseArgs } from 'node:util'
 import {
-    REPOS,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
     WORKER_EDITOR,
     envAccount,
     expiresOn,
+    loadRepos,
     plan,
     policies,
     repoAccounts,
@@ -45,7 +51,16 @@ const { values } = parseArgs({
         check: { type: 'boolean', default: false },
         groups: { type: 'boolean', default: false },
         repo: { type: 'string' },
+        config: { type: 'string' },
     },
+})
+
+const REPOS = await loadRepos(
+    values.config,
+    process.env.CF_TOKENS_BASE || process.cwd(),
+).catch((e: Error) => {
+    console.error(e.message)
+    process.exit(2)
 })
 
 const ADMIN = process.env.CF_TOKEN_ADMIN
