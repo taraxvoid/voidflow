@@ -30,6 +30,12 @@ inputs:
   migrate-d1:
     description: If 'true', run 'bun run db:migrate:<env>' before deploying.
     default: 'false'
+  token-fallback:
+    description: >
+      Pass vars.CF_TOKEN_FALLBACK. Set by 'just cf-tokens-apply' when the
+      env's token needed an account-wide fallback; non-empty adds a warning
+      to every deploy so the wider grant is never silent.
+    default: ''
 
 outputs:
   deployment-url:
@@ -39,6 +45,17 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Warn about a fallback token
+      if: ${{ inputs.token-fallback != '' }}
+      shell: bash
+      env:
+        FALLBACK: ${{ inputs.token-fallback }}
+        ENV_NAME: ${{ inputs.env }}
+      run: |
+        msg="Cloudflare token for $ENV_NAME has an account-wide Workers grant: $FALLBACK. See voidflow cloudflare/tokens.ts."
+        echo "::warning title=Cloudflare token fallback::$msg"
+        printf '> [!WARNING]\n> %s\n' "$msg" >> "$GITHUB_STEP_SUMMARY"
+
     - name: Apply D1 migrations
       if: ${{ inputs.migrate-d1 == 'true' }}
       shell: bash

@@ -417,6 +417,106 @@ failing the run, so `--check` stays green and they pick up their rulesets once t
 repo goes public or the plan changes. It is repo tooling, not part of the published
 package.
 
+## Cloudflare deploy tokens as code
+
+Deploy tokens for the fleet live in [`cloudflare/tokens.ts`](cloudflare/tokens.ts):
+per repo and GitHub environment, the Worker it deploys and the zones of its
+custom domains. An env can set its own `account` (say dev/staging in a
+separate account from prod); otherwise it uses the repo's. Each token is owned
+by its env's account and scoped to that one Worker (the
+Workers Editor role on it), plus Workers Routes Write on those zones only, with
+a 90-day expiry.
+
+The targets need `CF_TOKEN_ADMIN`: a user-owned token (account-owned tokens
+reach only their own account) that includes every account in the config, with
+Account API Tokens Edit, Workers Scripts Read and Zone Read on each, a short
+expiry and an IP filter. Adding a repo in a new account means adding that
+account to this token. It can mint
+deploy tokens, so it stays on a maintainer's machine and never goes into CI.
+[fnox](https://github.com/jdx/fnox) supplies it: the committed
+[`fnox.toml`](fnox.toml) declares the secret and a provider name, `cf-admin`,
+but no value. Each maintainer defines that provider in
+`~/.config/fnox/config.toml`. On macOS the Keychain needs nothing installed:
+
+```toml
+[providers.cf-admin]
+type = "keychain"
+service = "fnox"
+```
+
+Then store the value once with `fnox set -k voidflow-cf-token-admin
+CF_TOKEN_ADMIN` (it prompts with hidden input), and confirm with `just doctor`.
+Any other fnox provider works too (age, 1Password, `pass`...). If
+`CF_TOKEN_ADMIN` is already in the environment, the targets use it and skip
+fnox.
+
+```sh
+just cf-tokens-plan                 # read-only: diff every repo's tokens against the config
+just cf-tokens-plan --check         # exit 1 on drift or a token within 14 days of expiry
+just cf-tokens-apply                # create/update, rotate tokens due, set CLOUDFLARE_API_TOKEN per env
+just cf-tokens-apply --rotate       # rotate every token now
+just cf-tokens-apply --prune        # also delete the old tokens a repo lists under `retire`
+just cf-tokens-groups               # live names of the permission group ids the config uses
+```
+
+New values go straight from the API into `gh secret set CLOUDFLARE_API_TOKEN
+--env <env>` and are never printed. A rotation creates the new token, sets the
+secret, then deletes the old token, so a deploy in between still works. Policy
+drift is fixed in place without changing the value.
+
+Limits worth knowing:
+
+- Per-Worker grants apply only to Workers that exist. A Worker's first deploy
+  needs an admin token; the tool refuses to plan for a Worker it cannot find.
+- Custom Domains do not support per-Worker roles yet. If a deploy fails on the
+  domain with only the zone grant, add `fallback: { reason, since }` to that
+  env. Its token then also gets account-wide Workers Scripts Write, every plan
+  prints it, and `apply` sets the env variable `CF_TOKEN_FALLBACK`. Pass that
+  to the deploy action so every deploy warns:
+
+  ```yaml
+  - uses: taraxvoid/voidflow/actions/cloudflare-deploy@<sha> # <version>
+    with:
+      env: ${{ needs.resolve-env.outputs.env }}
+      cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      token-fallback: ${{ vars.CF_TOKEN_FALLBACK }}
+  ```
+
+Cut over one repo at a time: `just cf-tokens-apply --repo <name>`, deploy, then
+`just cf-tokens-apply --repo <name> --prune` to delete its old token. Repo
+tooling, not part of the published package.
+
+The built-in config covers taraxvoid repos only. Another org keeps its fleet
+map in its own (private) repo, as a module that exports `REPOS` (or a default)
+of the same shape, and passes it with `--config`:
+
+```ts
+// ravenflight/infra: cf-tokens.ts
+import type { RepoConfig } from '../voidflow/cloudflare/tokens.ts' // optional
+
+const DEV = '<dev account id>' // dev and staging
+const PROD = '<prod account id>'
+
+export const REPOS: Record<string, RepoConfig> = {
+    'ravenflight/site': {
+        account: PROD,
+        envs: [
+            { env: 'dev', worker: 'site-dev', zones: [], account: DEV },
+            { env: 'prod', worker: 'site', zones: ['example.com'] },
+        ],
+        retire: [],
+    },
+}
+```
+
+```sh
+just -f ../voidflow/justfile cf-tokens-plan --config cf-tokens.ts
+```
+
+A relative path resolves from the directory `just` runs in. The config is
+checked before any API call, and every problem is reported by its path.
+`CF_TOKEN_ADMIN` then needs to cover that org's accounts.
+
 ## Deployments
 
 Example deployment job added to your workflow above. `resolve-env` maps the
