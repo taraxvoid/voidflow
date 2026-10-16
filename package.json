@@ -35,9 +35,11 @@
             "types": "./playwright/index.d.mts",
             "default": "./playwright/index.mjs"
         },
+        "./biome": "./biome/base.json",
         "./package.json": "./package.json"
     },
     "files": [
+        "biome",
         "playwright",
         "scripts/unlighthouse",
         "scripts/check-licenses.ts"
@@ -59,6 +61,7 @@
         }
     },
     "devDependencies": {
+        "@biomejs/biome": "2.5.14",
         "@playwright/test": "1.64.0",
         "@socketsecurity/bun-security-scanner": "1.1.3"
     },

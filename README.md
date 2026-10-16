@@ -257,6 +257,31 @@ Options: `ciPort` (required in CI), `runner` (default `bun`, e.g. `pnpm`),
 `timeout` (default 30000), `projects` (default Pixel 7 and Desktop Chrome),
 `testDir` (default `./test/e2e`). Requires `@playwright/test` in the site.
 
+## Shared Biome config
+
+[`biome/base.json`](biome/base.json) is the house style for the fleet: 4-space
+indent, LF, width 80, single quotes, semicolons only where needed, trailing
+commas, the `recommended` rule preset, organized imports, CSS lint off, and
+unused-import/variable rules off in `.astro` files (Biome can't see template
+usage). With `@taraxvoid/voidflow` as a devDependency, the site's `biome.json`
+extends it and adds only what is specific to the site:
+
+```json
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "extends": ["@taraxvoid/voidflow/biome"],
+  "files": {
+    "includes": ["**", "!**/bun.lock", "!public/admin/**"]
+  }
+}
+```
+
+Lists such as `files.includes` and `overrides` combine with the base's rather
+than replace them; single values set in the site win. The base has no ignore
+lists, so each site keeps its own. It needs Biome 2: the pre-commit hook and
+`site-ci.yml` print a warning (they don't fail) when a site has Biome 1.x
+installed.
+
 ## Dependency updates (Renovate)
 
 [`default.json`](default.json) is the shared Renovate preset. Sites add a
@@ -287,7 +312,7 @@ the repo's own `package.json` scripts (`<pm> run --if-present`, so a missing
 script is skipped; `<pm>` is pnpm when the repo has a `pnpm-lock.yaml`, bun
 otherwise):
 
-- `pre-commit`: dependency guard, `format` (formatted files are re-staged),
+- `pre-commit`: dependency guard, Biome 1.x warning, `format` (formatted files are re-staged),
   `lint:actions`, `check`, `test:unit`, and `check:licenses` / `audit` when the
   lockfile changed.
 - `commit-msg`: advisory Conventional Commits hint (never blocks).

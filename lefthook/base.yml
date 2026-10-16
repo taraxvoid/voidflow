@@ -35,6 +35,19 @@ pre-commit:
           echo "            Run '{pm} install' before committing, then commit again."
           exit 1
         fi
+    biome-version:
+      priority: 2
+      # Advisory only: Biome 1.x can't extend the shared config
+      # (@taraxvoid/voidflow/biome), so nudge the repo toward 2.x.
+      run: |
+        v=$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' node_modules/@biomejs/biome/package.json 2>/dev/null | head -n1)
+        case "$v" in
+          1.*)
+            echo "pre-commit: Biome $v is installed; voidflow's shared config (@taraxvoid/voidflow/biome) needs Biome 2."
+            echo "            Upgrade with '{pm} add -D @biomejs/biome@^2', then '{pm} run biome migrate --write'."
+            ;;
+        esac
+        exit 0
     format:
       priority: 2
       run: "{pm} run --if-present format"

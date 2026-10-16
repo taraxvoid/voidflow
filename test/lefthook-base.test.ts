@@ -139,3 +139,87 @@ describe('git env cleanup before tests', () => {
         expect(pushRun.indexOf('unset $(git rev-parse')).toBeLessThan(pushRun.indexOf('{pm} run --if-present test:push'))
     })
 })
+
+describe('lefthook/base.yml pre-push new-commit detection', () => {
+    const ZERO = '0'.repeat(40)
+    // Clean env: if bun test itself runs inside a git hook, an inherited
+    // GIT_DIR would point these git calls at the wrong repo.
+    const env = () => ({ PATH: process.env.PATH, HOME: tmpdir() })
+
+    // The hook's script with lefthook's {1} (remote name) filled in and {pm}
+    // made an echo, so the test sees whether test:push would run.
+    const script = pushRun.replaceAll('{1}', 'origin').replaceAll('{pm}', 'echo PM')
+
+    const git = (cwd: string, ...args: string[]) => {
+        const proc = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env: env() })
+        if (proc.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${proc.stderr}`)
+        return proc.stdout.toString().trim()
+    }
+
+    // A clone with one commit already on origin/main, plus node_modules so
+    // the hook gets past its install check.
+    const setup = () => {
+        const root = mkdtempSync(join(tmpdir(), 'prepush-'))
+        const remote = join(root, 'remote.git')
+        const repo = join(root, 'repo')
+        git(root, 'init', '-q', '--bare', '-b', 'main', remote)
+        git(root, 'init', '-q', '-b', 'main', repo)
+        git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'pushed')
+        git(repo, 'remote', 'add', 'origin', remote)
+        git(repo, 'push', '-q', '--no-verify', 'origin', 'main')
+        mkdirSync(join(repo, 'node_modules'))
+        return { repo, pushed: git(repo, 'rev-parse', 'HEAD') }
+    }
+
+    const run = async (repo: string, stdin: string) => {
+        const proc = Bun.spawn(['sh', '-c', script], {
+            cwd: repo,
+            env: env(),
+            stdin: new Blob([stdin]),
+            stdout: 'pipe',
+            stderr: 'pipe',
+        })
+        const code = await proc.exited
+        return { code, out: await new Response(proc.stdout).text() }
+    }
+
+    test('skips checks for a branch delete', async () => {
+        const { repo, pushed } = setup()
+        const { code, out } = await run(repo, `(delete) ${ZERO} refs/heads/old ${pushed}\n`)
+        expect(code).toBe(0)
+        expect(out).toContain('no new commits to push')
+        expect(out).not.toContain('PM run')
+    })
+
+    test('skips checks for a new branch at an already-pushed commit', async () => {
+        const { repo, pushed } = setup()
+        const { out } = await run(repo, `refs/heads/feature ${pushed} refs/heads/feature ${ZERO}\n`)
+        expect(out).toContain('no new commits to push')
+        expect(out).not.toContain('PM run')
+    })
+
+    test('skips checks for a tag on an already-pushed commit', async () => {
+        const { repo, pushed } = setup()
+        const { out } = await run(repo, `refs/tags/v1 ${pushed} refs/tags/v1 ${ZERO}\n`)
+        expect(out).toContain('no new commits to push')
+        expect(out).not.toContain('PM run')
+    })
+
+    test('runs checks when a commit is not on the remote yet', async () => {
+        const { repo, pushed } = setup()
+        git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'new')
+        const head = git(repo, 'rev-parse', 'HEAD')
+        const { code, out } = await run(repo, `refs/heads/main ${head} refs/heads/main ${pushed}\n`)
+        expect(code).toBe(0)
+        expect(out).toContain('PM run --if-present test:push')
+    })
+
+    test('runs checks when a tag push also carries a new commit', async () => {
+        const { repo, pushed } = setup()
+        git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'new')
+        const head = git(repo, 'rev-parse', 'HEAD')
+        const stdin = `refs/tags/v1 ${pushed} refs/tags/v1 ${ZERO}\nrefs/heads/main ${head} refs/heads/main ${pushed}\n`
+        const { out } = await run(repo, stdin)
+        expect(out).toContain('PM run --if-present test:push')
+    })
+})

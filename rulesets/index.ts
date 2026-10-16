@@ -106,8 +106,7 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
 // Netlify/Cloudflare apps and come out once deploys run from Actions (see
 // the "Deploy via Actions" issue).
 // Private repos can be listed: on a plan without rulesets for private repos
-// the API returns 403 and the script skips them (see isPlanGated). trailguide
-// gets `tool()` if it goes public.
+// the API returns 403 and the script skips them (see isPlanGated).
 export const REPOS: Record<string, RepoConfig> = {
     'taraxvoid/queeromaha': site({
         bypass: { main: [app(NETLIFY), app(85455)] },
