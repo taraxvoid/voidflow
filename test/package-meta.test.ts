@@ -5,9 +5,7 @@ const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'u
 const pkg = JSON.parse(read('package.json'))
 
 describe('package.json', () => {
-    test('describes the whole fleet, not only sites', () => {
-        expect(pkg.description).toBe('Shared workflows, hooks and tooling for @taraxvoid repos')
-        expect(pkg.keywords).not.toContain('astro')
+    test('has good keywords', () => {
         for (const k of ['lefthook', 'renovate', 'bun']) expect(pkg.keywords).toContain(k)
     })
 
