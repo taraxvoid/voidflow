@@ -1,15 +1,17 @@
 {
     "name": "@taraxvoid/voidflow",
     "version": "0.13.0",
-    "description": "Shared workflows, actions and tooling for @taraxvoid sites",
+    "description": "Shared workflows, hooks and tooling for @taraxvoid repos",
     "license": "MIT",
     "keywords": [
         "github-actions",
         "ci",
         "reusable-workflows",
+        "lefthook",
+        "renovate",
+        "bun",
         "playwright",
         "unlighthouse",
-        "astro",
         "cloudflare"
     ],
     "homepage": "https://github.com/taraxvoid/voidflow#readme",
@@ -41,9 +43,11 @@
         "scripts/check-licenses.ts"
     ],
     "engines": {
-        "bun": ">=1.4.0"
+        "bun": ">=1.4.0",
+        "node": ">=22"
     },
     "scripts": {
+        "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
         "test": "bun test"
     },
     "peerDependencies": {

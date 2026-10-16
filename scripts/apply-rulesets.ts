@@ -11,9 +11,11 @@
  * Uses the `gh` CLI for auth, so run it as someone with admin on the repos.
  * Rulesets not described in the config are reported and left alone; only the
  * ones a repo lists under `retire` are deleted, and only with --prune.
+ * Private repos on a plan without rulesets (GitHub answers 403) are skipped
+ * and reported, never counted as drift, so --check stays green for them.
  */
 import { parseArgs } from 'node:util'
-import { REPOS, desired, diff, normalise, type Ruleset } from '../rulesets/index.ts'
+import { REPOS, desired, diff, isPlanGated, normalise, type Ruleset } from '../rulesets/index.ts'
 
 const { values } = parseArgs({
     options: {
@@ -48,12 +50,19 @@ if (repos.length === 0) {
 }
 
 let drift = 0
+const gated: string[] = []
 
 for (const repo of repos) {
     console.log(`\n== ${repo}`)
-    const listed: Array<{ id: number; name: string }> = await gh([
-        `repos/${repo}/rulesets`,
-    ])
+    let listed: Array<{ id: number; name: string }>
+    try {
+        listed = await gh([`repos/${repo}/rulesets`])
+    } catch (e) {
+        if (!isPlanGated(String(e))) throw e
+        gated.push(repo)
+        console.log('  skipped: private repo on a plan without rulesets (HTTP 403)')
+        continue
+    }
     const matched = new Set<number>()
 
     for (const { ruleset, aka } of desired(repo)) {
@@ -103,6 +112,9 @@ for (const repo of repos) {
     }
 }
 
+if (gated.length > 0) {
+    console.log(`\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`)
+}
 console.log(
     `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
 )
