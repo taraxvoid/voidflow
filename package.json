@@ -1,7 +1,7 @@
 {
     "name": "@taraxvoid/voidflow",
     "version": "0.13.1",
-    "description": "Shared workflows, hooks and tooling for @taraxvoid repos",
+    "description": "Enter a flow state of security, stability, and developer ergonomics - batteries-included Biome, vitest, Astro, CI-driven Deploys on Netlify and Cloudflare support with GitHub rulesets and security checks.",
     "license": "MIT",
     "keywords": [
         "github-actions",
