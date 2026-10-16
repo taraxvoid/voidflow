@@ -264,10 +264,38 @@ jobs:
 
       - name: Lint CI workflows
         if: steps.changes.outputs.workflows == 'true'
+        # jactionlint's default profile adds rules actionlint never had, so a
+        # caller gets actionlint's checks (--profile correctness) unless its
+        # .github/jactionlint.yaml (or actionlint.yaml) opts in with `profile:`.
         run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7/scripts/download-actionlint.bash \
-            | bash -s -- 1.7.12 "$RUNNER_TEMP"
-          "$RUNNER_TEMP/actionlint" -color
+          case "$RUNNER_ARCH" in
+            X64) arch=amd64 ;;
+            ARM64) arch=arm64 ;;
+            *) echo "::error::No jactionlint build for runner arch $RUNNER_ARCH"; exit 1 ;;
+          esac
+          tarball="jactionlint_${VERSION}_linux_${arch}.tar.gz"
+          gh release download --repo jdx/jactionlint --pattern "$tarball" "v$VERSION" --dir "$RUNNER_TEMP"
+          gh attestation verify -R jdx/jactionlint "$RUNNER_TEMP/$tarball"
+          tar xf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" jactionlint
+          args=(--color)
+          if ! grep -qs '^profile:' .github/jactionlint.yaml .github/jactionlint.yml .github/actionlint.yaml .github/actionlint.yml 2>/dev/null; then
+            args+=(--profile correctness)
+          fi
+          "$RUNNER_TEMP/jactionlint" "${args[@]}"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: 2.1.0
+
+      - name: Check Biome version
+        if: steps.scripts.outputs.lint == 'true'
+        # Advisory only: Biome 1.x can't extend the shared config
+        # (@taraxvoid/voidflow/biome).
+        run: |
+          v=$(jq -r '.version // empty' node_modules/@biomejs/biome/package.json 2>/dev/null || true)
+          if [[ "$v" == 1.* ]]; then
+            echo "::warning file=package.json::Biome $v is installed. voidflow's shared config (@taraxvoid/voidflow/biome) needs Biome 2."
+          fi
         shell: bash
 
       - name: Lint Code
