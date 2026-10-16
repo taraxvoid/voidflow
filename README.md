@@ -1,6 +1,6 @@
 # voidflow
 
-Shared CI and deploy pipeline for a small fleet of Astro sites on Cloudflare Workers. One set of reusable GitHub Actions workflows and composite actions keeps lint, type checks, license policy, Playwright and axe-core accessibility tests, Unlighthouse budgets, and deploys identical across every site.
+Shared CI and deploy pipeline for a small fleet of Astro sites on Cloudflare Workers, and the bun tools around them. One set of reusable GitHub Actions workflows and composite actions keeps lint, type checks, license policy, Playwright and axe-core accessibility tests, Unlighthouse budgets, and deploys identical across every site.
 
 - **SHA-pinned.** Every third-party action in this repo is pinned to a full commit SHA with a version comment.
 - **Audited.** Workflows are checked with [zizmor](https://github.com/zizmorcore/zizmor), [jactionlint](https://github.com/jdx/jactionlint), check-jsonschema and shellcheck on every change (see [Self-validation](#self-validation)).
@@ -146,6 +146,39 @@ Runs lint, typecheck, check for GPL licenses, e2e with Playwright.
 `live`), and `test:e2e:lighthouse` (`live`). A script the site does not define
 is skipped with a notice, so none of them is required.
 
+### Tool validation
+
+`tool-ci.yml` is the validation job for bun tools and libraries (CLIs, TUIs,
+packages): gitleaks over the full history, install (with the same Socket
+scanner handling as `site-ci.yml`), tools from the repo's `mise.toml` when it
+has one, then whichever of `lint`, `check`, `build` and `test` `package.json`
+defines, and `check:licenses` when dependencies or `scripts/` changed. When
+workflows change it also runs jactionlint (same profile handling as
+`site-ci.yml`) and
+[zizmor](https://github.com/zizmorcore/zizmor). The bun version comes from
+`.bun-version` when present.
+
+```yaml
+name: CI
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<release SHA> # vX.Y.Z
+```
+
+The job reports as `validate / Validate`, the check the `tool()` entry in
+[`rulesets/index.ts`](#branch-rulesets-as-code) requires.
+
 ### Unlighthouse (performance / SEO budgets)
 
 `site-ci.yml` runs `bun run test:e2e:lighthouse` on PRs into `live`. Sites
@@ -273,10 +306,11 @@ on the repo.
 
 ## Git hooks (lefthook)
 
-[`lefthook/site.yml`](lefthook/site.yml) is the shared hook set for the site
-stack, consumed as a lefthook remote. It calls the site's own `package.json`
-scripts (`<pm> run --if-present`, so a missing script is skipped; `<pm>` is pnpm
-when the repo has a `pnpm-lock.yaml`, bun otherwise):
+[`lefthook/base.yml`](lefthook/base.yml) is the shared hook set for any bun
+(or pnpm) repo, sites and tools alike, consumed as a lefthook remote. It calls
+the repo's own `package.json` scripts (`<pm> run --if-present`, so a missing
+script is skipped; `<pm>` is pnpm when the repo has a `pnpm-lock.yaml`, bun
+otherwise):
 
 - `pre-commit`: dependency guard, Biome 1.x warning, `format` (formatted files are re-staged),
   `lint:actions`, `check`, `test:unit`, and `check:licenses` / `audit` when the
@@ -286,18 +320,29 @@ when the repo has a `pnpm-lock.yaml`, bun otherwise):
   the push carries no commit the remote lacks (branch deletes, and tags or
   branches at already-pushed commits).
 
+Before `test:unit` and `test:push`, the hooks unset the variables git exports to
+hooks (`GIT_DIR`, `GIT_INDEX_FILE`, ...; the list comes from
+`git rev-parse --local-env-vars`). Without that, a test that runs
+`git -C <tmpdir> commit` operates on, and commits into, the repo being hooked.
+
 ```yaml
-# lefthook.yml in the site
+# lefthook.yml in the repo
 remotes:
   - git_url: https://github.com/taraxvoid/voidflow
     ref: v0.10.0 # a tag or branch; lefthook passes it to `git clone --branch`
     configs:
-      - lefthook/site.yml
+      - lefthook/base.yml
 
 ```
 
+Upgrading from `lefthook/site.yml` (v0.13 and earlier): change the `configs`
+entry to `lefthook/base.yml` when you bump `ref`. The hooks are otherwise the
+same. `lefthook/site.yml` is now a stub whose `pre-commit` and `pre-push` fail
+with that instruction, so a `ref` bump (for example from Renovate) that leaves
+`configs` alone stops commits instead of turning the hooks off silently.
+
 Lefthook merges `lefthook.yml`, then remotes, then `lefthook-local.yml`, so a
-site's own `lefthook.yml` can add commands (for example image compression) but
+repo's own `lefthook.yml` can add commands (for example image compression) but
 cannot override ones defined here. Differences go through `package.json`
 scripts: define `test:unit:precommit` (for example excluding tests that need a
 built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
@@ -314,13 +359,22 @@ locally. Common uses:
   as a recursive run, add `--filter '!{.}'` so it doesn't recurse.
 
 Hook-level options merge too. Don't set `parallel: true` under `pre-commit:` in
-the site's `lefthook.yml`: it applies to the merged hook, so every step,
+the repo's `lefthook.yml`: it applies to the merged hook, so every step,
 including the shared ones, starts at once and their `priority` order is ignored
 (tests that share a database or build output can then time out).
 
-Install the binary through mise (`lefthook = "<version>"` in `mise.toml`) and
-set the `prepare` script so `bun install` wires the hooks, but make it tolerate a
-missing binary:
+Install the binaries through mise. A starter `mise.toml` for a repo using
+these hooks and voidflow CI:
+
+```toml
+[tools]
+lefthook = "2.2.1"
+gitleaks = "8.30.1"
+jactionlint = "2.1.0"
+```
+
+Renovate bumps `mise.toml` natively. Set the `prepare` script so `bun install`
+wires the hooks, but make it tolerate a missing binary:
 
 ```json
 "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'"
@@ -336,7 +390,10 @@ release tag.
 Branch protection for the fleet lives in [`rulesets/index.ts`](rulesets/index.ts):
 one canonical `main` / `next` / `live` definition (plus `prerelease` and `maintenance`
 tiers for repos with release channels) and a small per-repo table
-(Netlify or not, check names, CODEOWNERS, extra bypass actors). Hand-edited
+(Netlify or not, check names, CODEOWNERS, extra bypass actors). Sites use
+`site()` and tools use `tool()` (main only, no Netlify, requires
+`validate / Validate` from `tool-ci.yml`). Private repos are left out: on a
+plan without rulesets for private repos, the API returns 403. Hand-edited
 rulesets drift, and drift is how a `next` ruleset ends up requiring a check
 name that no workflow reports any more.
 
@@ -440,8 +497,8 @@ This repo validates its own workflows and composite actions (`.github/workflows/
 ### Local dev setup
 
 ```sh
-brew install just lefthook shellcheck bun act uv gh  # jactionlint: `just lint-workflows` fetches it
-lefthook install
+mise install   # tools pinned in mise.toml
+bun install    # its prepare script runs `lefthook install`
 ```
 
 - `just validate`: run everything CI runs, locally
