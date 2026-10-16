@@ -17,6 +17,9 @@ commit-msg:
       run: scripts/check-commit-msg.sh {1}
 
 pre-push:
+  parallel: true
   commands:
     zizmor:
       run: just security
+    test:
+      run: bun test
