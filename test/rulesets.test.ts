@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import { REPOS, build, desired, diff, normalise } from '../rulesets/index.ts'
+import {
+    REPOS,
+    build,
+    checkFleet,
+    desired,
+    diff,
+    normalise,
+    type Fleet,
+    type Ruleset,
+} from '../rulesets/index.ts'
 
 const statusChecks = (r: ReturnType<typeof build>) =>
     (
@@ -135,5 +144,86 @@ describe('voidflow release channels', () => {
 
     test('voidflow manages main, prerelease and maintenance', () => {
         expect(cfg.tiers).toEqual(['main', 'prerelease', 'maintenance'])
+    })
+})
+
+describe('raw rulesets (another fleet, --config)', () => {
+    const live: Ruleset = {
+        name: 'prod (live)',
+        target: 'branch',
+        enforcement: 'active',
+        conditions: {
+            ref_name: {
+                include: ['refs/heads/live', 'refs/heads/promote/*'],
+                exclude: [],
+            },
+        },
+        bypass_actors: [
+            { actor_id: null, actor_type: 'OrganizationAdmin', bypass_mode: 'always' },
+        ],
+        rules: [
+            { type: 'deletion' },
+            {
+                type: 'required_deployments',
+                parameters: { required_deployment_environments: ['staging'] },
+            },
+        ],
+    }
+    const fleet: Fleet = {
+        'ravenflight/site': { rulesets: [live], retire: ['old'] },
+        'taraxvoid/voidflow': REPOS['taraxvoid/voidflow'],
+    }
+
+    test('are wanted verbatim, never adopted under another name', () => {
+        expect(desired('ravenflight/site', fleet)).toEqual([
+            { ruleset: live, aka: [] },
+        ])
+    })
+
+    test('tiered repos in the same fleet still build from tiers', () => {
+        expect(desired('taraxvoid/voidflow', fleet)).toEqual(
+            desired('taraxvoid/voidflow'),
+        )
+    })
+
+    test("show no drift against GitHub's copy, extra fields and order aside", () => {
+        const fromApi = {
+            ...live,
+            id: 1,
+            source: 'ravenflight/site',
+            node_id: 'x',
+            rules: [...live.rules].reverse(),
+        }
+        expect(diff(normalise(fromApi), normalise(live))).toEqual([])
+    })
+
+    test('checkFleet accepts the built-in config and raw rulesets', () => {
+        expect(checkFleet(REPOS)).toBe(REPOS)
+        expect(checkFleet(fleet)).toBe(fleet)
+    })
+
+    test('checkFleet names every problem by its path', () => {
+        let msg = ''
+        try {
+            checkFleet({
+                nope: { rulesets: [], retire: [] },
+                'a/b': { rulesets: [{ name: '', rules: {} }] },
+                'a/c': { ...REPOS['taraxvoid/voidflow'], tiers: ['main', 'dev'] },
+                'a/d': { tiers: ['main'] },
+            })
+        } catch (e) {
+            msg = (e as Error).message
+        }
+        for (const want of [
+            '"nope": key is not owner/name',
+            '"a/b".rulesets[0].name: missing',
+            '"a/b".rulesets[0].conditions.ref_name.include: not a list',
+            '"a/b".rulesets[0].rules: not a list',
+            '"a/b".retire: not a list',
+            '"a/c".tiers[1]: unknown tier "dev"',
+            '"a/d".checks: not a list',
+        ]) {
+            expect(msg).toContain(want)
+        }
     })
 })

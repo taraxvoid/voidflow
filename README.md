@@ -394,19 +394,20 @@ Cut over one repo at a time: `just cf-tokens-apply --repo <name>`, deploy, then
 `just cf-tokens-apply --repo <name> --prune` to delete its old token. Repo
 tooling, not part of the published package.
 
-The built-in config covers taraxvoid repos only. Another org keeps its fleet
-map in its own (private) repo, as a module that exports `REPOS` (or a default)
-of the same shape, and passes it with `--config`:
+## Another org's fleet (`--config`)
+
+The built-in configs for rulesets and Cloudflare tokens cover taraxvoid repos.
+Another org keeps its fleet map in its own (private) repo, as modules that
+export `REPOS` (or a default) of the same shape, and passes them with
+`--config` to `rulesets-*` or `cf-tokens-*`:
 
 ```ts
-// ravenflight/infra: cf-tokens.ts
-import type { RepoConfig } from '../voidflow/cloudflare/tokens.ts' // optional
-
+// cf-tokens.ts in the org's own repo
 const DEV = '<dev account id>' // dev and staging
 const PROD = '<prod account id>'
 
-export const REPOS: Record<string, RepoConfig> = {
-    'ravenflight/site': {
+export const REPOS = {
+    'example-org/site': {
         account: PROD,
         envs: [
             { env: 'dev', worker: 'site-dev', zones: [], account: DEV },
@@ -419,11 +420,19 @@ export const REPOS: Record<string, RepoConfig> = {
 
 ```sh
 just -f ../voidflow/justfile cf-tokens-plan --config cf-tokens.ts
+just -f ../voidflow/justfile rulesets-plan --config rulesets.ts
 ```
 
-A relative path resolves from the directory `just` runs in. The config is
+A rulesets config can use the tier model, or spell a repo's rulesets out in
+full as `{ rulesets: [...], retire: [...] }` when its protection doesn't fit
+the tiers. A snapshot of what GitHub has now (`gh api
+repos/<repo>/rulesets/<id>`, keeping `name`, `target`, `enforcement`,
+`conditions`, `bypass_actors` and `rules`) plans with no drift.
+
+A relative path resolves from the directory `just` runs in. Each config is
 checked before any API call, and every problem is reported by its path.
-`CF_TOKEN_ADMIN` then needs to cover that org's accounts.
+`CF_TOKEN_ADMIN` then needs to cover that org's accounts, and `gh` needs admin
+on its repos.
 
 ## Deployments
 

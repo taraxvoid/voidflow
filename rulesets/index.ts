@@ -8,7 +8,7 @@
 
 export type BypassActor = {
     actor_id: number | null
-    actor_type: 'RepositoryRole' | 'Integration' | 'DeployKey'
+    actor_type: 'RepositoryRole' | 'Integration' | 'DeployKey' | 'OrganizationAdmin'
     bypass_mode: 'always' | 'pull_request'
 }
 
@@ -69,6 +69,21 @@ export type RepoConfig = {
      */
     retire: string[]
 }
+
+/**
+ * A repo whose rulesets are spelled out in full instead of built from tiers,
+ * for fleets whose protection doesn't fit the tier model (see `--config`).
+ */
+export type RawConfig = {
+    rulesets: Ruleset[]
+    /** As in RepoConfig: names to delete with --prune. */
+    retire: string[]
+}
+
+export type Fleet = Record<string, RepoConfig | RawConfig>
+
+const isRaw = (cfg: RepoConfig | RawConfig): cfg is RawConfig =>
+    'rulesets' in cfg
 
 const SITE_CHECK = 'validate / Validate'
 
@@ -216,13 +231,76 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
 }
 
 /** Every ruleset we want, per repo, with the names it may already have. */
-export function desired(repo: string): Array<{ ruleset: Ruleset; aka: string[] }> {
-    const cfg = REPOS[repo]
+export function desired(
+    repo: string,
+    fleet: Fleet = REPOS,
+): Array<{ ruleset: Ruleset; aka: string[] }> {
+    const cfg = fleet[repo]
     if (!cfg) throw new Error(`unknown repo ${repo}`)
+    if (isRaw(cfg)) return cfg.rulesets.map((ruleset) => ({ ruleset, aka: [] }))
     return cfg.tiers.map((tier) => ({
         ruleset: build(tier, cfg),
         aka: cfg.aka[tier] ?? [],
     }))
+}
+
+// ---- config from elsewhere ------------------------------------------------
+
+const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
+
+/**
+ * Check an untyped fleet (another repo's `--config` module) and throw with
+ * every problem, by path. Returns the fleet unchanged.
+ */
+export function checkFleet(x: unknown): Fleet {
+    const isObj = (v: unknown): v is Record<string, any> =>
+        typeof v === 'object' && v !== null && !Array.isArray(v)
+    const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
+    const strList = (v: unknown) => Array.isArray(v) && v.every(isStr)
+    if (!isObj(x)) throw new Error('config is not an object of repos')
+    const errs: string[] = []
+    const bad = (path: string, why: string) => errs.push(`${path}: ${why}`)
+    for (const [repo, cfg] of Object.entries(x)) {
+        const at = JSON.stringify(repo)
+        if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) bad(at, 'key is not owner/name')
+        if (!isObj(cfg)) {
+            bad(at, 'not an object')
+            continue
+        }
+        if (!strList(cfg.retire)) bad(`${at}.retire`, 'not a list')
+        if ('rulesets' in cfg) {
+            if (!Array.isArray(cfg.rulesets)) {
+                bad(`${at}.rulesets`, 'not a list')
+                continue
+            }
+            for (const [i, r] of cfg.rulesets.entries()) {
+                const rs = `${at}.rulesets[${i}]`
+                if (!isObj(r)) {
+                    bad(rs, 'not an object')
+                    continue
+                }
+                if (!isStr(r.name)) bad(`${rs}.name`, 'missing')
+                if (!strList(r.conditions?.ref_name?.include))
+                    bad(`${rs}.conditions.ref_name.include`, 'not a list')
+                if (!Array.isArray(r.bypass_actors))
+                    bad(`${rs}.bypass_actors`, 'not a list')
+                if (!Array.isArray(r.rules) || !r.rules.every((u: any) => isStr(u?.type)))
+                    bad(`${rs}.rules`, 'not a list')
+            }
+            continue
+        }
+        if (!Array.isArray(cfg.tiers)) bad(`${at}.tiers`, 'not a list')
+        for (const [i, t] of (Array.isArray(cfg.tiers) ? cfg.tiers : []).entries()) {
+            if (!TIERS.includes(t)) bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
+        }
+        if (!strList(cfg.checks)) bad(`${at}.checks`, 'not a list')
+        for (const k of ['netlify', 'codeowners', 'linearHistory'])
+            if (typeof cfg[k] !== 'boolean') bad(`${at}.${k}`, 'not true/false')
+        for (const k of ['bypass', 'aka'])
+            if (!isObj(cfg[k])) bad(`${at}.${k}`, 'not an object')
+    }
+    if (errs.length) throw new Error(errs.join('\n'))
+    return x as Fleet
 }
 
 // ---- normalisation + diff -------------------------------------------------
