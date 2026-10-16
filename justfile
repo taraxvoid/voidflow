@@ -90,18 +90,21 @@ doctor:
     @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (holds CF_TOKEN_ADMIN for 'just cf-tokens-*'; see README)"
     @command -v fnox >/dev/null && { fnox check >/dev/null 2>&1 && echo "CF_TOKEN_ADMIN:  resolvable via fnox" || echo "CF_TOKEN_ADMIN:  not resolvable (run 'fnox check'; see README)"; } || true
 
+# So a relative --config (another repo's fleet map) resolves from where `just`
+# was run, not this directory. See scripts/lib/config.ts.
+config_base := "env VOIDFLOW_CONFIG_BASE=" + quote(invocation_directory())
+
 # Show how each repo's branch rulesets differ from rulesets/index.ts (read-only)
 rulesets-plan *args:
-    bun scripts/apply-rulesets.ts {{ args }}
+    {{ config_base }} bun scripts/apply-rulesets.ts {{ args }}
 
 # Create/update branch rulesets to match rulesets/index.ts (needs repo admin via gh)
 rulesets-apply *args:
-    bun scripts/apply-rulesets.ts --apply {{ args }}
+    {{ config_base }} bun scripts/apply-rulesets.ts --apply {{ args }}
 
 # CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
 cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
-# So a relative --config resolves from where `just` was run, not this directory.
-cf_tokens := cf_admin + " env CF_TOKENS_BASE=" + quote(invocation_directory()) + " bun scripts/cf-tokens.ts"
+cf_tokens := cf_admin + " " + config_base + " bun scripts/cf-tokens.ts"
 
 # Show how each repo's Cloudflare deploy tokens differ from cloudflare/tokens.ts (read-only; needs CF_TOKEN_ADMIN)
 cf-tokens-plan *args:

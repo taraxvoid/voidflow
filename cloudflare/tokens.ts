@@ -14,8 +14,6 @@
  * account-wide Workers Scripts Write. Every plan and every deploy says so.
  */
 
-import { resolve } from 'node:path'
-
 export type Fallback = {
     /** Why the narrow token was not enough, e.g. 'custom-domain'. */
     reason: string
@@ -184,27 +182,6 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
     }
     if (errs.length) throw new Error(errs.join('\n'))
     return x as Record<string, RepoConfig>
-}
-
-/**
- * The repos to manage: REPOS above, or the `REPOS` (or default) export of
- * the module at `path`, resolved against `base`. Lets another org keep its
- * fleet map in its own (private) repo and run this script against it.
- */
-export async function loadRepos(
-    path: string | undefined,
-    base: string,
-): Promise<Record<string, RepoConfig>> {
-    if (!path) return REPOS
-    const file = resolve(base, path)
-    const mod = (await import(file)) as { REPOS?: unknown; default?: unknown }
-    const cfg = mod.REPOS ?? mod.default
-    if (cfg === undefined) throw new Error(`${file}: no REPOS or default export`)
-    try {
-        return checkRepos(cfg)
-    } catch (e) {
-        throw new Error(`${file}: ${(e as Error).message}`)
-    }
 }
 
 const account = (id: string) => `com.cloudflare.api.account.${id}`

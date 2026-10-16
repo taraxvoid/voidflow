@@ -1,11 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import {
     REPOS,
     checkRepos,
-    loadRepos,
     RENEW_DAYS,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
@@ -254,41 +250,3 @@ describe('checkRepos', () => {
     })
 })
 
-describe('loadRepos', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cf-tokens-'))
-    const cfg = {
-        'ravenflight/site': {
-            account: 'e632b9f816f9f2a62ed9571d352fd4ae',
-            envs: [{ env: 'prod', worker: 'site', zones: [] }],
-            retire: [],
-        },
-    }
-    writeFileSync(
-        join(dir, 'named.ts'),
-        `export const REPOS = ${JSON.stringify(cfg)}`,
-    )
-    writeFileSync(
-        join(dir, 'default.ts'),
-        `export default ${JSON.stringify(cfg)}`,
-    )
-    writeFileSync(join(dir, 'empty.ts'), 'export const other = 1')
-
-    test('without a path, the built-in config', async () => {
-        expect(await loadRepos(undefined, dir)).toBe(REPOS)
-    })
-
-    test('a REPOS or default export, relative to the base dir', async () => {
-        expect(await loadRepos('named.ts', dir)).toEqual(cfg)
-        expect(await loadRepos(join(dir, 'default.ts'), '/')).toEqual(cfg)
-    })
-
-    test('names the file when it has no config or a bad one', async () => {
-        await expect(loadRepos('empty.ts', dir)).rejects.toThrow(
-            `${join(dir, 'empty.ts')}: no REPOS or default export`,
-        )
-        writeFileSync(join(dir, 'bad.ts'), 'export const REPOS = { x: 1 }')
-        await expect(loadRepos('bad.ts', dir)).rejects.toThrow(
-            `${join(dir, 'bad.ts')}: `,
-        )
-    })
-})

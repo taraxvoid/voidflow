@@ -13,9 +13,7 @@
  *   bun scripts/cf-tokens.ts --config ../infra/cf-tokens.ts   # another fleet's config
  *
  * The config is REPOS in cloudflare/tokens.ts unless --config names a module
- * exporting `REPOS` (or a default) of the same shape. A relative path resolves
- * against CF_TOKENS_BASE (the just recipes set it to the directory `just` was
- * run from), else the current directory.
+ * exporting `REPOS` (or a default) of the same shape (see scripts/lib/config.ts).
  *
  * Needs CF_TOKEN_ADMIN: a user-owned token covering every account in the
  * config (envs can sit in different accounts, e.g. dev/staging apart from
@@ -24,13 +22,15 @@
  * straight into `gh secret set` and never printed.
  */
 import { parseArgs } from 'node:util'
+import { loadOrExit } from './lib/config.ts'
 import {
+    REPOS as BUILTIN,
     WORKERS_ROUTES_WRITE,
+    checkRepos,
     WORKERS_SCRIPTS_WRITE,
     WORKER_EDITOR,
     envAccount,
     expiresOn,
-    loadRepos,
     plan,
     policies,
     repoAccounts,
@@ -55,13 +55,7 @@ const { values } = parseArgs({
     },
 })
 
-const REPOS = await loadRepos(
-    values.config,
-    process.env.CF_TOKENS_BASE || process.cwd(),
-).catch((e: Error) => {
-    console.error(e.message)
-    process.exit(2)
-})
+const REPOS = await loadOrExit(values.config, BUILTIN, checkRepos)
 
 const ADMIN = process.env.CF_TOKEN_ADMIN
 if (!ADMIN) {
