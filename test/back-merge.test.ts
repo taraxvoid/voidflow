@@ -5,8 +5,11 @@ import { dirname, join } from 'node:path'
 import { nextManifestVersion } from '../scripts/back-merge.ts'
 
 const SCRIPT = join(import.meta.dir, '../scripts/back-merge.ts')
+// Drop inherited GIT_* vars: inside a git hook (e.g. pre-push from a
+// worktree) GIT_DIR points at the real repo, and these git calls would
+// commit there instead of in the temp repos.
 const ENV = {
-    ...process.env,
+    ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))),
     GIT_AUTHOR_NAME: 'test',
     GIT_AUTHOR_EMAIL: 'test@example.com',
     GIT_COMMITTER_NAME: 'test',
