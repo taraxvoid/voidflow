@@ -61,6 +61,13 @@ export type RepoConfig = {
     linearHistory: boolean
     /** Extra bypass actors per tier, on top of the tier defaults. */
     bypass: Partial<Record<Tier, BypassActor[]>>
+    /**
+     * GitHub deployment environments that must have a successful deployment of
+     * the commit before it can be pushed or merged into a tier (e.g. live
+     * requires `staging`). The deploy job must set `environment:` for GitHub to
+     * record the deployment.
+     */
+    deployments: Partial<Record<Tier, string[]>>
     /** Existing ruleset names to adopt (rename) instead of duplicating. */
     aka: Partial<Record<Tier, string[]>>
     /**
@@ -83,6 +90,7 @@ const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     codeowners: true,
     linearHistory: true,
     bypass: {},
+    deployments: {},
     aka: {},
     retire: ['next (staging)', 'live (prod)'],
     ...over,
@@ -97,6 +105,7 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     codeowners: true,
     linearHistory: true,
     bypass: {},
+    deployments: {},
     aka: {},
     retire: [],
     ...over,
@@ -121,6 +130,20 @@ export const REPOS: Record<string, RepoConfig> = {
     // Deploys to Cloudflare through voidflow, so no Netlify check and no
     // deploy app bypass. Private, so skipped until rulesets are available.
     'taraxvoid/taraxvoid.net': site({ netlify: false }),
+    // Multi-environment: main -> dev, next -> staging, live -> prod, each tier
+    // promoted by merge commit. A tier's deployment gate is the previous
+    // environment, so a SHA that never deployed to staging cannot reach live.
+    'ravenflight/ravenflight.io': {
+        tiers: ['main', 'next', 'live'],
+        netlify: false,
+        checks: [VALIDATE_CHECK],
+        codeowners: false,
+        linearHistory: true,
+        bypass: {},
+        deployments: { next: ['dev'], live: ['staging'] },
+        aka: { main: ['main (dev)'], next: ['staging (next)'], live: ['prod (live)'] },
+        retire: [],
+    },
     'taraxvoid/voidflow': {
         // main (stable), next (prerelease channel), release/* (maintenance).
         // See RELEASING.md. Promotion next -> main uses merge commits, so no
@@ -131,6 +154,7 @@ export const REPOS: Record<string, RepoConfig> = {
         codeowners: false,
         linearHistory: false,
         bypass: {},
+        deployments: {},
         aka: { main: ['main/prod'] },
         retire: [],
     },
@@ -163,8 +187,12 @@ function mergeMethods(tier: Tier, cfg: RepoConfig): string[] {
             return ['squash', 'merge']
         case 'maintenance':
             return ['squash']
+        case 'live':
+            // Squash or rebase would rewrite next's commits and make every later
+            // promotion conflict, so live takes real merge commits only.
+            return ['merge']
         default:
-            // next/live merge promotion branches with any method.
+            // next merges release branches with any method.
             return ['merge', 'squash', 'rebase']
     }
 }
@@ -181,6 +209,7 @@ function bypassFor(tier: Tier, cfg: RepoConfig): BypassActor[] {
 }
 
 export function build(tier: Tier, cfg: RepoConfig): Ruleset {
+    const environments = cfg.deployments[tier] ?? []
     const contexts = [
         ...(cfg.netlify
             ? [{ context: 'deploy/netlify', integration_id: NETLIFY }]
@@ -220,6 +249,14 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
                     allowed_merge_methods: mergeMethods(tier, cfg),
                 },
             },
+            ...(environments.length > 0
+                ? [
+                      {
+                          type: 'required_deployments',
+                          parameters: { required_deployment_environments: environments },
+                      },
+                  ]
+                : []),
             {
                 type: 'required_status_checks',
                 parameters: {
