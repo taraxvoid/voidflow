@@ -70,6 +70,16 @@ describe('canonical rulesets', () => {
     })
 })
 
+describe('normalise', () => {
+    test('ignores the dismissal_restriction default that org-owned repos echo back', () => {
+        const want = build('live', REPOS['ravenflight/ravenflight.io'])
+        const have = structuredClone(want)
+        const pr = have.rules.find((x) => x.type === 'pull_request')
+        if (pr?.parameters) pr.parameters.dismissal_restriction = { enabled: false, allowed_actors: [] }
+        expect(diff(normalise(have), normalise(want))).toEqual([])
+    })
+})
+
 describe('diff', () => {
     test('is empty for the same ruleset in a different order', () => {
         const a = build('next', REPOS['taraxvoid/queeromaha'])

@@ -310,6 +310,11 @@ export function normalise(r: Ruleset): unknown {
                     },
                 }
             }
+            if (rule.type === 'pull_request' && p) {
+                // Org-owned repos echo this back with defaults; we never set it.
+                const { dismissal_restriction: _ignored, ...rest } = p
+                return { type: rule.type, parameters: rest }
+            }
             return rule.parameters
                 ? { type: rule.type, parameters: p }
                 : { type: rule.type }
