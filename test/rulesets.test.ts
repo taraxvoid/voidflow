@@ -47,21 +47,6 @@ describe('canonical rulesets', () => {
         }
     })
 
-    test('multi-environment repos gate each tier on the previous environment', () => {
-        const cfg = REPOS['ravenflight/ravenflight.io']
-        expect(cfg.tiers).toEqual(['main', 'next', 'live'])
-        const envs = (tier: 'main' | 'next' | 'live') =>
-            build(tier, cfg).rules.find((x) => x.type === 'required_deployments')?.parameters
-        expect(envs('main')).toBeUndefined()
-        expect(envs('next')).toEqual({ required_deployment_environments: ['dev'] })
-        expect(envs('live')).toEqual({ required_deployment_environments: ['staging'] })
-    })
-
-    test('live takes merge commits only so promotions keep shared ancestry', () => {
-        const pr = build('live', REPOS['ravenflight/ravenflight.io']).rules.find((x) => x.type === 'pull_request')
-        expect(pr?.parameters?.allowed_merge_methods).toEqual(['merge'])
-    })
-
     test('names within a repo are unique', () => {
         for (const repo of Object.keys(REPOS)) {
             const names = desired(repo).map((d) => d.ruleset.name)
@@ -72,7 +57,7 @@ describe('canonical rulesets', () => {
 
 describe('normalise', () => {
     test('ignores the dismissal_restriction default that org-owned repos echo back', () => {
-        const want = build('live', REPOS['ravenflight/ravenflight.io'])
+        const want = build('main', REPOS['ravenflight/ravenflight.io'])
         const have = structuredClone(want)
         const pr = have.rules.find((x) => x.type === 'pull_request')
         if (pr?.parameters) pr.parameters.dismissal_restriction = { enabled: false, allowed_actors: [] }
@@ -174,7 +159,6 @@ describe('tool()', () => {
             codeowners: true,
             linearHistory: true,
             bypass: {},
-            deployments: {},
             aka: {},
             retire: [],
         })
