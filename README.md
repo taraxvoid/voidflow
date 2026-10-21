@@ -100,6 +100,41 @@ With `pnpm`, the pnpm version comes from `packageManager` and Node from
 follows the package manager. `build-env` is a JSON object, visible in logs, so
 no secrets.
 
+With `aube`, the site's `mise.toml` must pin aube (`aube = "<version>"`); aube
+then runs the `packageManager` version from `package.json` and gets Node from
+`devEngines.runtime`. aube keeps `pnpm-lock.yaml`, and CI installs with a frozen
+`aube ci`.
+
+### Sites with their own e2e scripts
+
+The built-in e2e tiers expect `test:e2e:full`, `:all`, `:a11y` and `:lighthouse`.
+A site whose scripts are named differently lists them in `e2e-scripts`; they run
+in order whenever e2e-relevant files changed, and a listed script that is
+missing fails the job. Pass `build: false` when those scripts already build.
+
+```yaml
+    with:
+      e2e-scripts: '["test:e2e", "test:e2e:gtm", "test:e2e:editor"]'
+      build: false
+```
+
+### Skipped work
+
+`site-ci.yml` is two jobs. `changes` is cheap and always runs: gitleaks over
+the full history and a changed-file filter. `validate` (install, lint, tests)
+is skipped for a pull request whose changed files are all docs, so it never
+starts the heavy runner. A skipped `validate / Validate` still counts as passing
+for required checks. Pushes and manual runs always validate, so a deploy job
+that needs `validate` is never skipped.
+
+`code-paths` sets what counts as code: a JSON array of globs with `!` excludes,
+by default everything except Markdown, `docs/`, `LICENSE*` and issue templates.
+GitHub bills each job in whole minutes, so `changes` costs about one minute on
+a code PR and saves the whole `validate` run on a docs-only one.
+
+The Playwright browser cache is keyed on the installed Playwright version, so
+an unrelated dependency bump keeps it.
+
 ### Install-time security scanner (Socket)
 
 A bun site can set a security scanner in `bunfig.toml`, which checks every
