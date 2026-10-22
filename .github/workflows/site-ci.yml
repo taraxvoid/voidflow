@@ -2,7 +2,7 @@ name: Validation
 
 # Validation job for sites using a Astro/Playwright stack (bun, pnpm or aube)
 # for self-hosted runners pass `runner`
-# Callers need pull_request/workflow_dispatch triggers, plus push on main/next/live
+# Callers need pull_request/workflow_dispatch triggers, plus push on main
 # so direct pushes are validated too
 # Caller is expected to define referenced package.json scripts
 #
@@ -101,7 +101,9 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only superseded PR pushes are cancelled: on trunk, a second quick merge to
+  # main must not cancel the first one's validation (and so its deploy).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

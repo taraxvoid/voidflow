@@ -73,9 +73,8 @@ export type RepoConfig = {
 // Reported by both site-ci.yml and tool-ci.yml when the caller job is `validate`.
 const VALIDATE_CHECK = 'validate / Validate'
 
-// Sites run a single stable `main` that deploys to prod (previews on PRs),
-// i.e. voidflow's `single-environment` mode. Multi-environment repos
-// (main/next/live) list all three tiers instead.
+// Sites run a single stable `main` that deploys to prod (previews on PRs).
+// Repos that still use next/live tiers list them explicitly.
 const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     tiers: ['main'],
     netlify: true,

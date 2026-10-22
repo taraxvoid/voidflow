@@ -113,6 +113,14 @@ composite action:
   # with: { socket-scanner: 'true' }
 ```
 
+### Migrating from main/next/live
+
+- Drop `single-environment` from `site-ci.yml` callers; GitHub rejects
+  unknown inputs.
+- `branch-env-map` takes no inputs and fails on `next`, `live` and pushes to
+  other branches.
+- `test:e2e:full` no longer runs; define `test:e2e:all` instead.
+
 ## Tool CI
 
 For bun CLIs, TUIs and libraries. Runs gitleaks over full history, installs
@@ -152,7 +160,6 @@ jobs:
   deploy:
     name: Deploy
     needs: validate
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@<sha> # <version>
@@ -168,11 +175,12 @@ A job's `name:` and `environment:` can't read its own step outputs. To use
 GitHub deployment environments, add one deploy job for `main` and one for pull
 requests, each gated with an `if:`.
 
-- `actions/cloudflare-deploy`: `wrangler deploy` for the environment, with an
-  optional D1 migration first (`migrate-d1`). Other inputs:
-  `cloudflare-account-id`, `working-directory`, `command`.
-- `actions/netlify-deploy`: `prod` is a production deploy, `dev`/`staging` are
-  alias deploys. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
+- `actions/cloudflare-deploy`: `wrangler deploy --env <env>`, with an optional
+  D1 migration first (`migrate-d1`). `preview` needs a matching env block in the
+  wrangler config, or pass `command` to deploy previews another way. Other
+  inputs: `cloudflare-account-id`, `working-directory`.
+- `actions/netlify-deploy`: `prod` is a production deploy, anything else (e.g.
+  `preview`) is an alias deploy. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
   `netlify-site-id`, `working-directory`, `github-token`. Turn off Netlify's
   own GitHub auto-deploy for the site, or the two will double-deploy.
 
