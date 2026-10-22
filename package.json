@@ -1,6 +1,6 @@
 {
     "name": "@taraxvoid/voidflow",
-    "version": "0.14.0-next",
+    "version": "0.14.0-next.1",
     "description": "Enter a flow state of security, stability, and developer ergonomics - batteries-included Biome, vitest, Astro, local hooks, CI and deployments on Netlify and Cloudflare support with GitHub rulesets, branch environments, releases and security checks.",
     "license": "MIT",
     "keywords": [
