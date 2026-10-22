@@ -97,4 +97,4 @@ backwards. Commit, push, open the PR against `next` and merge it with a merge co
 
 ## Consuming
 
-See [Versioning](README.md#versioning) for pinning options.
+See [Pinning](README.md#pinning) for pinning options.

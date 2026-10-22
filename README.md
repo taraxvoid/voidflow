@@ -1,37 +1,37 @@
 # voidflow
 
-Shared CI and deploy pipeline for a small fleet of Astro sites on Cloudflare Workers, and the bun tools around them. One set of reusable GitHub Actions workflows and composite actions keeps lint, type checks, license policy, Playwright and axe-core accessibility tests, Unlighthouse budgets, and deploys identical across every site.
+Shared CI, deploy and repo config for Astro sites on Cloudflare Workers or
+Netlify, and for bun tools and libraries. Defaults assume bun, Astro and
+Playwright; pnpm is supported.
 
-- **SHA-pinned.** Every third-party action in this repo is pinned to a full commit SHA with a version comment.
-- **Audited.** Workflows are checked with [zizmor](https://github.com/zizmorcore/zizmor), [jactionlint](https://github.com/jdx/jactionlint), check-jsonschema and shellcheck on every change (see [Self-validation](#self-validation)).
-- **In production.** It runs the pipelines for the sites listed under [Used by](#used-by), including the marketing site for [RavenFlight Industries, LLC](https://rvnflt.com/github).
+| Piece | What it does |
+|---|---|
+| [`site-ci.yml`](#site-ci) | Lint, typecheck, build, unit, license, Playwright, axe and Unlighthouse for sites |
+| [`tool-ci.yml`](#tool-ci) | gitleaks, lint, typecheck, build, test, workflow audit for bun tools |
+| [`resolve-env.yml`, deploy actions](#deploys) | Map branch to environment, deploy to Cloudflare or Netlify |
+| [`unlighthouse-runner`, `check-licenses`](#npm-package) | Performance budgets and copyleft license check (npm bins) |
+| [`@taraxvoid/voidflow/playwright`](#playwright-config) | Playwright config for `astro preview` |
+| [`@taraxvoid/voidflow/biome`](#biome) | Shared Biome config |
+| [`github>taraxvoid/voidflow`](#renovate) | Shared Renovate preset |
+| [`lefthook/base.yml`](#git-hooks) | Shared git hooks |
 
-It is semi-opinionated: the defaults match how my own sites are built (bun, Astro, Playwright).
+## Pinning
 
-## Used by
-
-- [taraxvoid.net](https://taraxvoid.net), my portfolio
-- [Queer Omaha](https://queeromaha.net), [Synth Omaha](https://synthomaha.net) and [Soundry](https://soundryomaha.org), free community sites for Omaha's queer and music scenes
-- [ravenflight.io](https://ravenflight.io), RavenFlight's marketing site
-
-### Show you use it
-
-Optional. Paste this into your site's README. It follows light and dark mode.
-
-```html
-<a href="https://github.com/taraxvoid/voidflow">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/CI-voidflow-8b8fd9?labelColor=2b2d3a&style=flat">
-    <img alt="CI: voidflow" src="https://img.shields.io/badge/CI-voidflow-5a5fb8?labelColor=3a3d4d&style=flat">
-  </picture>
-</a>
-```
-
-## Usage
-
-Point `uses` in your configuration at a workflow, e.g. in your `.github/workflows/ci.yml`. Pin to a release commit SHA with the version in a comment, the same way you would any third-party action (see [Versioning](#versioning)).
+Pin to a release commit SHA with the version in a comment, like any
+third-party action. Renovate and Dependabot can bump it.
 
 ```yaml
+uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
+```
+
+`@v0` follows the newest stable 0.x release if you'd rather float. To try
+unreleased changes, pin the SHA of a `vX.Y.Z-next.N` tag. Don't use `@main` or
+`@next`. Release channels are described in [`RELEASING.md`](RELEASING.md).
+
+## Site CI
+
+```yaml
+# .github/workflows/ci.yml
 name: CI
 on:
   pull_request:
@@ -41,26 +41,37 @@ on:
 
 jobs:
   validate:
-    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@15caea203066d42cb7be021eedb6356fac6ffdec # v0.8.1
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
 ```
 
-### Non-GitHub / self-hosted runners
+It runs whichever of these `package.json` scripts the site defines (missing
+ones are skipped with a notice):
 
-Pass `runner` (defaults to GitHub runner `ubuntu-latest`)
+| Script | When |
+|---|---|
+| `lint`, `check`, `build`, `test:unit` | always |
+| `check:licenses` | lockfile or `scripts/` changed |
+| `test:e2e:full` | PRs into `main` |
+| `test:e2e:all`, `test:e2e:a11y` | PRs into `next` and `live` |
+| `test:e2e:lighthouse` | PRs into `live` |
 
-```yaml
-jobs:
-  validate:
-    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@15caea203066d42cb7be021eedb6356fac6ffdec # v0.8.1
-    with:
-      runner: my-hosted-runner
-```
+Inputs:
+
+| Input | Default | |
+|---|---|---|
+| `runner` | `ubuntu-latest` | Runner label |
+| `package-manager` | `bun` | `bun` or `pnpm`. pnpm version comes from `packageManager`, Node from `engines` |
+| `single-environment` | `false` | See below |
+| `build-env` | `{}` | JSON object of build env vars. Visible in logs, so no secrets |
+| `e2e-extra-paths` | `["wrangler.jsonc", "site.vars.json"]` | JSON array of globs that also trigger e2e |
+| `socket-scanner` | `false` | Run the bun install security scanner in CI (see below) |
+| `playwright-install-with-deps` | `true` | Install Playwright system deps |
 
 ### Single-environment sites
 
-Sites with one production environment and no `next`/`live` branches (`main`
-deploys to prod, pull requests get previews) pass `single-environment: true`,
-the same flag `resolve-env` and `branch-env-map` take:
+For sites where `main` deploys to prod and PRs get previews (no `next`/`live`),
+pass `single-environment: true` and add a `push` trigger so direct pushes to
+`main` are validated:
 
 ```yaml
 on:
@@ -73,90 +84,41 @@ on:
 
 jobs:
   validate:
-    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # <version>
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
     with:
       single-environment: true
 ```
 
-`main` then gets the production test tier (`test:e2e:all`, `test:e2e:a11y`,
-`test:e2e:lighthouse`) instead of only `test:e2e:full`. Include the `push`
-trigger so a direct push to `main` is validated too; the e2e steps resolve the
-branch from the pushed ref.
+`main` then runs the production tier (`test:e2e:all`, `test:e2e:a11y`,
+`test:e2e:lighthouse`).
 
-### pnpm sites, build env, extra e2e paths
+### Socket install scanner
 
-```yaml
-jobs:
-  validate:
-    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # <version>
-    with:
-      package-manager: pnpm # default: bun
-      e2e-extra-paths: '["wrangler.jsonc", "site.vars.json"]' # JSON array of globs
-      build-env: ${{ format('{{"PUBLIC_SITE_URL":"https://example.com","GIT_SHA":"{0}"}}', github.sha) }}
-```
+If `bunfig.toml` sets `install.security.scanner`, CI installs with that line
+removed (everything else still applies) and leaves a notice, so a flaky
+third-party API can't fail the build. Local installs still run it. Pass
+`socket-scanner: true` to run it in CI too.
 
-With `pnpm`, the pnpm version comes from `packageManager` and Node from 
-`engines` in `package.json`. The lockfile (`bun.lock` or `pnpm-lock.yaml`)
-follows the package manager. `build-env` is a JSON object, visible in logs, so
-no secrets.
+Write it as a plain `scanner = "..."` line or dotted `security.scanner`. An
+inline table can't be removed cleanly, so the install fails instead.
 
-### Install-time security scanner (Socket)
-
-A bun site can set a security scanner in `bunfig.toml`, which checks every
-package on install:
-
-```toml
-[install.security]
-scanner = "@socketsecurity/bun-security-scanner"
-```
-
-CI skips it by default. The scanner calls a third-party API on every install,
-so a network blip or an API change could fail a build that otherwise passes,
-and rerunning the same commit could give a different result. `site-ci.yml`
-installs with a copy of `bunfig.toml` minus the scanner line (every other
-setting, e.g. `minimumReleaseAge`, still applies) and leaves a notice in the
-run. Local `bun install` reads `bunfig.toml` as is, so the scanner still runs
-on your machine.
-
-To run it in CI too, pass `socket-scanner: true` to `site-ci.yml`. A workflow
-that installs on its own (outside `site-ci.yml`) gets the same default from
-the composite action:
+Workflows that install outside `site-ci.yml` get the same behavior from the
+composite action:
 
 ```yaml
 - uses: oven-sh/setup-bun@<sha> # <version>
-- uses: taraxvoid/voidflow/actions/bun-install@<sha> # <version>
+- uses: taraxvoid/voidflow/actions/bun-install@<sha> # vX.Y.Z
   # with: { socket-scanner: 'true' }
 ```
 
-The copy is checked by parsing both files: it must equal your `bunfig.toml`
-with only `install.security.scanner` removed. Set the scanner as a plain
-`scanner = "..."` line (or the dotted `security.scanner` form); if it can't be
-removed cleanly, e.g. an inline table, the install fails rather than run or
-skip the scanner silently. pnpm sites are unaffected.
+## Tool CI
 
-## Workflow Types
-
-### Validation / Checks
-
-Runs lint, typecheck, check for GPL licenses, e2e with Playwright.
-
-`site-ci.yml` runs these `package.json` scripts: `lint`, `check`, `build`,
-`test:unit`, `check:licenses`, `test:e2e:full` (PRs into `main`),
-`test:e2e:all` (PRs into `next` and `live`), `test:e2e:a11y` (`next` and
-`live`), and `test:e2e:lighthouse` (`live`). A script the site does not define
-is skipped with a notice, so none of them is required.
-
-### Tool validation
-
-`tool-ci.yml` is the validation job for bun tools and libraries (CLIs, TUIs,
-packages): gitleaks over the full history, install (with the same Socket
-scanner handling as `site-ci.yml`), tools from the repo's `mise.toml` when it
-has one, then whichever of `lint`, `check`, `build` and `test` `package.json`
-defines, and `check:licenses` when dependencies or `scripts/` changed. When
-workflows change it also runs jactionlint (same profile handling as
-`site-ci.yml`) and
-[zizmor](https://github.com/zizmorcore/zizmor). The bun version comes from
-`.bun-version` when present.
+For bun CLIs, TUIs and libraries. Runs gitleaks over full history, installs
+(same scanner handling), installs tools from `mise.toml` if present, then
+whichever of `lint`, `check`, `build` and `test` exist, plus `check:licenses`
+when dependencies or `scripts/` change. When workflows change it also runs
+jactionlint and [zizmor](https://github.com/zizmorcore/zizmor). Bun version
+comes from `.bun-version` if present. Inputs: `runner`, `socket-scanner`.
 
 ```yaml
 name: CI
@@ -173,73 +135,88 @@ permissions:
 
 jobs:
   validate:
-    uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<release SHA> # vX.Y.Z
+    uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<sha> # vX.Y.Z
 ```
 
-The job reports as `validate / Validate`, the check the `tool()` entry in
-[`rulesets/index.ts`](#branch-rulesets-as-code) requires.
+The required status check is `validate / Validate`.
 
-### Unlighthouse (performance / SEO budgets)
+## Deploys
 
-`site-ci.yml` runs `bun run test:e2e:lighthouse` on PRs into `live`. Sites
-implement that script with the shared runner here, which serves the built
-static directory on a free port and runs
-[Unlighthouse](https://unlighthouse.dev/) against it, reusing Playwright's
-Chromium. It exits non-zero if a category budget in the site's config fails.
+`resolve-env.yml` maps the branch to an environment: `main` to `dev`, `next`
+to `staging`, `live` to `prod`. With `single-environment: true`, `main` maps to
+`prod`, pull requests to `preview`, and any other ref fails. It's a separate
+job so the deploy job's `name:` can show the environment.
 
-Add `@taraxvoid/voidflow` as a devDependency and call the bin from the site's
-`package.json`:
+```yaml
+jobs:
+  resolve-env:
+    needs: validate
+    if: github.event_name == 'push'
+    uses: taraxvoid/voidflow/.github/workflows/resolve-env.yml@<sha> # vX.Y.Z
+
+  deploy:
+    name: Deploy [${{ needs.resolve-env.outputs.env }}]
+    needs: resolve-env
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve-env.outputs.env }}
+    steps:
+      - uses: actions/checkout@<sha> # <version>
+      - uses: taraxvoid/voidflow/actions/cloudflare-deploy@<sha> # vX.Y.Z
+        with:
+          env: ${{ needs.resolve-env.outputs.env }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
+
+- `actions/cloudflare-deploy`: `wrangler deploy` for the environment, with an
+  optional D1 migration first (`migrate-d1`). Other inputs:
+  `cloudflare-account-id`, `working-directory`, `command`.
+- `actions/netlify-deploy`: `prod` is a production deploy, `dev`/`staging` are
+  alias deploys. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
+  `netlify-site-id`, `working-directory`, `github-token`. Turn off Netlify's
+  own GitHub auto-deploy for the site, or the two will double-deploy.
+- `actions/branch-env-map`: the mapping step on its own, for use inside a job.
+
+## npm package
+
+```sh
+bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
+```
+
+Also published unscoped as `voidflow` with identical contents.
+
+Call the bins from `package.json` scripts rather than `bunx --package ...`, so
+the version stays in the lockfile and the site's `bunfig.toml` applies. Both
+bins need `bun` on `PATH`, even in npm or pnpm projects.
+
+### Unlighthouse budgets
 
 ```json
 "test:e2e:lighthouse": "bun run build && unlighthouse-runner --dir dist"
 ```
 
-Options: `--dir` (default `dist`, use `dist/client` for Cloudflare adapter
-builds), `--config` (default `unlighthouse.config.ts`), `--version` (pinned
-Unlighthouse version). Start from
-[`scripts/unlighthouse/unlighthouse.config.example.ts`](scripts/unlighthouse/unlighthouse.config.example.ts)
-and add `.unlighthouse/` to the site's `.gitignore`.
+Serves the built directory and runs [Unlighthouse](https://unlighthouse.dev/)
+with Playwright's Chromium. Fails if a category budget fails.
 
-### License policy
+- `--dir`: default `dist`; use `dist/client` for the Cloudflare adapter
+- `--config`: default `unlighthouse.config.ts`; start from
+  [the example](scripts/unlighthouse/unlighthouse.config.example.ts)
+- `--version`: Unlighthouse version
 
-`site-ci.yml` runs `bun run check:licenses` when the lockfile or `scripts/`
-change. Sites implement that script with the shared check, which runs
-`license-checker-rseidelsohn` in the site's repo root and fails on GPL, AGPL,
-SSPL and similar copyleft licenses (LGPL is allowed). Voidflow pins the
-checker to an exact version as its own dependency, so sites don't need to
-install it and every site runs the same version (sites that added
-`license-checker-rseidelsohn` as a devDependency for 0.12.2 can drop it).
+Add `.unlighthouse/` to `.gitignore`.
 
-With `@taraxvoid/voidflow` as a devDependency, call the bin from the site's
-`package.json`:
+### License check
 
 ```json
 "check:licenses": "check-licenses"
 ```
 
-Don't use `bunx --package @taraxvoid/voidflow@<version> ...` for these. It
-duplicates the version pin outside the lockfile and Renovate, and `bunx` reads
-the global `~/.bunfig.toml` rather than the site's, so a global
-`minimumReleaseAge` that doesn't exclude `@taraxvoid/voidflow` blocks it
-locally (including in the pre-commit hook) for 3 days after every release.
-The devDependency's bins are installed under the site's own `bunfig.toml`.
+Fails on GPL, AGPL, SSPL and similar copyleft licenses. LGPL is allowed.
 
-Both bins (`check-licenses`, `unlighthouse-runner`) are TypeScript run by Bun
-(`#!/usr/bin/env bun`), so `bun` must be on `PATH` even when the site uses
-npm or pnpm. The `@taraxvoid/voidflow/playwright` export is plain ESM and runs
-on Node 22+ without Bun.
+### Playwright config
 
-### Playwright preview config
-
-Shared `playwright.config` for Astro sites that run e2e against
-`astro preview`. It picks a free port outside CI, sets
-`ASTRO_PREVIEW_BACKGROUND=false` (Astro backgrounds `preview` in agent
-environments, which makes Playwright think the server exited), and drops the
-`webServer` when `PLAYWRIGHT_BASE_URL` is set.
-
-```sh
-bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
-```
+For Astro sites that run e2e against `astro preview`. Requires
+`@playwright/test`. Runs on Node 22+ without Bun.
 
 ```js
 // playwright.config.js
@@ -248,23 +225,14 @@ import { definePreviewConfig } from '@taraxvoid/voidflow/playwright'
 export default definePreviewConfig({ ciPort: 4141 })
 ```
 
-The same release is also published unscoped as `voidflow` (identical code and
-version, with a short pointer README), so `bun add -d voidflow` and
-`import ... from 'voidflow/playwright'` work too. `@taraxvoid/voidflow` is the
-canonical name.
+Picks a free port locally and skips `webServer` when `PLAYWRIGHT_BASE_URL` is
+set. Options: `ciPort` (required in CI), `runner` (default `bun`), `timeout`
+(default 30000), `projects` (default Pixel 7 and Desktop Chrome), `testDir`
+(default `./test/e2e`).
 
-Options: `ciPort` (required in CI), `runner` (default `bun`, e.g. `pnpm`),
-`timeout` (default 30000), `projects` (default Pixel 7 and Desktop Chrome),
-`testDir` (default `./test/e2e`). Requires `@playwright/test` in the site.
+### Biome
 
-## Shared Biome config
-
-[`biome/base.json`](biome/base.json) is the house style for the fleet: 4-space
-indent, LF, width 80, single quotes, semicolons only where needed, trailing
-commas, the `recommended` rule preset, organized imports, CSS lint off, and
-unused-import/variable rules off in `.astro` files (Biome can't see template
-usage). With `@taraxvoid/voidflow` as a devDependency, the site's `biome.json`
-extends it and adds only what is specific to the site:
+Needs Biome 2. In the site's `biome.json`:
 
 ```json
 {
@@ -276,16 +244,12 @@ extends it and adds only what is specific to the site:
 }
 ```
 
-Lists such as `files.includes` and `overrides` combine with the base's rather
-than replace them; single values set in the site win. The base has no ignore
-lists, so each site keeps its own. It needs Biome 2: the pre-commit hook and
-`site-ci.yml` print a warning (they don't fail) when a site has Biome 1.x
-installed.
+The base sets formatting (4-space indent, width 80, single quotes, semicolons
+as needed), the `recommended` rules, and turns off unused-import/variable rules
+in `.astro` files. It has no ignore lists. Lists like `files.includes` and
+`overrides` merge with the base; single values in the site win.
 
-## Dependency updates (Renovate)
-
-[`default.json`](default.json) is the shared Renovate preset. Sites add a
-`renovate.json`:
+## Renovate
 
 ```json
 {
@@ -294,220 +258,78 @@ installed.
 }
 ```
 
-It builds on `config:best-practices` (which pins GitHub Action digests), holds
-updates for 3 days like `minimumReleaseAge` in `bunfig.toml` (except our own
-package and security alerts), uses `chore(deps):` Conventional Commits, groups
-actions, astro, biome and playwright, and runs on Monday mornings. Custom
-managers keep three things current that Dependabot cannot see: the
-`@taraxvoid/voidflow@x.y.z` pin inside `package.json` scripts, a lefthook
-remote's `ref` tag, and tool versions in a `justfile` (annotate the line above
-with `# renovate: datasource=... depName=...`). Requires the Renovate GitHub App
-on the repo.
+Requires the Renovate GitHub App. Based on `config:best-practices`: 3-day
+release age (except voidflow and security fixes), `chore(deps):` commits,
+grouped updates, Monday mornings. It also bumps the lefthook remote `ref`, and
+`justfile` tool versions annotated with
+`# renovate: datasource=... depName=...` on the line above.
 
-## Git hooks (lefthook)
+## Git hooks
 
-[`lefthook/base.yml`](lefthook/base.yml) is the shared hook set for any bun
-(or pnpm) repo, sites and tools alike, consumed as a lefthook remote. It calls
-the repo's own `package.json` scripts (`<pm> run --if-present`, so a missing
-script is skipped; `<pm>` is pnpm when the repo has a `pnpm-lock.yaml`, bun
-otherwise):
+Shared lefthook hooks for bun or pnpm repos. Each step runs the repo's own
+`package.json` script and is skipped if the script is missing.
 
-- `pre-commit`: dependency guard, Biome 1.x warning, `format` (formatted files are re-staged),
-  `lint:actions`, `check`, `test:unit`, and `check:licenses` / `audit` when the
-  lockfile changed.
-- `commit-msg`: advisory Conventional Commits hint (never blocks).
-- `pre-push`: bail if the remote branch is ahead, then `test:push`; skipped when
-  the push carries no commit the remote lacks (branch deletes, and tags or
-  branches at already-pushed commits).
-
-Before `test:unit` and `test:push`, the hooks unset the variables git exports to
-hooks (`GIT_DIR`, `GIT_INDEX_FILE`, ...; the list comes from
-`git rev-parse --local-env-vars`). Without that, a test that runs
-`git -C <tmpdir> commit` operates on, and commits into, the repo being hooked.
+- `pre-commit`: dependency guard, `format` (re-staged), `lint:actions`,
+  `check`, `test:unit`, and `check:licenses` / `audit` when the lockfile changed
+- `commit-msg`: Conventional Commits hint (never blocks)
+- `pre-push`: stop if the remote is ahead, then `test:push`
 
 ```yaml
-# lefthook.yml in the repo
+# lefthook.yml
 remotes:
   - git_url: https://github.com/taraxvoid/voidflow
-    ref: v0.10.0 # a tag or branch; lefthook passes it to `git clone --branch`
+    ref: vX.Y.Z # a tag, not a SHA
     configs:
       - lefthook/base.yml
-
 ```
 
-Upgrading from `lefthook/site.yml` (v0.13 and earlier): change the `configs`
-entry to `lefthook/base.yml` when you bump `ref`. The hooks are otherwise the
-same. `lefthook/site.yml` is now a stub whose `pre-commit` and `pre-push` fail
-with that instruction, so a `ref` bump (for example from Renovate) that leaves
-`configs` alone stops commits instead of turning the hooks off silently.
-
-Lefthook merges `lefthook.yml`, then remotes, then `lefthook-local.yml`, so a
-repo's own `lefthook.yml` can add commands (for example image compression) but
-cannot override ones defined here. Differences go through `package.json`
-scripts: define `test:unit:precommit` (for example excluding tests that need a
-built `dist/`) and the pre-commit unit step runs it instead of `test:unit`.
-Likewise, define `check:precommit` and the typecheck step runs it instead of
-`check`. CI keeps calling the full scripts, so these only narrow what runs
-locally. Common uses:
-
-- bun: `"test:unit:precommit": "bun test --changed"` runs only the test files
-  whose imports reach an uncommitted change.
-- pnpm workspace: `pnpm -r --filter '...[HEAD]' run <script>` runs only the
-  changed packages and their dependents. Fall back to the full run when a
-  root-level file (lockfile, shared tsconfig) changed, since those don't
-  belong to any package. If the root `package.json` defines the same script
-  as a recursive run, add `--filter '!{.}'` so it doesn't recurse.
-
-Hook-level options merge too. Don't set `parallel: true` under `pre-commit:` in
-the repo's `lefthook.yml`: it applies to the merged hook, so every step,
-including the shared ones, starts at once and their `priority` order is ignored
-(tests that share a database or build output can then time out).
-
-Install the binaries through mise. A starter `mise.toml` for a repo using
-these hooks and voidflow CI:
+Install the binaries with mise:
 
 ```toml
+# mise.toml
 [tools]
 lefthook = "2.2.1"
 gitleaks = "8.30.1"
 jactionlint = "2.1.0"
 ```
 
-Renovate bumps `mise.toml` natively. Set the `prepare` script so `bun install`
-wires the hooks, but make it tolerate a missing binary:
+and wire the hooks on install without failing where lefthook is absent (CI):
 
 ```json
 "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'"
 ```
 
-A bare `lefthook install` fails the whole install step (exit 127) on any runner
-without the `lefthook` binary, which includes GitHub-hosted and self-hosted CI
-images, and CI never runs git hooks anyway. `ref` cannot be a commit SHA; pin a
-release tag.
+To run less locally, define `test:unit:precommit` or `check:precommit`;
+pre-commit runs those instead. CI still runs the full scripts. For example:
 
-## Branch rulesets as code
+- bun: `"test:unit:precommit": "bun test --changed"`
+- pnpm workspace: `pnpm -r --filter '...[HEAD]' run <script>` (add
+  `--filter '!{.}'` if the root defines the same script recursively)
 
-Branch protection for the fleet lives in [`rulesets/index.ts`](rulesets/index.ts):
-one canonical `main` / `next` / `live` definition (plus `prerelease` and `maintenance`
-tiers for repos with release channels) and a small per-repo table
-(Netlify or not, check names, CODEOWNERS, extra bypass actors). Sites use
-`site()` and tools use `tool()` (main only, no Netlify, requires
-`validate / Validate` from `tool-ci.yml`). Private repos are left out: on a
-plan without rulesets for private repos, the API returns 403. Hand-edited
-rulesets drift, and drift is how a `next` ruleset ends up requiring a check
-name that no workflow reports any more.
+Your `lefthook.yml` can add commands but not override shared ones. Don't set
+`parallel: true` on `pre-commit`; it applies to the shared steps too and breaks
+their ordering.
 
-```sh
-just rulesets-plan                  # read-only: diff every repo against the config
-just rulesets-plan --repo soundry
-just rulesets-plan --check          # exit 1 on drift, for CI
-just rulesets-apply                 # create/update rulesets to match
-just rulesets-apply --prune         # also delete rulesets a repo lists under `retire`
+Upgrading from `lefthook/site.yml` (v0.13 and earlier): change `configs` to
+`lefthook/base.yml`. The old file now fails commits with that instruction.
+
+## Used by
+
+[taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),
+[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org),
+[ravenflight.io](https://ravenflight.io).
+
+Optional badge for your README (follows light/dark mode):
+
+```html
+<a href="https://github.com/taraxvoid/voidflow">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/CI-voidflow-8b8fd9?labelColor=2b2d3a&style=flat">
+    <img alt="CI: voidflow" src="https://img.shields.io/badge/CI-voidflow-5a5fb8?labelColor=3a3d4d&style=flat">
+  </picture>
+</a>
 ```
 
-Single-environment sites (a stable `main` that deploys to prod) manage only the
-`main` tier; their old `next`/`live` rulesets are listed under `retire`. voidflow itself
-manages `main`, `prerelease` (`next`) and `maintenance` (`release/*`) and sets
-`linearHistory: false` so `next` can be promoted into `main` with a merge commit.
-Uses the `gh` CLI for auth (needs admin on the repos). Rulesets that are not in
-the config are reported and left alone; only `retire` entries are ever deleted,
-and only with `--prune`. Private repos on a plan without rulesets (GitHub answers
-403, e.g. a free personal account) are skipped and listed at the end rather than
-failing the run, so `--check` stays green and they pick up their rulesets once the
-repo goes public or the plan changes. It is repo tooling, not part of the published
-package.
+## Contributing
 
-## Deployments
-
-Example deployment job added to your workflow above. `resolve-env` maps the
-branch to dev/staging/prod once, up front, so its output can be used both to
-drive the deploy and to label the job (`Deploy [dev]`, `Deploy [staging]`,
-`Deploy [prod]`). A job's `name:` can reference `needs.<job>.outputs.*` but
-not a step output from within itself, hence the split:
-
-```yaml
-jobs:
-  resolve-env:
-    needs: validate
-    if: github.event_name == 'push'
-    uses: taraxvoid/voidflow/.github/workflows/resolve-env.yml@15caea203066d42cb7be021eedb6356fac6ffdec # v0.8.1
-
-  deploy:
-    name: Deploy [${{ needs.resolve-env.outputs.env }}]
-    needs: resolve-env
-    if: github.event_name == 'push'
-    environment: ${{ needs.resolve-env.outputs.env }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taraxvoid/voidflow/actions/cloudflare-deploy@15caea203066d42cb7be021eedb6356fac6ffdec # v0.8.1
-        with:
-          env: ${{ needs.resolve-env.outputs.env }}
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-```
-
-Sites with a single production environment and per-PR previews (no `next` or
-`live` branch) pass `with: { single-environment: true }` to `resolve-env.yml`
-(or the same input on `actions/branch-env-map`). `main` then maps to `prod` and
-`pull_request` events map to `preview`; any other ref fails.
-
-### Versioning
-
-Semver, released with [release-please](https://github.com/googleapis/release-please)
-([`release-please.yml`](.github/workflows/release-please.yml)) on three branch-based channels
-(full flow in [`RELEASING.md`](RELEASING.md)):
-
-| Channel | Branch | Example | npm dist-tag |
-|---|---|---|---|
-| stable | `main` | `0.10.0` | `latest` |
-| prerelease | `next` | `0.10.0-next`, `0.10.0-next.1` | `next` |
-| maintenance | `release/N.x` | `0.9.4` | `release-N.x` |
-
-release-please keeps a standing release PR open on each channel's branch, updated as commits land.
-Merging it bumps `package.json` (and [`CHANGELOG.md`](CHANGELOG.md) on stable), tags `vX.Y.Z` (`vX.Y.Z-next[.N]` on `next`),
-creates the GitHub release and publishes to npm and JSR under the channel's dist-tag. The PR is
-opened with the org's release-bot GitHub App token (`RELEASE_BOT_CLIENT_ID` /
-`RELEASE_BOT_APP_PRIVATE_KEY`) so CI runs on it.
-
-Feature PRs target `next`; promotion to `main` is a merge-commit PR (`just promote`).
-
-Commit messages should follow [Conventional Commits](https://www.conventionalcommits.org),
-enforced loosely, as an advisory `commit-msg` hint (see
-[`scripts/check-commit-msg.sh`](scripts/check-commit-msg.sh)), not a blocking check. They
-drive the version bump and generated changelog.
-
-Ways to consume a release:
-
-- **Floating major tag**: `@v0` follows the newest stable 0.x release. Easiest to track, and
-  mutable like any floating tag.
-- **SHA pin with a version comment**, e.g. `@15caea2... # v0.8.1`: what I use. Same hardening
-  as any third-party action, and Renovate or Dependabot can bump it.
-- **Try unreleased changes**: pin the commit SHA of a `vX.Y.Z-next` / `vX.Y.Z-next.N` prerelease tag.
-
-Treat `@main` and `@next` as unstable.
-
-## Self-validation
-
-This repo validates its own workflows and composite actions (`.github/workflows/ci.yml`):
-
-- **jactionlint**: workflow schema/logic; also shellchecks `run:` steps in `.github/workflows/*.yml` automatically (`shellcheck` ships on `ubuntu-latest`)
-- **check-jsonschema**: schema-checks `actions/**/action.yml` and the workflow files against [SchemaStore](https://www.schemastore.org/)'s `github-action.json` / `github-workflow.json`
-- **shellcheck** (`scripts/shellcheck-actions.ts`): checks `run:` steps inside `actions/**/action.yml`, which jactionlint doesn't reach
-- **zizmor**: security audit (unpinned refs, script injection via `${{ }}` in `run:`, excess permissions, etc.)
-
-### Local dev setup
-
-```sh
-mise install   # tools pinned in mise.toml
-bun install    # its prepare script runs `lefthook install`
-```
-
-- `just validate`: run everything CI runs, locally
-- `just lint-workflows` / `lint-actions` / `lint-shell` / `security`: run one check at a time
-- `just dry-run`: full local run of `ci.yml` via [`act`](https://github.com/nektos/act) (needs Docker running); pass extra args, e.g. `just dry-run -j validation`
-- lefthook runs the fast checks (`lint-workflows`, `lint-actions`, `lint-shell`) on `pre-commit`, and `zizmor` on `pre-push`
-
-**Colima users:** `.actrc` already disables the docker-socket mount (`--container-daemon-socket -`). `act` binds `/var/run/docker.sock` by default, which doesn't exist under Colima and fails with `operation not supported`. None of these workflow steps need docker-in-docker, so this is safe.
-
-**Run `just dry-run` from a normal checkout, not a linked git worktree.** `act` copies the working tree via `docker cp` rather than a real clone, so a worktree's `.git` pointer back to the parent repo doesn't resolve inside the container, so `git ls-files`-based steps (schema validation, `scripts/shellcheck-actions.ts`) silently see zero files instead of erroring. Verified clean end-to-end (`🏁 Job succeeded`) from a plain clone.
-
-Provided as is under the [MIT license](LICENSE). Issues and pull requests are welcome.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). MIT licensed.
