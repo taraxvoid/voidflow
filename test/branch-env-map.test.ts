@@ -9,7 +9,7 @@ const actionScript: string = Bun.YAML.parse(read('actions/branch-env-map/action.
     (s: any) => s.id === 'map',
 ).run
 
-async function map(script: string, ref: string, event: string, single: boolean) {
+async function map(script: string, ref: string, event: string) {
     const out = join(mkdtempSync(join(tmpdir(), 'voidflow-env-')), 'out')
     await Bun.write(out, '')
     const proc = Bun.spawn(['bash', '-c', script], {
@@ -17,7 +17,6 @@ async function map(script: string, ref: string, event: string, single: boolean) 
             PATH: process.env.PATH,
             REF_NAME: ref,
             EVENT_NAME: event,
-            SINGLE: String(single),
             GITHUB_OUTPUT: out,
         },
         stdout: 'pipe',
@@ -28,29 +27,19 @@ async function map(script: string, ref: string, event: string, single: boolean) 
 }
 
 describe('action script', () => {
-    const script = actionScript
-
-    test.each([
-        ['main', 'push', 'env=dev'],
-        ['next', 'push', 'env=staging'],
-        ['live', 'push', 'env=prod'],
-    ])('default mode: %s on %s', async (ref, event, expected) => {
-        expect(await map(script, ref, event, false)).toEqual({ code: 0, env: expected })
-    })
-
-    test('default mode rejects unknown branches', async () => {
-        expect((await map(script, 'feature/x', 'push', false)).code).toBe(1)
-    })
-
     test.each([
         ['main', 'push', 'env=prod'],
         ['123/merge', 'pull_request', 'env=preview'],
         ['feature/x', 'pull_request', 'env=preview'],
-    ])('single-environment: %s on %s', async (ref, event, expected) => {
-        expect(await map(script, ref, event, true)).toEqual({ code: 0, env: expected })
+    ])('%s on %s', async (ref, event, expected) => {
+        expect(await map(actionScript, ref, event)).toEqual({ code: 0, env: expected })
     })
 
-    test('single-environment rejects non-main pushes', async () => {
-        expect((await map(script, 'feature/x', 'push', true)).code).toBe(1)
+    test.each([
+        ['feature/x', 'push'],
+        ['next', 'push'],
+        ['live', 'push'],
+    ])('rejects %s on %s', async (ref, event) => {
+        expect((await map(actionScript, ref, event)).code).toBe(1)
     })
 })

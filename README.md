@@ -34,8 +34,10 @@ unreleased changes, pin the SHA of a `vX.Y.Z-next.N` tag. Don't use `@main` or
 # .github/workflows/ci.yml
 name: CI
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches: [main, next, live]
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
@@ -44,6 +46,9 @@ jobs:
     uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
 ```
 
+`main` deploys to prod and pull requests get previews; there are no other
+environment branches. The `push` trigger validates direct pushes to `main`.
+
 It runs whichever of these `package.json` scripts the site defines (missing
 ones are skipped with a notice):
 
@@ -51,9 +56,7 @@ ones are skipped with a notice):
 |---|---|
 | `lint`, `check`, `build`, `test:unit` | always |
 | `check:licenses` | lockfile or `scripts/` changed |
-| `test:e2e:full` | PRs into `main` |
-| `test:e2e:all`, `test:e2e:a11y` | PRs into `next` and `live` |
-| `test:e2e:lighthouse` | PRs into `live` |
+| `test:e2e:all`, `test:e2e:a11y`, `test:e2e:lighthouse` | e2e-relevant files changed |
 
 Inputs:
 
@@ -61,7 +64,6 @@ Inputs:
 |---|---|---|
 | `runner` | `ubuntu-latest` | Runner label |
 | `package-manager` | `bun` | `bun`, `pnpm` or `aube` (see below) |
-| `single-environment` | `false` | See below |
 | `build` | `true` | Run `build` as its own step. Pass `false` when the e2e scripts already build |
 | `build-env` | `{}` | JSON object of build env vars. Visible in logs, so no secrets |
 | `code-paths` | everything except Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs (`!` excludes) that count as code |
@@ -80,35 +82,10 @@ pnpm takes its version from `packageManager` and Node from `volta` or
 then follows `packageManager` and takes Node from `devEngines.runtime`. Both
 use `pnpm-lock.yaml`.
 
-### Single-environment sites
-
-For sites where `main` deploys to prod and PRs get previews (no `next`/`live`),
-pass `single-environment: true` and add a `push` trigger so direct pushes to
-`main` are validated:
-
-```yaml
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
-  workflow_dispatch:
-
-jobs:
-  validate:
-    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
-    with:
-      single-environment: true
-```
-
-`main` then runs the production tier (`test:e2e:all`, `test:e2e:a11y`,
-`test:e2e:lighthouse`).
-
 ### Extra e2e scripts
 
-Scripts listed in `e2e-scripts` run in order after the built-in tiers whenever
-e2e-relevant files changed. Unlike the built-in tiers, a missing one fails the
+Scripts listed in `e2e-scripts` run in order after the built-in ones whenever
+e2e-relevant files changed. Unlike the built-in ones, a missing one fails the
 job.
 
 ```yaml
@@ -167,10 +144,8 @@ The required status check is `validate / Validate`.
 
 ## Deploys
 
-`actions/branch-env-map` maps the branch to an environment: `main` to `dev`,
-`next` to `staging`, `live` to `prod`. With `single-environment: true`, `main`
-maps to `prod`, pull requests to `preview`, and any other ref fails. Run it as
-the first step of the deploy job:
+`actions/branch-env-map` maps `main` to `prod` and pull requests to `preview`;
+any other ref fails. Run it as the first step of the deploy job:
 
 ```yaml
 jobs:
@@ -190,8 +165,8 @@ jobs:
 ```
 
 A job's `name:` and `environment:` can't read its own step outputs. To use
-GitHub deployment environments, add one deploy job per branch, each gated with
-an `if:`.
+GitHub deployment environments, add one deploy job for `main` and one for pull
+requests, each gated with an `if:`.
 
 - `actions/cloudflare-deploy`: `wrangler deploy` for the environment, with an
   optional D1 migration first (`migrate-d1`). Other inputs:
