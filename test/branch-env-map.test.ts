@@ -8,9 +8,6 @@ const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'u
 const actionScript: string = Bun.YAML.parse(read('actions/branch-env-map/action.yml')).runs.steps.find(
     (s: any) => s.id === 'map',
 ).run
-const workflowScript: string = Bun.YAML.parse(read('.github/workflows/resolve-env.yml')).jobs[
-    'resolve-env'
-].steps.find((s: any) => s.id === 'map').run
 
 async function map(script: string, ref: string, event: string, single: boolean) {
     const out = join(mkdtempSync(join(tmpdir(), 'voidflow-env-')), 'out')
@@ -30,21 +27,9 @@ async function map(script: string, ref: string, event: string, single: boolean) 
     return { code, env: readFileSync(out, 'utf8').trim() }
 }
 
-describe('resolve-env.yml carries the same mapping as branch-env-map', () => {
-    test('scripts are identical (no drift)', () => {
-        expect(workflowScript).toBe(actionScript)
-    })
+describe('action script', () => {
+    const script = actionScript
 
-    test('resolve-env.yml has no `uses` steps (a local ./actions path or checkout cannot work cross-repo)', () => {
-        const steps = Bun.YAML.parse(read('.github/workflows/resolve-env.yml')).jobs['resolve-env'].steps
-        expect(steps.filter((s: any) => s.uses)).toEqual([])
-    })
-})
-
-describe.each([
-    ['action', actionScript],
-    ['workflow', workflowScript],
-])('%s script', (_name, script) => {
     test.each([
         ['main', 'push', 'env=dev'],
         ['next', 'push', 'env=staging'],

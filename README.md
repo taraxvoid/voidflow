@@ -8,7 +8,7 @@ Playwright; pnpm is supported.
 |---|---|
 | [`site-ci.yml`](#site-ci) | Lint, typecheck, build, unit, license, Playwright, axe and Unlighthouse for sites |
 | [`tool-ci.yml`](#tool-ci) | gitleaks, lint, typecheck, build, test, workflow audit for bun tools |
-| [`resolve-env.yml`, deploy actions](#deploys) | Map branch to environment, deploy to Cloudflare or Netlify |
+| [Deploy actions](#deploys) | Map branch to environment, deploy to Cloudflare or Netlify |
 | [`unlighthouse-runner`, `check-licenses`](#npm-package) | Performance budgets and copyleft license check (npm bins) |
 | [`@taraxvoid/voidflow/playwright`](#playwright-config) | Playwright config for `astro preview` |
 | [`@taraxvoid/voidflow/biome`](#biome) | Shared Biome config |
@@ -167,31 +167,31 @@ The required status check is `validate / Validate`.
 
 ## Deploys
 
-`resolve-env.yml` maps the branch to an environment: `main` to `dev`, `next`
-to `staging`, `live` to `prod`. With `single-environment: true`, `main` maps to
-`prod`, pull requests to `preview`, and any other ref fails. It's a separate
-job so the deploy job's `name:` can show the environment.
+`actions/branch-env-map` maps the branch to an environment: `main` to `dev`,
+`next` to `staging`, `live` to `prod`. With `single-environment: true`, `main`
+maps to `prod`, pull requests to `preview`, and any other ref fails. Run it as
+the first step of the deploy job:
 
 ```yaml
 jobs:
-  resolve-env:
+  deploy:
+    name: Deploy
     needs: validate
     if: github.event_name == 'push'
-    uses: taraxvoid/voidflow/.github/workflows/resolve-env.yml@<sha> # vX.Y.Z
-
-  deploy:
-    name: Deploy [${{ needs.resolve-env.outputs.env }}]
-    needs: resolve-env
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve-env.outputs.env }}
     steps:
       - uses: actions/checkout@<sha> # <version>
+      - id: env
+        uses: taraxvoid/voidflow/actions/branch-env-map@<sha> # vX.Y.Z
       - uses: taraxvoid/voidflow/actions/cloudflare-deploy@<sha> # vX.Y.Z
         with:
-          env: ${{ needs.resolve-env.outputs.env }}
+          env: ${{ steps.env.outputs.env }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 ```
+
+A job's `name:` and `environment:` can't read its own step outputs. To use
+GitHub deployment environments, add one deploy job per branch, each gated with
+an `if:`.
 
 - `actions/cloudflare-deploy`: `wrangler deploy` for the environment, with an
   optional D1 migration first (`migrate-d1`). Other inputs:
@@ -200,7 +200,6 @@ jobs:
   alias deploys. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
   `netlify-site-id`, `working-directory`, `github-token`. Turn off Netlify's
   own GitHub auto-deploy for the site, or the two will double-deploy.
-- `actions/branch-env-map`: the mapping step on its own, for use inside a job.
 
 ## npm package
 
