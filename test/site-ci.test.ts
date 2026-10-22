@@ -6,33 +6,33 @@ import { join } from 'node:path'
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const wf: any = Bun.YAML.parse(read('.github/workflows/site-ci.yml'))
 const inputs = wf.on.workflow_call.inputs
-const { changes, validate } = wf.jobs
-const changesStep = (id: string) => changes.steps.find((s: any) => s.id === id)
+const { validate } = wf.jobs
+const GATE = "steps.decide.outputs.validate == 'true'"
+const changesStep = (id: string) => validate.steps.find((s: any) => s.id === id)
 const validateStep = (name: string) => validate.steps.find((s: any) => s.name === name)
 
-describe('site-ci.yml job split', () => {
-    test('validate still reports as "validate / Validate" (the required check name)', () => {
+describe('site-ci.yml job shape', () => {
+    test('is one job that still reports as "validate / Validate" (the required check name)', () => {
+        expect(Object.keys(wf.jobs)).toEqual(['validate'])
         expect(validate.name).toBe('Validate')
+        expect(validate.needs).toBeUndefined()
     })
 
-    test('validate waits for changes and only runs when it says so', () => {
-        expect(validate.needs).toBe('changes')
-        expect(validate.if).toBe("needs.changes.outputs.validate == 'true'")
+    test('skips drafts and keeps full history for gitleaks', () => {
+        expect(validate.if).toBe('github.event.pull_request.draft == false')
+        expect(validate.steps[0].with['fetch-depth']).toBe(0)
+        expect(validateStep('Secrets Scan')).toBeDefined()
     })
 
-    test('changes skips drafts and keeps full history for gitleaks', () => {
-        expect(changes.if).toBe('github.event.pull_request.draft == false')
-        expect(changes.steps[0].with['fetch-depth']).toBe(0)
-        expect(changes.steps.some((s: any) => s.name === 'Secrets Scan')).toBe(true)
+    test('every step after decide is gated on it, so a docs-only PR stops after the scan', () => {
+        const ids = validate.steps.map((s: any) => s.id)
+        const after = validate.steps.slice(ids.indexOf('decide') + 1)
+        expect(after.length).toBeGreaterThan(10)
+        for (const s of after) expect(s.if).toContain(GATE)
     })
 
-    test('validate uses a shallow checkout and no longer scans for secrets', () => {
-        expect(validate.steps[0].with['fetch-depth']).toBeUndefined()
-        expect(validateStep('Secrets Scan')).toBeUndefined()
-    })
-
-    test('every action in both jobs is pinned to a full SHA', () => {
-        for (const s of [...changes.steps, ...validate.steps].filter((s: any) => s.uses)) {
+    test('every action is pinned to a full SHA', () => {
+        for (const s of validate.steps.filter((s: any) => s.uses)) {
             expect(s.uses).toMatch(/@[0-9a-f]{40}$/)
         }
     })
@@ -90,22 +90,20 @@ describe('site-ci.yml docs-only filtering', () => {
 describe('site-ci.yml aube', () => {
     test('documents aube among the package managers and accepts it', () => {
         expect(inputs['package-manager'].description).toContain('aube')
-        const check = changes.steps.find((s: any) => s.name === 'Check package manager')
+        const check = validate.steps.find((s: any) => s.name === 'Check package manager')
         expect(check.run).toContain('bun | pnpm | aube')
     })
 
     test('aube shares pnpm-lock.yaml; only bun has its own lockfile', () => {
-        for (const job of [changes, validate]) {
-            expect(job.env.LOCKFILE).toBe("${{ inputs.package-manager == 'bun' && 'bun.lock' || 'pnpm-lock.yaml' }}")
-        }
+        expect(validate.env.LOCKFILE).toBe("${{ inputs.package-manager == 'bun' && 'bun.lock' || 'pnpm-lock.yaml' }}")
     })
 
     test('installs through mise and a frozen `aube ci`', () => {
         const setup = validateStep('Setup aube')
-        expect(setup.if).toBe("inputs.package-manager == 'aube'")
+        expect(setup.if).toBe(`${GATE} && inputs.package-manager == 'aube'`)
         expect(setup.uses).toMatch(/^jdx\/mise-action@[0-9a-f]{40}$/)
         const install = validateStep('Install NPM Dependencies (aube)')
-        expect(install.if).toBe("inputs.package-manager == 'aube'")
+        expect(install.if).toBe(`${GATE} && inputs.package-manager == 'aube'`)
         expect(install.run).toContain('aube ci')
     })
 
@@ -134,13 +132,13 @@ describe('site-ci.yml extra e2e scripts and build', () => {
     test('e2e-scripts defaults to none and runs listed scripts in order', () => {
         expect(inputs['e2e-scripts'].default).toBe('[]')
         const step = validateStep('E2E - Extra scripts')
-        expect(step.if).toBe("needs.changes.outputs.e2e == 'true' && inputs.e2e-scripts != '[]'")
+        expect(step.if).toBe(`${GATE} && steps.e2e.outputs.relevant == 'true' && inputs.e2e-scripts != '[]'`)
         expect(step.env.SCRIPTS).toBe('${{ inputs.e2e-scripts }}')
         expect(step.run).not.toContain('inputs.')
     })
 
     test('build can be turned off', () => {
         expect(inputs.build.default).toBe(true)
-        expect(validateStep('Build Code').if).toBe("steps.scripts.outputs.build == 'true' && inputs.build")
+        expect(validateStep('Build Code').if).toBe(`${GATE} && steps.scripts.outputs.build == 'true' && inputs.build`)
     })
 })

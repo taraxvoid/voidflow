@@ -6,10 +6,11 @@ name: Validation
 # so direct pushes are validated too
 # Caller is expected to define referenced package.json scripts
 #
-# Two jobs: `changes` is cheap (secrets scan, changed-file filter) and always
-# runs; `validate` (install, lint, tests) is skipped for pull requests that
-# only touch docs, so they never start the heavy runner. Pushes and manual
-# runs always validate, so a caller's deploy job never waits on a skipped job.
+# One job, so the docs-only skip costs no extra billed minute: the secrets scan
+# and changed-file filter run first, then every later step is gated on the
+# `decide` step. A pull request that only touches docs stops after the scan
+# (the job still reports success). Pushes and manual runs always validate, so a
+# caller's deploy job never waits on a skipped job.
 
 on:
   workflow_call:
@@ -44,8 +45,8 @@ on:
       code-paths:
         description: >
           JSON array of globs (with `!` excludes) that decide whether a pull
-          request needs the full `validate` job. A PR whose changed files all
-          match an exclude only runs the `changes` job. The default skips
+          request needs install, lint and tests. A PR whose changed files all
+          match an exclude only gets the secrets scan. The default skips
           Markdown, docs/, LICENSE and issue templates.
         type: string
         default: '["**", "!**/*.md", "!docs/**", "!LICENSE*", "!.github/ISSUE_TEMPLATE/**"]'
@@ -118,20 +119,14 @@ permissions:
   pull-requests: write
 
 jobs:
-  changes:
-    name: Changes
+  validate:
+    name: Validate
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       PM: ${{ inputs.package-manager }}
       LOCKFILE: ${{ inputs.package-manager == 'bun' && 'bun.lock' || 'pnpm-lock.yaml' }}
     if: github.event.pull_request.draft == false
-    outputs:
-      validate: ${{ steps.decide.outputs.validate }}
-      lockfile: ${{ steps.changes.outputs.lockfile }}
-      scripts: ${{ steps.changes.outputs.scripts }}
-      workflows: ${{ steps.changes.outputs.workflows }}
-      e2e: ${{ steps.e2e.outputs.relevant }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -213,24 +208,8 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           CODE: ${{ steps.changes.outputs.code }}
-
-  validate:
-    name: Validate
-    needs: changes
-    if: needs.changes.outputs.validate == 'true'
-    runs-on: ${{ inputs.runner }}
-    timeout-minutes: 20
-    env:
-      PM: ${{ inputs.package-manager }}
-      LOCKFILE: ${{ inputs.package-manager == 'bun' && 'bun.lock' || 'pnpm-lock.yaml' }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - name: Setup Bun
-        if: inputs.package-manager == 'bun'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'bun'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         # XXX holding off on pinning here until 1.4.x is stable
         # in caller: specify version in package.json or .bun-version to override
@@ -240,12 +219,12 @@ jobs:
           # bun-version-file: ".bun-version"
 
       - name: Setup pnpm
-        if: inputs.package-manager == 'pnpm'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'pnpm'
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         # pnpm version comes from `packageManager` in the caller's package.json
 
       - name: Setup Node (pnpm)
-        if: inputs.package-manager == 'pnpm'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'pnpm'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json # reads `volta` / `engines`
@@ -256,13 +235,13 @@ jobs:
       # `devEngines.runtime`, installing it through mise. cache_save_post keeps
       # that Node in the mise cache.
       - name: Setup aube
-        if: inputs.package-manager == 'aube'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'aube'
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           cache_save_post: true
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: inputs.package-manager == 'aube'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'aube'
         with:
           path: ~/.local/share/aube/store
           key: ${{ runner.os }}-aube-store-${{ hashFiles(env.LOCKFILE) }}
@@ -270,7 +249,7 @@ jobs:
             ${{ runner.os }}-aube-store-
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: inputs.package-manager == 'bun'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'bun'
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles(env.LOCKFILE) }}
@@ -282,7 +261,7 @@ jobs:
       # own repo: checkout gives it the caller's tree, not voidflow's.
       - name: Install NPM Dependencies (bun)
         id: install
-        if: inputs.package-manager == 'bun'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'bun'
         shell: bash
         env:
           SOCKET_SCANNER: ${{ inputs.socket-scanner }}
@@ -328,16 +307,17 @@ jobs:
           bun install --frozen-lockfile
 
       - name: Install NPM Dependencies (pnpm)
-        if: inputs.package-manager == 'pnpm'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'pnpm'
         run: pnpm install --frozen-lockfile
 
       - name: Install NPM Dependencies (aube)
-        if: inputs.package-manager == 'aube'
+        if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'aube'
         # Frozen lockfile: fails if pnpm-lock.yaml is out of date with package.json.
         run: aube ci
 
       - name: Detect package scripts
         id: scripts
+        if: steps.decide.outputs.validate == 'true'
         # Fail open: a check whose script the caller doesn't define is skipped, not failed.
         run: |
           for name in lint check build test:unit check:licenses test:e2e:full test:e2e:all test:e2e:a11y test:e2e:lighthouse; do
@@ -349,7 +329,7 @@ jobs:
           done
 
       - name: Lint CI workflows
-        if: needs.changes.outputs.workflows == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.changes.outputs.workflows == 'true'
         # jactionlint's default profile adds rules actionlint never had, so a
         # caller gets actionlint's checks (--profile correctness) unless its
         # .github/jactionlint.yaml (or actionlint.yaml) opts in with `profile:`.
@@ -374,7 +354,7 @@ jobs:
           VERSION: 2.1.0
 
       - name: Check Biome version
-        if: steps.scripts.outputs.lint == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.lint == 'true'
         # Advisory only: Biome 1.x can't extend the shared config
         # (@taraxvoid/voidflow/biome).
         run: |
@@ -385,24 +365,24 @@ jobs:
         shell: bash
 
       - name: Lint Code
-        if: steps.scripts.outputs.lint == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.lint == 'true'
         run: '"$PM" run lint'
 
       - name: TypeCheck Code
-        if: steps.scripts.outputs.check == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.check == 'true'
         run: '"$PM" run check'
 
       - name: Build Code
-        if: steps.scripts.outputs.build == 'true' && inputs.build
+        if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.build == 'true' && inputs.build
         run: '"$PM" run build'
         env: ${{ fromJSON(inputs.build-env) }}
 
       - name: Unit Tests
-        if: steps.scripts.outputs.test_unit == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.test_unit == 'true'
         run: '"$PM" run test:unit'
 
       - name: Check Licenses for GPL kudzu
-        if: steps.scripts.outputs.check_licenses == 'true' && (needs.changes.outputs.lockfile == 'true' || needs.changes.outputs.scripts == 'true')
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.check_licenses == 'true' && (steps.changes.outputs.lockfile == 'true' || steps.changes.outputs.scripts == 'true'))
         run: '"$PM" run check:licenses'
 
       # Keyed on the installed Playwright version, not the lockfile: an
@@ -410,19 +390,19 @@ jobs:
       # Playwright bump (new browser revision) always misses.
       - name: Resolve Playwright version
         id: playwright
-        if: needs.changes.outputs.e2e == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.e2e.outputs.relevant == 'true'
         run: |
           version=$(jq -r '.version // "unknown"' node_modules/@playwright/test/package.json 2>/dev/null || echo unknown)
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: needs.changes.outputs.e2e == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.e2e.outputs.relevant == 'true'
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ steps.playwright.outputs.version }}
 
       - name: Install Playwright
-        if: needs.changes.outputs.e2e == 'true'
+        if: steps.decide.outputs.validate == 'true' && steps.e2e.outputs.relevant == 'true'
         # npx has better compat than bunx for this; aube has no Node on PATH,
         # so it goes through `aube exec`.
         run: |
@@ -438,6 +418,7 @@ jobs:
 
       - name: Resolve test tier
         id: tier
+        if: steps.decide.outputs.validate == 'true'
         # Which branch's test tier applies: the PR base on pull requests, the
         # pushed branch on pushes. Single-environment sites treat main as live.
         run: |
@@ -449,31 +430,31 @@ jobs:
           SINGLE: ${{ inputs.single-environment }}
 
       - name: E2E - Dev
-        if: steps.scripts.outputs.test_e2e_full == 'true' && needs.changes.outputs.e2e == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'main'
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'main')
         run: '"$PM" run test:e2e:full'
 
       - name: E2E - Staging
-        if: steps.scripts.outputs.test_e2e_all == 'true' && needs.changes.outputs.e2e == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next'
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next')
         run: '"$PM" run test:e2e:all'
 
       - name: E2E - Accessibility (staging)
-        if: steps.scripts.outputs.test_e2e_a11y == 'true' && needs.changes.outputs.e2e == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next'
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next')
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Production
-        if: steps.scripts.outputs.test_e2e_all == 'true' && needs.changes.outputs.e2e == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live'
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live')
         run: '"$PM" run test:e2e:all'
 
       - name: E2E - Accessibility (production)
-        if: steps.scripts.outputs.test_e2e_a11y == 'true' && needs.changes.outputs.e2e == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live'
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live')
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Lighthouse (production)
-        if: steps.scripts.outputs.test_e2e_lighthouse == 'true' && needs.changes.outputs.e2e == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live'
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live')
         run: '"$PM" run test:e2e:lighthouse'
 
       - name: E2E - Extra scripts
-        if: needs.changes.outputs.e2e == 'true' && inputs.e2e-scripts != '[]'
+        if: steps.decide.outputs.validate == 'true' && steps.e2e.outputs.relevant == 'true' && inputs.e2e-scripts != '[]'
         run: |
           while IFS= read -r name; do
             "$PM" run "$name"
@@ -482,7 +463,7 @@ jobs:
           SCRIPTS: ${{ inputs.e2e-scripts }}
 
       - name: Upload failure reports
-        if: failure()
+        if: steps.decide.outputs.validate == 'true' && failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-reports

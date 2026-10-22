@@ -7,7 +7,7 @@ const job = wf.jobs.validate
 const steps: any[] = job.steps
 const step = (name: string) => steps.find((s) => s.name === name)
 const siteJobs = Bun.YAML.parse(read('.github/workflows/site-ci.yml')).jobs
-const siteSteps: any[] = [...siteJobs.changes.steps, ...siteJobs.validate.steps]
+const siteSteps: any[] = siteJobs.validate.steps
 const siteStep = (name: string) => siteSteps.find((s) => s.name === name)
 const actionInstall: string = Bun.YAML.parse(read('actions/bun-install/action.yml')).runs.steps.find(
     (s: any) => s.id === 'install',

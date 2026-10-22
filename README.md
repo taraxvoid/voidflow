@@ -120,17 +120,16 @@ missing fails the job. Pass `build: false` when those scripts already build.
 
 ### Skipped work
 
-`site-ci.yml` is two jobs. `changes` is cheap and always runs: gitleaks over
-the full history and a changed-file filter. `validate` (install, lint, tests)
-is skipped for a pull request whose changed files are all docs, so it never
-starts the heavy runner. A skipped `validate / Validate` still counts as passing
-for required checks. Pushes and manual runs always validate, so a deploy job
-that needs `validate` is never skipped.
+`site-ci.yml` is one job. It runs gitleaks over the full history and a
+changed-file filter first. For a pull request whose changed files are all docs,
+every later step (install, lint, tests) is skipped and the job still reports
+success, so `validate / Validate` passes for required checks. Pushes and manual
+runs always validate, so a deploy job that needs `validate` is never skipped.
 
 `code-paths` sets what counts as code: a JSON array of globs with `!` excludes,
 by default everything except Markdown, `docs/`, `LICENSE*` and issue templates.
-GitHub bills each job in whole minutes, so `changes` costs about one minute on
-a code PR and saves the whole `validate` run on a docs-only one.
+GitHub bills each job in whole minutes, so one job means a code PR pays no
+extra minute for the check, and a docs-only PR costs about one minute.
 
 The Playwright browser cache is keyed on the installed Playwright version, so
 an unrelated dependency bump keeps it.
