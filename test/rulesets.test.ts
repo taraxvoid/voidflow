@@ -47,6 +47,18 @@ describe('canonical rulesets', () => {
         }
     })
 
+    test('merge queue is only required where configured (org-owned repos)', () => {
+        const hasQueue = (repo: string) =>
+            build('main', REPOS[repo]).rules.some((x) => x.type === 'merge_queue')
+        expect(hasQueue('ravenflight/ravenflight.io')).toBe(true)
+        expect(hasQueue('taraxvoid/synthomaha')).toBe(false)
+        expect(hasQueue('taraxvoid/voidflow')).toBe(false)
+        const queue = build('main', REPOS['ravenflight/ravenflight.io']).rules.find(
+            (x) => x.type === 'merge_queue',
+        )
+        expect(queue?.parameters?.merge_method).toBe('SQUASH')
+    })
+
     test('names within a repo are unique', () => {
         for (const repo of Object.keys(REPOS)) {
             const names = desired(repo).map((d) => d.ruleset.name)
@@ -158,6 +170,7 @@ describe('tool()', () => {
             checks: ['validate / Validate'],
             codeowners: true,
             linearHistory: true,
+            mergeQueue: false,
             bypass: {},
             aka: {},
             retire: [],

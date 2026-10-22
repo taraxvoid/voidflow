@@ -56,7 +56,10 @@ ones are skipped with a notice):
 |---|---|
 | `lint`, `check`, `build`, `test:unit` | always |
 | `check:licenses` | lockfile or `scripts/` changed |
-| `test:e2e:all`, `test:e2e:a11y`, `test:e2e:lighthouse` | e2e-relevant files changed |
+| `test:e2e:all` (or `test:e2e:full` if there's no `:all`) | e2e-relevant files changed; always on `merge_group`, `schedule` and `workflow_dispatch` |
+| `test:e2e:a11y`, `test:e2e:lighthouse` | `schedule` and `workflow_dispatch` only |
+
+Draft PRs skip the job.
 
 Inputs:
 
@@ -81,6 +84,28 @@ pnpm takes its version from `packageManager` and Node from `volta` or
 `engines`. aube needs the site's `mise.toml` to pin it (`aube = "<version>"`),
 then follows `packageManager` and takes Node from `devEngines.runtime`. Both
 use `pnpm-lock.yaml`.
+
+### Merge queue
+
+Org-owned repos can use a merge queue (personal accounts can't). Set
+`mergeQueue: true` on the repo in `rulesets/index.ts` and add the trigger so
+the required check reports on the queue's branch:
+
+```yaml
+on:
+  merge_group:
+```
+
+### Scheduled a11y and Lighthouse
+
+These only run on a schedule or a manual dispatch. The cron is the caller's;
+drop it to stop running them:
+
+```yaml
+on:
+  schedule:
+    - cron: '17 6 * * *'
+```
 
 ### Extra e2e scripts
 
@@ -119,7 +144,7 @@ composite action:
   unknown inputs.
 - `branch-env-map` takes no inputs and fails on `next`, `live` and pushes to
   other branches.
-- `test:e2e:full` no longer runs; define `test:e2e:all` instead.
+- a11y and Lighthouse no longer run on pull requests.
 
 ## Tool CI
 

@@ -59,6 +59,12 @@ export type RepoConfig = {
      * a prerelease branch into main with merge commits set this to false.
      */
     linearHistory: boolean
+    /**
+     * Require a merge queue on main. GitHub only offers merge queues on
+     * org-owned repos, so personal repos must leave this false. The required
+     * checks must also run on `merge_group` (see site-ci.yml).
+     */
+    mergeQueue: boolean
     /** Extra bypass actors per tier, on top of the tier defaults. */
     bypass: Partial<Record<Tier, BypassActor[]>>
     /** Existing ruleset names to adopt (rename) instead of duplicating. */
@@ -81,6 +87,7 @@ const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     checks: [VALIDATE_CHECK],
     codeowners: true,
     linearHistory: true,
+    mergeQueue: false,
     bypass: {},
     aka: {},
     retire: ['next (staging)', 'live (prod)'],
@@ -95,6 +102,7 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     checks: [VALIDATE_CHECK],
     codeowners: true,
     linearHistory: true,
+    mergeQueue: false,
     bypass: {},
     aka: {},
     retire: [],
@@ -125,6 +133,7 @@ export const REPOS: Record<string, RepoConfig> = {
     'ravenflight/ravenflight.io': site({
         netlify: false,
         codeowners: false,
+        mergeQueue: true,
         aka: { main: ['main (dev)'] },
         retire: ['staging (next)', 'prod (live)'],
     }),
@@ -137,6 +146,7 @@ export const REPOS: Record<string, RepoConfig> = {
         checks: ['Validation', 'Unit tests'],
         codeowners: false,
         linearHistory: false,
+        mergeQueue: false,
         bypass: {},
         aka: { main: ['main/prod'] },
         retire: [],
@@ -213,6 +223,22 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
             { type: 'non_fast_forward' },
             ...(tier === 'main' && cfg.linearHistory
                 ? [{ type: 'required_linear_history' }]
+                : []),
+            ...(tier === 'main' && cfg.mergeQueue
+                ? [
+                      {
+                          type: 'merge_queue',
+                          parameters: {
+                              check_response_timeout_minutes: 60,
+                              grouping_strategy: 'ALLGREEN',
+                              max_entries_to_build: 5,
+                              max_entries_to_merge: 5,
+                              merge_method: cfg.linearHistory ? 'SQUASH' : 'MERGE',
+                              min_entries_to_merge: 1,
+                              min_entries_to_merge_wait_minutes: 0,
+                          },
+                      },
+                  ]
                 : []),
             {
                 type: 'pull_request',
