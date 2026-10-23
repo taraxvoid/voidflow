@@ -34,16 +34,22 @@ gitGraph
 
 ## Promote next to main
 
-1. `just promote` opens the `next` to `main` PR.
-2. Merge it with a **merge commit** (not squash) so each Conventional Commit
-   reaches release-please. The `main` ruleset allows squash and merge only.
-3. release-please opens or updates the stable release PR on `main`. Merging it
+1. `just promote` opens the `next` to `main` PR and sets it to auto-merge with a
+   **merge commit** (not squash) so each Conventional Commit reaches
+   release-please. The `main` ruleset allows squash and merge only. Don't promote
+   from a hand-made branch: CI's promotion guard fails any PR into `main` that
+   carries `next`'s commits unless its head is `next`. A squashed promotion
+   gives `main` next's changes without next's commits, so every back-merge
+   after it conflicts on the same lines.
+2. release-please opens or updates the stable release PR on `main`. Merging it
    publishes under `latest`, moves the floating `v0` tag, and opens a
    `main` to `next` back-merge PR.
-4. The back-merge PR auto-merges with a merge commit once checks pass. If you
+3. The back-merge PR auto-merges with a merge commit once checks pass. If you
    ever merge one by hand (e.g. after resolving conflicts), use a merge commit,
    never squash: a squash leaves main's commits out of next's history, so the
-   following back-merge conflicts on the same lines again.
+   following back-merge conflicts on the same lines again. If the back-merge
+   job fails, it opens a "Back-merge of vX.Y.Z into next failed" issue; don't
+   re-run the release run instead, it skips the job and goes green.
 
 Check the stable release PR's version before merging it. release-please walks
 `main` newest-first by commit date and stops at the last release commit, so a
