@@ -6,11 +6,9 @@ name: Validation
 # so direct pushes are validated too
 # Caller is expected to define referenced package.json scripts
 #
-# One job, so the docs-only skip costs no extra billed minute: the secrets scan
-# and changed-file filter run first, then every later step is gated on the
-# `decide` step. A pull request that only touches docs stops after the scan
-# (the job still reports success). Pushes and manual runs always validate, so a
-# caller's deploy job never waits on a skipped job.
+# The secrets scan and changed-file filter run first; later steps are gated on
+# the `decide` step, so a pull request that only touches docs stops after the
+# scan and still reports success. Pushes and manual runs always validate.
 
 on:
   workflow_call:

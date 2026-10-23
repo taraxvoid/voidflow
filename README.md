@@ -60,12 +60,25 @@ Inputs:
 | Input | Default | |
 |---|---|---|
 | `runner` | `ubuntu-latest` | Runner label |
-| `package-manager` | `bun` | `bun` or `pnpm`. pnpm version comes from `packageManager`, Node from `engines` |
+| `package-manager` | `bun` | `bun`, `pnpm` or `aube` (see below) |
 | `single-environment` | `false` | See below |
+| `build` | `true` | Run `build` as its own step. Pass `false` when the e2e scripts already build |
 | `build-env` | `{}` | JSON object of build env vars. Visible in logs, so no secrets |
+| `code-paths` | everything except Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs (`!` excludes) that count as code |
+| `e2e-scripts` | `[]` | JSON array of extra e2e scripts (see below) |
 | `e2e-extra-paths` | `["wrangler.jsonc", "site.vars.json"]` | JSON array of globs that also trigger e2e |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI (see below) |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
+
+Pull requests outside `code-paths` skip install, lint and tests but still pass
+`validate / Validate`. Pushes and manual runs always run everything.
+
+### pnpm and aube
+
+pnpm takes its version from `packageManager` and Node from `volta` or
+`engines`. aube needs the site's `mise.toml` to pin it (`aube = "<version>"`),
+then follows `packageManager` and takes Node from `devEngines.runtime`. Both
+use `pnpm-lock.yaml`.
 
 ### Single-environment sites
 
@@ -92,17 +105,11 @@ jobs:
 `main` then runs the production tier (`test:e2e:all`, `test:e2e:a11y`,
 `test:e2e:lighthouse`).
 
-With `aube`, the site's `mise.toml` must pin aube (`aube = "<version>"`); aube
-then runs the `packageManager` version from `package.json` and gets Node from
-`devEngines.runtime`. aube keeps `pnpm-lock.yaml`, and CI installs with a frozen
-`aube ci`.
+### Extra e2e scripts
 
-### Sites with their own e2e scripts
-
-The built-in e2e tiers expect `test:e2e:full`, `:all`, `:a11y` and `:lighthouse`.
-A site whose scripts are named differently lists them in `e2e-scripts`; they run
-in order whenever e2e-relevant files changed, and a listed script that is
-missing fails the job. Pass `build: false` when those scripts already build.
+Scripts listed in `e2e-scripts` run in order after the built-in tiers whenever
+e2e-relevant files changed. Unlike the built-in tiers, a missing one fails the
+job.
 
 ```yaml
     with:
@@ -110,43 +117,18 @@ missing fails the job. Pass `build: false` when those scripts already build.
       build: false
 ```
 
-### Skipped work
+### Socket install scanner
 
-`site-ci.yml` is one job. It runs gitleaks over the full history and a
-changed-file filter first. For a pull request whose changed files are all docs,
-every later step (install, lint, tests) is skipped and the job still reports
-success, so `validate / Validate` passes for required checks. Pushes and manual
-runs always validate, so a deploy job that needs `validate` is never skipped.
+If `bunfig.toml` sets `install.security.scanner`, CI installs with that line
+removed (everything else still applies) and leaves a notice, so a flaky
+third-party API can't fail the build. Local installs still run it. Pass
+`socket-scanner: true` to run it in CI too.
 
-`code-paths` sets what counts as code: a JSON array of globs with `!` excludes,
-by default everything except Markdown, `docs/`, `LICENSE*` and issue templates.
-GitHub bills each job in whole minutes, so one job means a code PR pays no
-extra minute for the check, and a docs-only PR costs about one minute.
+Write it as a plain `scanner = "..."` line or dotted `security.scanner`. An
+inline table can't be removed cleanly, so the install fails instead.
 
-The Playwright browser cache is keyed on the installed Playwright version, so
-an unrelated dependency bump keeps it.
-
-### Install-time security scanner (Socket)
-
-A bun site can set a security scanner in `bunfig.toml`, which checks every
-package on install:
-
-```toml
-[install.security]
-scanner = "@socketsecurity/bun-security-scanner"
-```
-
-CI skips it by default. The scanner calls a third-party API on every install,
-so a network blip or an API change could fail a build that otherwise passes,
-and rerunning the same commit could give a different result. `site-ci.yml`
-installs with a copy of `bunfig.toml` minus the scanner line (every other
-setting, e.g. `minimumReleaseAge`, still applies) and leaves a notice in the
-run. Local `bun install` reads `bunfig.toml` as is, so the scanner still runs
-on your machine.
-
-To run it in CI too, pass `socket-scanner: true` to `site-ci.yml`. A workflow
-that installs on its own (outside `site-ci.yml`) gets the same default from
-the composite action:
+Workflows that install outside `site-ci.yml` get the same behavior from the
+composite action:
 
 ```yaml
 - uses: oven-sh/setup-bun@<sha> # <version>
