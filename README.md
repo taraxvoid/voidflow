@@ -60,12 +60,25 @@ Inputs:
 | Input | Default | |
 |---|---|---|
 | `runner` | `ubuntu-latest` | Runner label |
-| `package-manager` | `bun` | `bun` or `pnpm`. pnpm version comes from `packageManager`, Node from `engines` |
+| `package-manager` | `bun` | `bun`, `pnpm` or `aube` (see below) |
 | `single-environment` | `false` | See below |
+| `build` | `true` | Run `build` as its own step. Pass `false` when the e2e scripts already build |
 | `build-env` | `{}` | JSON object of build env vars. Visible in logs, so no secrets |
+| `code-paths` | everything except Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs (`!` excludes) that count as code |
+| `e2e-scripts` | `[]` | JSON array of extra e2e scripts (see below) |
 | `e2e-extra-paths` | `["wrangler.jsonc", "site.vars.json"]` | JSON array of globs that also trigger e2e |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI (see below) |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
+
+Pull requests outside `code-paths` skip install, lint and tests but still pass
+`validate / Validate`. Pushes and manual runs always run everything.
+
+### pnpm and aube
+
+pnpm takes its version from `packageManager` and Node from `volta` or
+`engines`. aube needs the site's `mise.toml` to pin it (`aube = "<version>"`),
+then follows `packageManager` and takes Node from `devEngines.runtime`. Both
+use `pnpm-lock.yaml`.
 
 ### Single-environment sites
 
@@ -91,6 +104,18 @@ jobs:
 
 `main` then runs the production tier (`test:e2e:all`, `test:e2e:a11y`,
 `test:e2e:lighthouse`).
+
+### Extra e2e scripts
+
+Scripts listed in `e2e-scripts` run in order after the built-in tiers whenever
+e2e-relevant files changed. Unlike the built-in tiers, a missing one fails the
+job.
+
+```yaml
+    with:
+      e2e-scripts: '["test:e2e", "test:e2e:gtm", "test:e2e:editor"]'
+      build: false
+```
 
 ### Socket install scanner
 
