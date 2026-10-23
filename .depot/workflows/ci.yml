@@ -1,0 +1,97 @@
+# Depot CI Migration
+# Source: .github/workflows/ci.yml
+#
+# Changes made:
+# - Rewrote .github/ path references to .depot/
+# - Changed GitHub runs-on labels to their Depot equivalents
+
+name: CI
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+      types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+  
+jobs:
+  validation:
+    name: Validation
+    runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
+    permissions:
+      contents: read
+    if: github.event.pull_request.draft == false
+    
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: jactionlint
+        run: |
+          gh release download --repo jdx/jactionlint --pattern '*_linux_amd64.tar.gz' v2.1.0 --dir "$RUNNER_TEMP"
+          gh attestation verify -R jdx/jactionlint "$RUNNER_TEMP/jactionlint_2.1.0_linux_amd64.tar.gz"
+          tar xf "$RUNNER_TEMP"/jactionlint_2.1.0_linux_amd64.tar.gz -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/jactionlint" --color
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # shellcheck ships on ubuntu-latest; jactionlint also picks it up from PATH
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      # A PR into main that carries next's commits must come from `just promote`
+      # (head next, auto-merged with a merge commit). A squashed hand-made
+      # promotion (#185) left main without next's history and broke every
+      # back-merge after it.
+      - name: Promotion guard
+        if: github.base_ref == 'main'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --quiet --no-tags --unshallow origin main next
+          bun scripts/promotion-guard.ts --head-ref "$HEAD_REF" --head "$HEAD_SHA"
+
+      - name: Shellcheck composite action scripts
+        run: bun scripts/shellcheck-actions.ts
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+          # No Python deps in this repo; uvx tool versions are pinned in this file.
+          cache-dependency-glob: .depot/workflows/ci.yml
+
+      - name: Validate action.yml schemas
+        run: |
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(git ls-files -- 'actions/**/action.yml' 'actions/**/action.yaml')
+          uvx check-jsonschema@0.38.0 --builtin-schema vendor.github-actions "${files[@]}"
+
+      - name: Validate workflow schemas
+        run: |
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(git ls-files -- '.depot/workflows/*.yml' '.depot/workflows/*.yaml')
+          uvx check-jsonschema@0.38.0 --builtin-schema vendor.github-workflows "${files[@]}"
+
+      - name: zizmor (security)
+        run: uvx zizmor@1.30.1 --min-severity medium .
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  unit-tests:
+    name: Unit tests
+    runs-on: depot-ubuntu-latest # was: ubuntu-latest. Mapped standard GitHub runner to Depot equivalent.
+    permissions:
+      contents: read
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - uses: ./actions/bun-install
+
+      - run: bun test
