@@ -29,6 +29,10 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Clawness: per-machine session state (memory.md and rules/ stay shared)
+.clawness/*
+!.clawness/memory.md
+!.clawness/rules/
 
 # Unlighthouse
 .unlighthouse/
