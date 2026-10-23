@@ -5,16 +5,17 @@ import { join } from 'node:path'
 
 const config = new URL('../lefthook/base.yml', import.meta.url).pathname
 const hasLefthook = Bun.which('lefthook') !== null
+// Git exports GIT_DIR, GIT_INDEX_FILE and friends to hooks. Under pre-push
+// they would point this test's git and lefthook calls at the invoking repo.
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
 
 const runPreCommit = async (withDeps: boolean) => {
     const dir = mkdtempSync(join(tmpdir(), 'lefthook-deps-'))
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { format: 'echo FORMAT-RAN' } }))
     if (withDeps) mkdirSync(join(dir, 'node_modules'))
     for (const args of [['init', '-q'], ['add', '.']]) {
-        await Bun.spawn(['git', ...args], { cwd: dir }).exited
+        await Bun.spawn(['git', ...args], { cwd: dir, env }).exited
     }
-    // Git exports GIT_DIR and friends to hooks; this test spawns git itself.
-    const { GIT_DIR: _d, GIT_INDEX_FILE: _i, GIT_WORK_TREE: _w, ...env } = process.env
     const proc = Bun.spawn(['lefthook', 'run', 'pre-commit', '--force'], {
         cwd: dir,
         env: { ...env, LEFTHOOK_CONFIG: config },
