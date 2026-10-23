@@ -1,0 +1,219 @@
+# Depot CI Migration
+# Source: .github/workflows/tool-ci.yml
+#
+# Changes made:
+# - Rewrote .github/ path references to .depot/
+
+name: Validation
+
+# Validation job for bun tools and libraries (CLIs, TUIs, packages).
+# For self-hosted runners pass `runner`.
+# Callers need pull_request/workflow_dispatch triggers, plus push on main so
+# direct pushes are validated too, and must grant `contents: read` and
+# `pull-requests: read`.
+# Runs whichever of lint, check, build, test and check:licenses package.json
+# defines; a missing script is skipped with a notice.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: >
+          Runner label for the validate job. Defaults to a GitHub-hosted
+          runner; pass a self-hosted label (e.g. 'my-hosted-runner')
+        type: string
+        default: ubuntu-latest
+      socket-scanner:
+        description: >
+          Run the bunfig.toml install-time security scanner (`[install.security]
+          scanner`, e.g. Socket's) during the CI install. Defaults to false: it
+          calls a third-party API on every install and can fail a build for
+          reasons outside the repo. It still runs on local installs.
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read # paths-filter lists PR files through the API
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # sharp edge: gitleaks requires full commit history
+          persist-credentials: false
+
+      - name: Secrets Scan
+        # OSS gitleaks binary: the gitleaks-action wrapper needs a paid license for orgs.
+        # Scans full history; known findings live in the caller's .gitleaksignore.
+        # Same script as site-ci.yml (a test keeps them identical).
+        run: |
+          version=8.30.1
+          case "$(uname -m)" in
+            x86_64) arch=x64; sha=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb ;;
+            aarch64|arm64) arch=arm64; sha=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 ;;
+            *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+          esac
+          tarball="gitleaks_${version}_linux_${arch}.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${tarball}"
+          echo "${sha}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
+        shell: bash
+
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: changes
+        with:
+          filters: |
+            lockfile:
+              - 'bun.lock'
+            manifest:
+              - 'package.json'
+            scripts:
+              - 'scripts/**'
+            workflows:
+              - '.depot/workflows/**'
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Empty when the repo has no .bun-version: setup-bun then uses its default.
+          bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
+
+      # Tools pinned in the repo's mise.toml. If it also pins bun, mise's bun
+      # comes first on PATH from here on.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        if: hashFiles('mise.toml') != ''
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # Same script as actions/bun-install (a test keeps them identical).
+      # Inlined because a reusable workflow can't reach `./actions/...` in its
+      # own repo: checkout gives it the caller's tree, not voidflow's.
+      - name: Install NPM Dependencies
+        id: install
+        shell: bash
+        env:
+          SOCKET_SCANNER: ${{ inputs.socket-scanner }}
+        run: |
+          # Removes the scanner line as text, then checks the result with a real
+          # TOML parse: it must equal the original minus install.security.scanner.
+          # Anything that can't be removed that way fails the install instead of
+          # running the scanner, or skipping it, silently.
+          # shellcheck disable=SC2016 # JS source; the ${...} in it is for bun, not bash
+          strip_scanner='
+          const src = await Bun.file("bunfig.toml").text()
+          const parse = (text) => { try { return Bun.TOML.parse(text) } catch (e) { console.log(`::error file=bunfig.toml::Could not parse bunfig.toml: ${e.message}`); process.exit(1) } }
+          const original = parse(src)
+          if (original.install?.security?.scanner === undefined) process.exit(10)
+          const key = /^\s*((install\.)?security\.)?("scanner"|scanner)\s*=/
+          const stripped = src.split("\n").filter((line) => !key.test(line)).join("\n")
+          // empty tables left behind by the removal count as absent
+          const prune = (cfg) => {
+            delete cfg.install?.security?.scanner
+            if (cfg.install?.security && Object.keys(cfg.install.security).length === 0) delete cfg.install.security
+            if (cfg.install && Object.keys(cfg.install).length === 0) delete cfg.install
+            return cfg
+          }
+          const after = parse(stripped)
+          if (after.install?.security?.scanner !== undefined || !Bun.deepEquals(prune(after), prune(structuredClone(original)))) {
+            console.log("::error file=bunfig.toml::Could not remove the security scanner from bunfig.toml cleanly; set it as `scanner = \"...\"` under [install.security].")
+            process.exit(1)
+          }
+          await Bun.write(process.env.BUNFIG_OUT, stripped)
+          '
+          if [[ "$SOCKET_SCANNER" != "true" ]] && [[ -f bunfig.toml ]]; then
+            config="$RUNNER_TEMP/bunfig.toml"
+            rc=0
+            BUNFIG_OUT="$config" bun --config=/dev/null -e "$strip_scanner" || rc=$?
+            if [[ $rc -eq 0 ]]; then
+              echo "::notice file=bunfig.toml::Security scanner skipped in CI. Pass socket-scanner: true to run it here; it still runs on local installs."
+              bun install --frozen-lockfile --config="$config"
+              exit
+            elif [[ $rc -ne 10 ]]; then
+              exit "$rc"
+            fi
+          fi
+          bun install --frozen-lockfile
+
+      - name: Detect package scripts
+        id: scripts
+        # Fail open: a check whose script the caller doesn't define is skipped, not failed.
+        run: |
+          for name in lint check build test check:licenses; do
+            if jq -e --arg n "$name" '.scripts // {} | has($n)' package.json >/dev/null; then
+              echo "${name//:/_}=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Skipping '$name': no such script in package.json"
+            fi
+          done
+
+      - name: Lint CI workflows
+        if: steps.changes.outputs.workflows == 'true'
+        # jactionlint's default profile adds rules actionlint never had, so a
+        # caller gets actionlint's checks (--profile correctness) unless its
+        # .github/jactionlint.yaml (or actionlint.yaml) opts in with `profile:`.
+        run: |
+          case "$RUNNER_ARCH" in
+            X64) arch=amd64 ;;
+            ARM64) arch=arm64 ;;
+            *) echo "::error::No jactionlint build for runner arch $RUNNER_ARCH"; exit 1 ;;
+          esac
+          tarball="jactionlint_${VERSION}_linux_${arch}.tar.gz"
+          gh release download --repo jdx/jactionlint --pattern "$tarball" "v$VERSION" --dir "$RUNNER_TEMP"
+          gh attestation verify -R jdx/jactionlint "$RUNNER_TEMP/$tarball"
+          tar xf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" jactionlint
+          args=(--color)
+          if ! grep -qs '^profile:' .github/jactionlint.yaml .github/jactionlint.yml .github/actionlint.yaml .github/actionlint.yml 2>/dev/null; then
+            args+=(--profile correctness)
+          fi
+          "$RUNNER_TEMP/jactionlint" "${args[@]}"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: 2.1.0
+
+      - name: Setup uv
+        if: steps.changes.outputs.workflows == 'true'
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Audit CI workflows
+        if: steps.changes.outputs.workflows == 'true'
+        run: uvx zizmor@1.30.1 --min-severity medium .github
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Lint
+        if: steps.scripts.outputs.lint == 'true'
+        run: bun run lint
+
+      - name: Typecheck
+        if: steps.scripts.outputs.check == 'true'
+        run: bun run check
+
+      - name: Build
+        if: steps.scripts.outputs.build == 'true'
+        run: bun run build
+
+      - name: Test
+        if: steps.scripts.outputs.test == 'true'
+        run: bun run test
+
+      - name: Check licenses
+        if: steps.scripts.outputs.check_licenses == 'true' && (steps.changes.outputs.lockfile == 'true' || steps.changes.outputs.manifest == 'true' || steps.changes.outputs.scripts == 'true')
+        run: bun run check:licenses
