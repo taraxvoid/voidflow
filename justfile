@@ -96,14 +96,18 @@ rulesets-plan *args:
 rulesets-apply *args:
     bun scripts/apply-rulesets.ts --apply {{ args }}
 
-# Open the next -> main promotion PR; merge it with a merge commit, not a squash
+# Open the next -> main promotion PR, set to auto-merge with a merge commit
 promote:
     #!/usr/bin/env bash
     set -euo pipefail
     git fetch origin main next --quiet
-    gh pr create --base main --head next \
+    url=$(gh pr create --base main --head next \
         --title "chore: promote next to main" \
-        --body "$(printf 'Commits promoted from next:\n\n%s\n\nMerge with a merge commit so each Conventional Commit reaches release-please.\n' "$(git log --format='- %s' origin/main..origin/next)")"
+        --body "$(printf 'Commits promoted from next:\n\n%s\n\nAuto-merges with a merge commit once checks pass, so each Conventional Commit reaches release-please. Do not squash it: main would get the changes from next without its commits, and every back-merge after it conflicts.\n' "$(git log --format='- %s' origin/main..origin/next)")")
+    echo "$url"
+    # The main ruleset allows squash for hotfixes, so a merge button click
+    # would default to it; auto-merge pins the method to a merge commit.
+    gh pr merge "$url" --auto --merge
 
 # Cut release/N.x from a stable tag in a new worktree (e.g. v0.9.3 release/0.9.x); push it yourself
 cut-maintenance tag branch:

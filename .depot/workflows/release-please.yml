@@ -328,6 +328,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      issues: write
     steps:
       - name: Generate App token
         id: app-token
@@ -384,4 +385,23 @@ jobs:
           # merge here would default to squash (v0.12.0 to v0.12.4 all were).
           # Auto-merge pins the method to a real merge commit.
           gh pr merge "$BRANCH" --repo "$GITHUB_REPOSITORY" --auto --merge
+
+      # A failed back-merge only shows as a red run, and re-running the release
+      # run turns it green by skipping this job (release_created is false the
+      # second time), as happened on v0.13.1. An issue keeps it visible.
+      - name: Open an issue when the back-merge fails
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Back-merge of ${TAG} into next failed"
+          if [ -n "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[].number')" ]; then
+            echo "Issue already open: ${TITLE}"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+            --body "The automatic main to next back-merge for ${TAG} failed: ${RUN_URL}. Merge main into next by hand (RELEASING.md, \"If the back-merge fails\") before the next promotion, or that promotion PR will conflict."
 
