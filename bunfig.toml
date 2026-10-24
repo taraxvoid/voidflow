@@ -6,3 +6,7 @@ minimumReleaseAgeExcludes = ["@playwright/test", "playwright", "playwright-core"
 
 [install.security]
 scanner = "@socketsecurity/bun-security-scanner"
+
+[test]
+# Fail with one clear message when `bun install` hasn't run (see the file).
+preload = ["./test/require-deps.ts"]
