@@ -1,8 +1,51 @@
 # voidflow
 
-Shared CI, deploy and repo config for Astro sites on Cloudflare Workers or
-Netlify, and for bun tools and libraries. Defaults assume bun, Astro and
-Playwright; pnpm is supported.
+Shared CI, deploy and repo config for web sites and bun tools. It natively
+supports deployments on Netlify and Cloudflare Workers, and is
+framework-agnostic: any site that exposes the expected `package.json` scripts
+works. bun is the default package manager; pnpm is supported. Playwright and
+Astro defaults are opt-in extras.
+
+4 sites use it, 253 tests cover it, and it has shipped 27 stable releases.
+
+```mermaid
+flowchart LR
+  subgraph caller["Site repo"]
+    ci["ci.yml"]
+    renovate["Renovate config"]
+    hooks["lefthook.yml"]
+    pkg["package.json scripts"]
+  end
+  subgraph voidflow["voidflow"]
+    siteci["site-ci.yml"]
+    subgraph actions["Composite actions"]
+      bi["bun-install"]
+      bem["branch-env-map"]
+      cf["cloudflare-deploy"]
+      nl["netlify-deploy"]
+    end
+    subgraph npm["npm / JSR package"]
+      pw["Playwright config"]
+      cl["check-licenses"]
+      ul["unlighthouse-runner"]
+    end
+    preset["Renovate preset"]
+    remote["lefthook remote"]
+    rp["release-please<br/>(main, next, release/N.x)"]
+  end
+  ci --> siteci
+  siteci --> bi
+  ci --> bem
+  bem --> cf
+  bem --> nl
+  pkg --> pw
+  pkg --> cl
+  pkg --> ul
+  renovate --> preset
+  hooks --> remote
+  rp -. "tags and publishes" .-> npm
+  rp -. "tags" .-> siteci
+```
 
 | Piece | What it does |
 |---|---|
