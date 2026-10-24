@@ -211,8 +211,15 @@ describe('raw rulesets (another fleet, --config)', () => {
     })
 
     test('checkFleet accepts the built-in config and raw rulesets', () => {
-        expect(checkFleet(REPOS)).toBe(REPOS)
-        expect(checkFleet(fleet)).toBe(fleet)
+        expect(checkFleet(REPOS)).toEqual(REPOS)
+        expect(checkFleet(fleet)).toEqual(fleet)
+    })
+
+    test("checkFleet fills a tiered repo's missing fields from tool()", () => {
+        expect(checkFleet({ 'a/b': {} })['a/b']).toEqual(tool())
+        expect(checkFleet({ 'a/b': { netlify: true } })['a/b']).toEqual(
+            tool({ netlify: true }),
+        )
     })
 
     test('checkFleet names every problem by its path', () => {
@@ -222,7 +229,8 @@ describe('raw rulesets (another fleet, --config)', () => {
                 nope: { rulesets: [], retire: [] },
                 'a/b': { rulesets: [{ name: '', rules: {} }] },
                 'a/c': { ...REPOS['taraxvoid/voidflow'], tiers: ['main', 'dev'] },
-                'a/d': { tiers: ['main'] },
+                'a/d': { checks: 'validate', codeowners: 'yes' },
+                'a/e': { linearhistory: false },
             })
         } catch (e) {
             msg = (e as Error).message
@@ -235,6 +243,8 @@ describe('raw rulesets (another fleet, --config)', () => {
             '"a/b".retire: not a list',
             '"a/c".tiers[1]: unknown tier "dev"',
             '"a/d".checks: not a list',
+            '"a/d".codeowners: not a boolean',
+            '"a/e".linearhistory: unknown field',
         ]) {
             expect(msg).toContain(want)
         }

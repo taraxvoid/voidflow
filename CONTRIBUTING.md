@@ -148,8 +148,10 @@ just -f ../voidflow/justfile cf-tokens-plan --config cf-tokens.ts
 just -f ../voidflow/justfile rulesets-plan --config rulesets.ts
 ```
 
-A rulesets config can use the tier model, or spell a repo's rulesets out in
-full as `{ rulesets: [...], retire: [...] }` when its protection doesn't fit
+A rulesets config can use the tier model, where any field left out takes
+`tool()`'s value (main only, the `validate` check, CODEOWNERS, linear
+history, so `{}` is a valid repo) and an unknown field is an error. Or it can
+spell a repo's rulesets out in full as `{ rulesets: [...], retire: [...] }` when its protection doesn't fit
 the tiers. A snapshot of what GitHub has now (`gh api
 repos/<repo>/rulesets/<id>`, keeping `name`, `target`, `enforcement`,
 `conditions`, `bypass_actors` and `rules`) plans with no drift.

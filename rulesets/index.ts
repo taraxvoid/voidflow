@@ -277,7 +277,10 @@ const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
 
 /**
  * Check an untyped fleet (another repo's `--config` module) and throw with
- * every problem, by path. Returns the fleet unchanged.
+ * every problem, by path. A tiered repo may leave out any field: it gets
+ * `tool()`'s value, so a field added to RepoConfig later defaults for configs
+ * written before it. A field that is given must have the default's type, and
+ * an unknown one (likely a typo) is an error. Returns the filled-in fleet.
  */
 export function checkFleet(x: unknown): Fleet {
     const isObj = (v: unknown): v is Record<string, any> =>
@@ -287,6 +290,10 @@ export function checkFleet(x: unknown): Fleet {
     if (!isObj(x)) throw new Error('config is not an object of repos')
     const errs: string[] = []
     const bad = (path: string, why: string) => errs.push(`${path}: ${why}`)
+    const kind = (v: unknown) =>
+        Array.isArray(v) ? 'list' : isObj(v) ? 'object' : typeof v
+    const defaults: Record<string, unknown> = tool()
+    const out: Fleet = {}
     for (const [repo, cfg] of Object.entries(x)) {
         const at = JSON.stringify(repo)
         if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) bad(at, 'key is not owner/name')
@@ -294,8 +301,9 @@ export function checkFleet(x: unknown): Fleet {
             bad(at, 'not an object')
             continue
         }
-        if (!strList(cfg.retire)) bad(`${at}.retire`, 'not a list')
         if ('rulesets' in cfg) {
+            out[repo] = cfg as RawConfig
+            if (!strList(cfg.retire)) bad(`${at}.retire`, 'not a list')
             if (!Array.isArray(cfg.rulesets)) {
                 bad(`${at}.rulesets`, 'not a list')
                 continue
@@ -316,18 +324,23 @@ export function checkFleet(x: unknown): Fleet {
             }
             continue
         }
-        if (!Array.isArray(cfg.tiers)) bad(`${at}.tiers`, 'not a list')
-        for (const [i, t] of (Array.isArray(cfg.tiers) ? cfg.tiers : []).entries()) {
+        for (const k of Object.keys(cfg)) {
+            if (!(k in defaults)) bad(`${at}.${k}`, 'unknown field')
+        }
+        const full = { ...defaults, ...cfg }
+        for (const [k, d] of Object.entries(defaults)) {
+            if (kind(full[k]) !== kind(d)) bad(`${at}.${k}`, `not a ${kind(d)}`)
+        }
+        for (const k of ['checks', 'retire'])
+            if (Array.isArray(full[k]) && !strList(full[k]))
+                bad(`${at}.${k}`, 'not a list of names')
+        for (const [i, t] of (Array.isArray(full.tiers) ? full.tiers : []).entries()) {
             if (!TIERS.includes(t)) bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
         }
-        if (!strList(cfg.checks)) bad(`${at}.checks`, 'not a list')
-        for (const k of ['netlify', 'codeowners', 'linearHistory'])
-            if (typeof cfg[k] !== 'boolean') bad(`${at}.${k}`, 'not true/false')
-        for (const k of ['bypass', 'aka'])
-            if (!isObj(cfg[k])) bad(`${at}.${k}`, 'not an object')
+        out[repo] = full as RepoConfig
     }
     if (errs.length) throw new Error(errs.join('\n'))
-    return x as Fleet
+    return out
 }
 
 // ---- normalisation + diff -------------------------------------------------
