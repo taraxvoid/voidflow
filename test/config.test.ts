@@ -26,6 +26,12 @@ describe('loadConfig', () => {
         expect(await loadConfig(undefined, dir, builtin, check)).toBe(builtin)
     })
 
+    test('without a path or a built-in, asks for --config', async () => {
+        await expect(
+            loadConfig(undefined, dir, undefined, check),
+        ).rejects.toThrow('needs --config')
+    })
+
     test('a REPOS or default export, relative to the base dir', async () => {
         expect(await loadConfig('named.ts', dir, builtin, check)).toEqual(cfg)
         expect(

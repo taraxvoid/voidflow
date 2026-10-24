@@ -1,22 +1,28 @@
 /**
- * Fleet config for the repo tools (cf-tokens, apply-rulesets): the built-in
- * one, or another repo's module given with --config. That lets an org keep
- * its fleet map in its own (private) repo and run these scripts against it.
+ * Fleet config for the repo tools (cf-tokens, apply-rulesets): a module in
+ * the org's own (private) infra repo, given with --config, which holds the
+ * repo, account and zone mapping so voidflow holds only code. apply-rulesets
+ * still has a built-in fleet until that moves out too.
  */
 import { resolve } from 'node:path'
 
 /**
- * `builtin` when there is no `path`; otherwise the `REPOS` (or default)
- * export of the module at `path`, resolved against `base` and run through
- * `check`, which throws listing every problem.
+ * The `REPOS` (or default) export of the module at `path`, resolved against
+ * `base` and run through `check`, which throws listing every problem.
+ * Without a `path`, `builtin` if the tool has one, else an error.
  */
 export async function loadConfig<T>(
     path: string | undefined,
     base: string,
-    builtin: T,
+    builtin: T | undefined,
     check: (x: unknown) => T,
 ): Promise<T> {
-    if (!path) return builtin
+    if (!path) {
+        if (builtin !== undefined) return builtin
+        throw new Error(
+            'needs --config <module>: the fleet map in your infra repo (see CONTRIBUTING.md)',
+        )
+    }
     const file = resolve(base, path)
     const mod = (await import(file)) as { REPOS?: unknown; default?: unknown }
     const cfg = mod.REPOS ?? mod.default
@@ -35,7 +41,7 @@ export async function loadConfig<T>(
  */
 export function loadOrExit<T>(
     path: string | undefined,
-    builtin: T,
+    builtin: T | undefined,
     check: (x: unknown) => T,
 ): Promise<T> {
     const base = process.env.VOIDFLOW_CONFIG_BASE || process.cwd()

@@ -1,7 +1,9 @@
 /**
- * Scoped Cloudflare deploy tokens for the voidflow fleet, as data.
+ * Scoped Cloudflare deploy tokens: the config shape and the plan logic. The
+ * fleet itself (repos, accounts, envs) lives in the org's infra repo and is
+ * passed with --config (e.g. taraxvoid/infra's cf-tokens.ts).
  *
- * `scripts/cf-tokens.ts` diffs these against the account's API tokens and
+ * `scripts/cf-tokens.ts` diffs that config against the account's API tokens and
  * (with --apply) creates, updates or rotates them, writing each new value to
  * the repo's `CLOUDFLARE_API_TOKEN` secret (per GitHub environment by default,
  * or repo-wide). Tokens it did not create are left alone unless a repo lists
@@ -95,15 +97,15 @@ export const TAG = 'voidflow'
 export const TTL_DAYS = 90
 export const RENEW_DAYS = 14
 
-const TARAXVOID = 'c6a445a43a801403a8e33968be40c19c'
-
 // Permission group ids. Names are cosmetic and can change; ids are stable.
 // `just cf-tokens-groups` prints the live names next to these.
 //
 // WORKER_EDITOR is the set the dashboard produced for "Specified Workers >
 // Editor" (2026-10, twice). It mixes the new Workers role groups with legacy
-// ones (KV, R2, Scripts, Account Settings). The transbot shakedown checks
-// whether the role really needs all of them.
+// ones (KV, R2, Scripts, Account Settings). Shaken down 2026-10 on transbot
+// (custom domain, zone grant only) and taraxvoid.net (KV bound by id, two
+// zones): both deployed with no fallback. Whether every group is needed is
+// untested.
 export const WORKER_EDITOR = [
     'cb142f7fbc3540f0bade0cbe75f606dc',
     'bdbcd690c763475a985e8641dddc09f7',
@@ -120,25 +122,6 @@ export const WORKER_EDITOR = [
 export const WORKERS_ROUTES_WRITE = '28f4b596e7d643029c524985477ae49a'
 /** Legacy account-wide Workers Scripts Write, used only for a fallback. */
 export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
-
-export const REPOS: Record<string, RepoConfig> = {
-    // One custom domain, no D1/R2/KV: the smallest real deploy, so the first
-    // shakedown. Worker and zone come from its wrangler.jsonc. Shaken down
-    // 2026-10: the zone grant was enough for its custom domain (no fallback).
-    'taraxvoid/transbot': {
-        account: TARAXVOID,
-        envs: [{ env: 'prod' }],
-        retire: ['transbot-deploy-token'],
-    },
-    // The first migration: a KV namespace bound by id, custom domains on two
-    // zones, and its old token in a repo-wide secret (reported by the plan,
-    // deleted with --prune).
-    'taraxvoid/taraxvoid.net': {
-        account: TARAXVOID,
-        envs: [{ env: 'prod' }],
-        retire: ['taraxvoid-dot-net'],
-    },
-}
 
 export const tokenName = (repo: string, env: string) =>
     `${TAG}:${repo}:${env}`

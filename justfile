@@ -106,7 +106,10 @@ rulesets-apply *args:
 cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
 cf_tokens := cf_admin + " " + config_base + " bun scripts/cf-tokens.ts"
 
-# Show how each repo's Cloudflare deploy tokens differ from cloudflare/tokens.ts (read-only; needs CF_TOKEN_ADMIN)
+# The cf-tokens-* recipes all take --config <module>: the fleet map in your
+# infra repo (taraxvoid/infra, ravenflight/infra), whose justfile wraps these.
+
+# Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
 cf-tokens-plan *args:
     {{ cf_tokens }} {{ args }}
 
@@ -114,13 +117,13 @@ cf-tokens-plan *args:
 cf-tokens-apply *args:
     {{ cf_tokens }} --apply {{ args }}
 
-# Print the live names of the permission group ids in cloudflare/tokens.ts
+# Print the live names of the permission group ids cloudflare/tokens.ts uses
 cf-tokens-groups *args:
     {{ cf_tokens }} --groups {{ args }}
 
-# Run a command from here with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try transbot prod bunx wrangler deploy`
-cf-tokens-try repo env +cmd:
-    {{ cf_tokens }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
+# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts transbot prod bunx wrangler deploy`
+cf-tokens-try config repo env +cmd:
+    {{ cf_tokens }} --config {{ quote(config) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 
 # Open the next -> main promotion PR, set to auto-merge with a merge commit
 promote:

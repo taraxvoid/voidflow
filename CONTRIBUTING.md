@@ -56,8 +56,10 @@ returns 403 (private repos on a plan without rulesets) are skipped and listed.
 
 ## Cloudflare deploy tokens as code
 
-Deploy tokens for the fleet live in [`cloudflare/tokens.ts`](cloudflare/tokens.ts),
-one per repo and env. Each token is owned by its env's account and scoped to
+[`cloudflare/tokens.ts`](cloudflare/tokens.ts) holds the config shape and the
+plan logic; the fleet (repos, accounts, envs) lives in the org's own infra
+repo (see [Fleet config](#fleet-config---config)), one token per repo and
+env. Each token is owned by its env's account and scoped to
 one Worker (the Workers Editor role on it), plus Workers Routes Write on the
 zones of its routes only, with a 90-day expiry. An env whose Worker lives in
 another account (say a separate preview Worker kept apart from prod) sets its
@@ -116,6 +118,8 @@ hidden input), and confirm with `just doctor`. To use another fnox provider
 `CF_TOKEN_ADMIN` is already in the environment, the targets use it and skip
 fnox.
 
+From the infra repo, whose recipes pass its config to these:
+
 ```sh
 just cf-tokens-plan                 # read-only: diff every repo's tokens against the config
 just cf-tokens-plan --check         # exit 1 on drift or a token within 14 days of expiry
@@ -131,7 +135,7 @@ deploy with a throwaway token that has the same policies. From the site's
 checkout:
 
 ```sh
-just -f ../voidflow/justfile cf-tokens-try transbot prod bunx wrangler deploy
+just -f ../infra/justfile cf-tokens-try transbot prod bunx wrangler deploy
 ```
 
 The real token can't be used locally (its value only exists in GitHub), and
@@ -171,15 +175,17 @@ Cut over one repo at a time: `just cf-tokens-apply --repo <name>`, deploy, then
 `just cf-tokens-apply --repo <name> --prune` to delete its old token. Repo
 tooling, not part of the published package.
 
-## Another org's fleet (`--config`)
+## Fleet config (`--config`)
 
-The built-in configs for rulesets and Cloudflare tokens cover taraxvoid repos.
-Another org keeps its fleet map in its own (private) repo, as modules that
-export `REPOS` (or a default) of the same shape, and passes them with
-`--config` to `rulesets-*` or `cf-tokens-*`:
+voidflow holds the tools; each org keeps its fleet map (repo names, account
+ids, envs) in its own private infra repo, e.g. `taraxvoid/infra` or
+`ravenflight/infra`, as modules that export `REPOS` (or a default). The infra
+repo's justfile wraps voidflow's recipes with `--config` pointing at them.
+`cf-tokens-*` requires it; `rulesets-*` still falls back to the built-in
+`REPOS` in `rulesets/index.ts` until that moves out too.
 
 ```ts
-// cf-tokens.ts in the org's own repo
+// cf-tokens.ts in the org's infra repo
 export const REPOS = {
     'example-org/site': {
         account: '<account id>',
@@ -192,9 +198,19 @@ export const REPOS = {
 }
 ```
 
-```sh
-just -f ../voidflow/justfile cf-tokens-plan --config cf-tokens.ts
-just -f ../voidflow/justfile rulesets-plan --config rulesets.ts
+```just
+# justfile in the org's infra repo
+voidflow := env_var_or_default("VOIDFLOW", home_directory() / "projects/personal/voidflow")
+vf := "just -f " + quote(voidflow / "justfile")
+tokens := justfile_directory() / "cf-tokens.ts"
+
+cf-tokens-plan *args:
+    {{ vf }} cf-tokens-plan --config {{ quote(tokens) }} {{ args }}
+
+# [no-cd]: the command runs in the site checkout `just -f` was called from
+[no-cd]
+cf-tokens-try repo env +cmd:
+    {{ vf }} cf-tokens-try {{ quote(tokens) }} {{ repo }} {{ env }} {{ cmd }}
 ```
 
 A rulesets config can use the tier model, where any field left out takes

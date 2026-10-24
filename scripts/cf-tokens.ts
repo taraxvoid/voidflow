@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Plan, apply or rotate the scoped Cloudflare deploy tokens described in
- * cloudflare/tokens.ts.
+ * Plan, apply or rotate scoped Cloudflare deploy tokens for the fleet in the
+ * --config module (the org's infra repo), shaped as in cloudflare/tokens.ts.
+ * Every invocation takes --config <module>, e.g. ../infra/cf-tokens.ts:
  *
  *   bun scripts/cf-tokens.ts                    # plan (read-only), every repo
  *   bun scripts/cf-tokens.ts --repo transbot    # plan one repo
@@ -12,10 +13,8 @@
  *   bun scripts/cf-tokens.ts --groups           # live names of the permission group ids used
  *   bun scripts/cf-tokens.ts --repo transbot --try prod -- bunx wrangler deploy
  *                                               # run a command with a throwaway token scoped like prod's
- *   bun scripts/cf-tokens.ts --config ../infra/cf-tokens.ts   # another fleet's config
  *
- * The config is REPOS in cloudflare/tokens.ts unless --config names a module
- * exporting `REPOS` (or a default) of the same shape (see scripts/lib/config.ts).
+ * The module exports `REPOS` (or a default); see scripts/lib/config.ts.
  *
  * Needs CF_TOKEN_ADMIN: a user-owned token covering every account in the
  * config (envs can sit in different accounts),
@@ -30,7 +29,6 @@
 import { parseArgs } from 'node:util'
 import { loadOrExit } from './lib/config.ts'
 import {
-    REPOS as BUILTIN,
     WORKERS_ROUTES_WRITE,
     checkRepos,
     WORKERS_SCRIPTS_WRITE,
@@ -64,7 +62,7 @@ const { values, positionals } = parseArgs({
     allowPositionals: true,
 })
 
-const REPOS = await loadOrExit(values.config, BUILTIN, checkRepos)
+const REPOS = await loadOrExit(values.config, undefined, checkRepos)
 
 const ADMIN = process.env.CF_TOKEN_ADMIN
 if (!ADMIN) {

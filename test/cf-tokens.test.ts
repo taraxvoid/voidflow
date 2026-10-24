@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-    REPOS,
     checkRepos,
     fromWrangler,
     resolveTarget,
@@ -20,6 +19,19 @@ import {
     type Token,
 } from '../cloudflare/tokens.ts'
 
+// A fleet like taraxvoid/infra's cf-tokens.ts (the real one lives there).
+const REPOS: Record<string, RepoConfig> = {
+    'taraxvoid/transbot': {
+        account: 'c6a445a43a801403a8e33968be40c19c',
+        envs: [{ env: 'prod' }],
+        retire: ['transbot-deploy-token'],
+    },
+    'taraxvoid/taraxvoid.net': {
+        account: 'c6a445a43a801403a8e33968be40c19c',
+        envs: [{ env: 'prod' }, { env: 'preview', zones: [] }],
+        retire: [],
+    },
+}
 const transbot = REPOS['taraxvoid/transbot']
 const prod = transbot.envs[0]
 const ids = { scriptTag: 'tag123', zoneIds: { 'transbot.net': 'zone456' } }
@@ -216,7 +228,7 @@ describe('checkRepos', () => {
         },
     }
 
-    test('accepts the built-in config and a split-account one', () => {
+    test('accepts a fleet and a split-account one', () => {
         expect(checkRepos(REPOS)).toBe(REPOS)
         expect(checkRepos(good)).toBe(good)
     })
