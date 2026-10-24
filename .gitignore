@@ -16,7 +16,7 @@ fnox.local.toml
 .vscode/
 .idea
 .superpowers
-docs/superpowers
+docs/
 
 # mise state from runs with HOME at the repo root
 /.cache/
