@@ -375,8 +375,7 @@ Upgrading from `lefthook/site.yml` (v0.13 and earlier): change `configs` to
 ## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),
-[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org),
-[ravenflight.io](https://ravenflight.io).
+[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org).
 
 Optional badge for your README (follows light/dark mode):
 

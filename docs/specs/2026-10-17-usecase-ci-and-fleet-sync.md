@@ -10,8 +10,7 @@ tools (`tool-ci.yml`). Everything else in the fleet hand-rolls its CI:
 | Repo | Kind | Today |
 |---|---|---|
 | taraxvoid/rookery | Python (stdlib) + agent configs | own `nest-validate.yml`: `validate.py`, unittest, zizmor |
-| ravenflight/flock | Python (uv) + OpenTofu + k8s | own `pr-checks.yml` (paused; see Phasing) |
-| taraxvoid/skills, ravenflight/skills | Claude skills / plugin marketplace | no CI |
+| taraxvoid/skills | Claude skills / plugin marketplace | no CI |
 
 And the repos that do use voidflow drift apart. Observed 2026-10-16, latest
 release v0.13.1:
@@ -22,7 +21,6 @@ release v0.13.1:
 | soundry, synthomaha | v0.10.0 | 0.11.1 |
 | taraxvoid.com | v0.11.1 (deploy action) | none |
 | transbot | v0.13.0 | 0.13.0 |
-| ravenflight.io | `@v0.12.1` (tag, not SHA) | none |
 | trailguide | hand-rolled | `^0.12.3` (range) |
 
 Two causes. The shared Renovate preset files voidflow's workflow refs under
@@ -90,7 +88,7 @@ For rookery now, flock when it resumes.
 
 ### `skills-ci.yml`
 
-For taraxvoid/skills, ravenflight/skills, and rookery's `skills/`.
+For taraxvoid/skills and rookery's `skills/`.
 
 - A bun script, `scripts/check-skills.ts`, shipped as the `check-skills` bin
   (like `check-licenses`) so the same check runs in lefthook. Input
@@ -162,7 +160,7 @@ just fleet-sync v0.14.0 --repo soundry   # one repo
 ```
 
 The fleet list comes from the same config the ruleset tool reads (voidflow's
-`rulesets/index.ts`, or `ravenflight/infra/rulesets.ts` with `--config`), so
+`rulesets/index.ts`, or an infra repo's `rulesets.ts` with `--config`), so
 there is one inventory. Per consumer it:
 
 1. creates a worktree at `~/worktrees/<repo>/chore/voidflow-<version>`;

@@ -69,7 +69,7 @@ describe('canonical rulesets', () => {
 
 describe('normalise', () => {
     test('ignores the dismissal_restriction default that org-owned repos echo back', () => {
-        const want = build('main', REPOS['ravenflight/ravenflight.io'])
+        const want = build('main', REPOS['taraxvoid/queeromaha'])
         const have = structuredClone(want)
         const pr = have.rules.find((x) => x.type === 'pull_request')
         if (pr?.parameters) pr.parameters.dismissal_restriction = { enabled: false, allowed_actors: [] }
@@ -183,12 +183,12 @@ describe('raw rulesets (another fleet, --config)', () => {
         ],
     }
     const fleet: Fleet = {
-        'ravenflight/site': { rulesets: [live], retire: ['old'] },
+        'example-org/site': { rulesets: [live], retire: ['old'] },
         'taraxvoid/voidflow': REPOS['taraxvoid/voidflow'],
     }
 
     test('are wanted verbatim, never adopted under another name', () => {
-        expect(desired('ravenflight/site', fleet)).toEqual([
+        expect(desired('example-org/site', fleet)).toEqual([
             { ruleset: live, aka: [] },
         ])
     })
@@ -203,7 +203,7 @@ describe('raw rulesets (another fleet, --config)', () => {
         const fromApi = {
             ...live,
             id: 1,
-            source: 'ravenflight/site',
+            source: 'example-org/site',
             node_id: 'x',
             rules: [...live.rules].reverse(),
         }

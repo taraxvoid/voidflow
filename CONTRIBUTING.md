@@ -178,11 +178,11 @@ tooling, not part of the published package.
 ## Fleet config (`--config`)
 
 voidflow holds the tools; each org keeps its fleet map (repo names, account
-ids, envs) in its own private infra repo, e.g. `taraxvoid/infra` or
-`ravenflight/infra`, as modules that export `REPOS` (or a default). The infra
-repo's justfile wraps voidflow's recipes with `--config` pointing at them.
-`cf-tokens-*` requires it; `rulesets-*` still falls back to the built-in
-`REPOS` in `rulesets/index.ts` until that moves out too.
+ids, envs) in its own private infra repo, e.g. `taraxvoid/infra`, as modules
+that export `REPOS` (or a default). The infra repo's justfile wraps voidflow's
+recipes with `--config` pointing at them. `cf-tokens-*` requires it;
+`rulesets-*` still falls back to the built-in `REPOS` in `rulesets/index.ts`
+until that moves out too.
 
 ```ts
 // cf-tokens.ts in the org's infra repo

@@ -6,7 +6,7 @@ import { loadConfig } from '../scripts/lib/config.ts'
 
 describe('loadConfig', () => {
     const dir = mkdtempSync(join(tmpdir(), 'voidflow-config-'))
-    const cfg = { 'ravenflight/site': { n: 1 } }
+    const cfg = { 'example-org/site': { n: 1 } }
     const builtin = { 'taraxvoid/x': { n: 0 } }
     // Accepts objects whose values all have a numeric `n`.
     const check = (x: unknown) => {

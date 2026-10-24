@@ -100,7 +100,7 @@ describe('policies', () => {
 })
 
 describe('accounts', () => {
-    // dev/staging in one account, prod in another (ravenflight's shape).
+    // dev/staging in one account, prod in another.
     const split: RepoConfig = {
         account: 'proddd',
         envs: [
@@ -218,7 +218,7 @@ describe('checkRepos', () => {
     const DEV = '189861042e47aa72c52e44fe4d18e723'
     const PROD = 'e632b9f816f9f2a62ed9571d352fd4ae'
     const good = {
-        'ravenflight/site': {
+        'example-org/site': {
             account: PROD,
             envs: [
                 { env: 'dev', worker: 'site-dev', zones: [], account: DEV },
@@ -291,7 +291,7 @@ describe('checkRepos', () => {
 
 
 describe('wrangler config', () => {
-    // Shaped like transbot's and ravenflight.io's real configs.
+    // Shaped like transbot's real config.
     const single = {
         name: 'transbot',
         routes: [{ pattern: 'transbot.net', custom_domain: true }],

@@ -136,14 +136,6 @@ export const REPOS: Record<string, RepoConfig> = {
     // Deploys to Cloudflare through voidflow, so no Netlify check and no
     // deploy app bypass. Private, so skipped until rulesets are available.
     'taraxvoid/taraxvoid.net': site({ netlify: false }),
-    // Trunk-based: one main deployed to Cloudflare through voidflow (PR previews,
-    // prod environment gate). Its old next/live rulesets are retired at cutover.
-    'ravenflight/ravenflight.io': site({
-        netlify: false,
-        codeowners: false,
-        aka: { main: ['main (dev)'] },
-        retire: ['staging (next)', 'prod (live)'],
-    }),
     'taraxvoid/voidflow': {
         // main (stable), next (prerelease channel), release/* (maintenance).
         // See RELEASING.md. Promotion next -> main uses merge commits, so no
