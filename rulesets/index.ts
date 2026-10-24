@@ -60,11 +60,11 @@ export type RepoConfig = {
      */
     linearHistory: boolean
     /**
-     * Require a merge queue on main. GitHub only offers merge queues on
-     * org-owned repos, so personal repos must leave this false. The required
-     * checks must also run on `merge_group` (see site-ci.yml).
+     * Require a merge queue on main (default false). GitHub only offers
+     * merge queues on org-owned repos, so personal repos leave it off. The
+     * required checks must also run on `merge_group` (see site-ci.yml).
      */
-    mergeQueue: boolean
+    mergeQueue?: boolean
     /** Extra bypass actors per tier, on top of the tier defaults. */
     bypass: Partial<Record<Tier, BypassActor[]>>
     /** Existing ruleset names to adopt (rename) instead of duplicating. */
@@ -146,7 +146,6 @@ export const REPOS: Record<string, RepoConfig> = {
         checks: ['Validation', 'Unit tests'],
         codeowners: false,
         linearHistory: false,
-        mergeQueue: false,
         bypass: {},
         aka: { main: ['main/prod'] },
         retire: [],
