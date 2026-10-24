@@ -3,12 +3,16 @@
  *
  * `scripts/cf-tokens.ts` diffs these against the account's API tokens and
  * (with --apply) creates, updates or rotates them, writing each new value to
- * the repo's GitHub environment secret. Tokens it did not create are left
- * alone unless a repo lists them under `retire` (deleted only with --prune).
+ * the repo's `CLOUDFLARE_API_TOKEN` secret (per GitHub environment by default,
+ * or repo-wide). Tokens it did not create are left alone unless a repo lists
+ * them under `retire` (deleted only with --prune).
  *
- * Each token is owned by its env's account (dev/staging and prod can live in
- * different accounts) and scoped to one Worker (Workers Editor on that
- * Worker), plus Workers Routes Write on the zones of its custom domains.
+ * The Worker and its zones come from the repo's own wrangler config unless an
+ * env spells them out, so a route added there shows up as drift here.
+ *
+ * Each token is owned by its env's account (envs can live in different
+ * accounts) and scoped to one Worker (Workers Editor on that
+ * Worker), plus Workers Routes Write on the zones of its routes.
  * Custom Domains do not support per-Worker roles yet; when a deploy proves the
  * zone grant is not enough, record a `fallback` and the token also gets
  * account-wide Workers Scripts Write. Every plan and every deploy says so.
@@ -22,16 +26,40 @@ export type Fallback = {
 }
 
 export type EnvConfig = {
-    /** GitHub environment the deploy job runs in (holds the secret). */
+    /**
+     * Names the token, and is the GitHub environment that holds its secret
+     * (unless `secret` is 'repo').
+     */
     env: string
-    /** Worker script name, as in wrangler.jsonc `name`. */
-    worker: string
-    /** Zones of the Worker's routes and custom domains, by name. */
-    zones: string[]
+    /**
+     * Where the secret goes: 'env' (default) is an environment secret, read
+     * only by jobs with `environment: <env>`, so branch policies on that
+     * environment gate it; 'repo' is a repository secret every job can read,
+     * for repos that deploy without environments. One env per repo at most.
+     */
+    secret?: 'env' | 'repo'
+    /** Worker script name. Default: from the wrangler config. */
+    worker?: string
+    /**
+     * Zones to grant Workers Routes Write on, by name. Default: the zones of
+     * the wrangler config's routes; `[]` for none (e.g. a Worker Preview
+     * token, which deploys no routes).
+     */
+    zones?: string[]
+    /** Wrangler config path in the repo (default branch). Default: wrangler.jsonc. */
+    wrangler?: string
+    /**
+     * Wrangler `env.<name>` block to read. Default: the block named like
+     * `env` if the config has one, else the top level.
+     */
+    wranglerEnv?: string
     /** Account the Worker and token live in, when not the repo's `account`. */
     account?: string
     fallback?: Fallback
 }
+
+/** What an env's token is scoped to, once resolved. */
+export type Target = { worker: string; zones: string[] }
 
 /** An old token to retire; a bare name means the repo's `account`. */
 export type Retire = string | { account: string; name: string }
@@ -93,11 +121,11 @@ export const WORKERS_ROUTES_WRITE = '28f4b596e7d643029c524985477ae49a'
 export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
 
 export const REPOS: Record<string, RepoConfig> = {
-    // Assets-only Worker, one custom domain, no D1/R2/KV: the smallest real
-    // deploy, so the first shakedown.
+    // One custom domain, no D1/R2/KV: the smallest real deploy, so the first
+    // shakedown. Worker and zone come from its wrangler.jsonc.
     'taraxvoid/transbot': {
         account: TARAXVOID,
-        envs: [{ env: 'prod', worker: 'transbot', zones: ['transbot.net'] }],
+        envs: [{ env: 'prod' }],
         retire: ['transbot-deploy-token'],
     },
 }
@@ -123,7 +151,90 @@ export const repoAccounts = (cfg: RepoConfig) => [
     ]),
 ]
 
+// ---- wrangler config --------------------------------------------------------
+
+type Route = string | { pattern: string; zone_name?: string }
+
+/**
+ * The Worker name and route hostnames an env deploys, read from a parsed
+ * wrangler config the way wrangler reads it: an `env.<name>` block's `name`,
+ * else the top-level name plus `-<name>`; its `routes`/`route`, else the
+ * top level's. A route's `zone_name`, when set, is used as is.
+ */
+export function fromWrangler(
+    config: unknown,
+    env: string,
+    wranglerEnv?: string,
+): { worker: string; hosts: string[]; zones: string[] } {
+    type Block = { name?: string; route?: Route; routes?: Route[] }
+    const top = config as Block & { env?: Record<string, Block> }
+    const block = wranglerEnv ?? (top.env?.[env] ? env : undefined)
+    const sub = block === undefined ? undefined : top.env?.[block]
+    if (block !== undefined && !sub) {
+        throw new Error(`wrangler config has no env.${block}`)
+    }
+    const worker =
+        sub?.name ?? (top.name && block ? `${top.name}-${block}` : top.name)
+    if (!worker) throw new Error('wrangler config has no name')
+    const pick = (b?: Block) => b?.routes ?? (b?.route ? [b.route] : undefined)
+    const hosts: string[] = []
+    const zones: string[] = []
+    for (const r of pick(sub) ?? pick(top) ?? []) {
+        if (typeof r !== 'string' && r.zone_name) zones.push(r.zone_name)
+        else hosts.push(routeHost(typeof r === 'string' ? r : r.pattern))
+    }
+    return { worker, hosts, zones }
+}
+
+/** `*.example.com/api/*` and `https://example.com:443/` to their hostname. */
+export const routeHost = (pattern: string) =>
+    pattern
+        .replace(/^[a-z]+:\/\//, '')
+        .replace(/[/:].*$/, '')
+        .replace(/^\*\.?/, '')
+
+/** The zone a hostname belongs to: the longest zone name it ends with. */
+export function zoneOf(host: string, zoneNames: string[]): string | undefined {
+    return zoneNames
+        .filter((z) => host === z || host.endsWith(`.${z}`))
+        .sort((a, b) => b.length - a.length)[0]
+}
+
+/**
+ * The Worker and zone names an env's token covers: its own `worker`/`zones`
+ * when given, else the wrangler config's (`wrangler` is undefined only when
+ * the env gives both). Throws when a route's host is in none of `zoneNames`
+ * (the account's zones), rather than leaving it out.
+ */
+export function resolveTarget(
+    env: EnvConfig,
+    wrangler: unknown,
+    zoneNames: string[],
+): Target {
+    const from = () => fromWrangler(wrangler, env.env, env.wranglerEnv)
+    const worker = env.worker ?? from().worker
+    if (env.zones) return { worker, zones: env.zones }
+    const { hosts, zones } = from()
+    for (const h of hosts) {
+        const z = zoneOf(h, zoneNames)
+        if (!z) throw new Error(`route host ${h} is in no zone of the account`)
+        zones.push(z)
+    }
+    return { worker, zones: [...new Set(zones)].sort() }
+}
+
 // ---- config from elsewhere --------------------------------------------------
+
+const ENV_FIELDS = [
+    'env',
+    'secret',
+    'worker',
+    'zones',
+    'wrangler',
+    'wranglerEnv',
+    'account',
+    'fallback',
+] satisfies Array<keyof EnvConfig> as string[]
 
 /**
  * Check an untyped config (another repo's `--config` module) and throw with
@@ -150,17 +261,28 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
         if (!Array.isArray(cfg.envs)) bad(`${at}.envs`, 'not a list')
         else if (cfg.envs.length === 0) bad(`${at}.envs`, 'empty')
         const seen = new Set<string>()
+        let repoScoped = 0
         for (const [i, env] of (Array.isArray(cfg.envs) ? cfg.envs : []).entries()) {
             const e = `${at}.envs[${i}]`
             if (!isObj(env)) {
                 bad(e, 'not an object')
                 continue
             }
+            for (const k of Object.keys(env))
+                if (!ENV_FIELDS.includes(k)) bad(`${e}.${k}`, 'unknown field')
             if (!isStr(env.env)) bad(`${e}.env`, 'missing')
             else if (seen.has(env.env)) bad(`${e}.env`, `duplicate "${env.env}"`)
             else seen.add(env.env)
-            if (!isStr(env.worker)) bad(`${e}.worker`, 'missing')
-            if (!Array.isArray(env.zones) || !env.zones.every(isStr))
+            if (env.secret !== undefined && env.secret !== 'env' && env.secret !== 'repo')
+                bad(`${e}.secret`, "'env' or 'repo'")
+            if (env.secret === 'repo' && ++repoScoped === 2)
+                bad(`${e}.secret`, "a second 'repo' env would overwrite the first's secret")
+            for (const k of ['worker', 'wrangler', 'wranglerEnv'])
+                if (env[k] !== undefined && !isStr(env[k])) bad(`${e}.${k}`, 'not a name')
+            if (
+                env.zones !== undefined &&
+                (!Array.isArray(env.zones) || !env.zones.every(isStr))
+            )
                 bad(`${e}.zones`, 'not a list of zone names')
             if (env.account !== undefined && !isAcct(env.account))
                 bad(`${e}.account`, 'not a 32-hex account id')
@@ -188,13 +310,14 @@ const account = (id: string) => `com.cloudflare.api.account.${id}`
 
 /**
  * Policies for one env. `scriptTag` is the Worker's tag (not its name) and
- * `zoneIds` maps each configured zone name to its id; tokens reference
+ * `zoneIds` maps each of the target's zone names to its id; tokens reference
  * resources by id, so the script looks both up.
  */
 export function policies(
     cfg: RepoConfig,
     env: EnvConfig,
     ids: { scriptTag: string; zoneIds: Record<string, string> },
+    zones: string[] = Object.keys(ids.zoneIds),
 ): Policy[] {
     const acct = account(envAccount(cfg, env))
     const out: Policy[] = [
@@ -209,17 +332,17 @@ export function policies(
             },
         },
     ]
-    if (env.zones.length > 0) {
-        const zones: Resources = {}
-        for (const z of env.zones) {
+    if (zones.length > 0) {
+        const resources: Resources = {}
+        for (const z of zones) {
             const id = ids.zoneIds[z]
             if (!id) throw new Error(`no zone id for ${z}`)
-            zones[`com.cloudflare.api.account.zone.${id}`] = '*'
+            resources[`com.cloudflare.api.account.zone.${id}`] = '*'
         }
         out.push({
             effect: 'allow',
             permission_groups: [{ id: WORKERS_ROUTES_WRITE }],
-            resources: zones,
+            resources,
         })
     }
     if (env.fallback) {

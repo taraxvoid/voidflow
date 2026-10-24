@@ -2,6 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import {
     REPOS,
     checkRepos,
+    fromWrangler,
+    resolveTarget,
+    routeHost,
+    zoneOf,
     RENEW_DAYS,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
@@ -69,7 +73,9 @@ describe('policies', () => {
 
     test('a zone without an id fails rather than widening', () => {
         expect(() =>
-            policies(transbot, prod, { scriptTag: 't', zoneIds: {} }),
+            policies(transbot, prod, { scriptTag: 't', zoneIds: {} }, [
+                'transbot.net',
+            ]),
         ).toThrow('transbot.net')
     })
 
@@ -221,13 +227,22 @@ describe('checkRepos', () => {
             'a/b': {
                 account: 'not-hex',
                 envs: [
-                    { env: 'prod', zones: 'example.com', account: 'x' },
+                    {
+                        env: 'prod',
+                        worker: 3,
+                        zones: 'example.com',
+                        account: 'x',
+                        secret: 'org',
+                        wranglr: 'wrangler.toml',
+                    },
                     {
                         env: 'prod',
                         worker: 'w',
                         zones: [],
                         fallback: { reason: 'custom-domain' },
                     },
+                    { env: 'a', secret: 'repo' },
+                    { env: 'b', secret: 'repo' },
                 ],
                 retire: [{ name: 'old' }],
             },
@@ -242,7 +257,10 @@ describe('checkRepos', () => {
             '"nope": key is not owner/name',
             '"nope".envs: empty',
             '"a/b".account: not a 32-hex account id',
-            '"a/b".envs[0].worker: missing',
+            '"a/b".envs[0].worker: not a name',
+            '"a/b".envs[0].secret: \'env\' or \'repo\'',
+            '"a/b".envs[0].wranglr: unknown field',
+            '"a/b".envs[3].secret: a second \'repo\' env',
             '"a/b".envs[0].zones: not a list of zone names',
             '"a/b".envs[0].account: not a 32-hex account id',
             '"a/b".envs[1].env: duplicate "prod"',
@@ -259,3 +277,98 @@ describe('checkRepos', () => {
     })
 })
 
+
+describe('wrangler config', () => {
+    // Shaped like transbot's and ravenflight.io's real configs.
+    const single = {
+        name: 'transbot',
+        routes: [{ pattern: 'transbot.net', custom_domain: true }],
+    }
+    const multi = {
+        name: 'site',
+        routes: ['old.example.com/*'],
+        env: {
+            preview: { name: 'site-preview', workers_dev: true },
+            prod: {
+                name: 'site-prod',
+                routes: [
+                    { pattern: 'example.com', custom_domain: true },
+                    { pattern: 'www.example.com', custom_domain: true },
+                    { pattern: 'dl.example.com', custom_domain: true },
+                    { pattern: 'other.biz', custom_domain: true },
+                    { pattern: 'api.example.net/*', zone_name: 'example.net' },
+                ],
+            },
+            staging: {},
+        },
+    }
+    const zones = ['example.com', 'other.biz', 'transbot.net', 'sub.other.biz']
+
+    test('routeHost strips scheme, path, port and a leading wildcard', () => {
+        expect(routeHost('*.example.com/api/*')).toBe('example.com')
+        expect(routeHost('*example.com/*')).toBe('example.com')
+        expect(routeHost('https://a.example.com:443/')).toBe('a.example.com')
+        expect(routeHost('example.com')).toBe('example.com')
+    })
+
+    test('zoneOf picks the longest zone the host is in, never a lookalike', () => {
+        expect(zoneOf('www.example.com', zones)).toBe('example.com')
+        expect(zoneOf('a.sub.other.biz', zones)).toBe('sub.other.biz')
+        expect(zoneOf('notexample.com', zones)).toBeUndefined()
+    })
+
+    test('top level when there is no env block named like the env', () => {
+        expect(fromWrangler(single, 'prod')).toEqual({
+            worker: 'transbot',
+            hosts: ['transbot.net'],
+            zones: [],
+        })
+    })
+
+    test("an env block's name and routes, and a route's zone_name as is", () => {
+        const t = fromWrangler(multi, 'prod')
+        expect(t.worker).toBe('site-prod')
+        expect(t.hosts).toEqual([
+            'example.com',
+            'www.example.com',
+            'dl.example.com',
+            'other.biz',
+        ])
+        expect(t.zones).toEqual(['example.net'])
+    })
+
+    test("like wrangler: no name is <name>-<env>, no routes inherits the top level's", () => {
+        expect(fromWrangler(multi, 'staging')).toEqual({
+            worker: 'site-staging',
+            hosts: ['old.example.com'],
+            zones: [],
+        })
+    })
+
+    test('wranglerEnv picks a block, and a missing one fails', () => {
+        expect(fromWrangler(multi, 'live', 'prod').worker).toBe('site-prod')
+        expect(() => fromWrangler(multi, 'prod', 'nope')).toThrow('env.nope')
+    })
+
+    test('resolveTarget maps routes to deduplicated account zones', () => {
+        expect(resolveTarget({ env: 'prod' }, multi, zones)).toEqual({
+            worker: 'site-prod',
+            zones: ['example.com', 'example.net', 'other.biz'],
+        })
+    })
+
+    test('a route outside every account zone fails instead of being dropped', () => {
+        expect(() =>
+            resolveTarget({ env: 'prod' }, single, ['example.com']),
+        ).toThrow('transbot.net')
+    })
+
+    test("the env's own worker and zones win; zones: [] grants none", () => {
+        expect(
+            resolveTarget({ env: 'preview', zones: [] }, single, zones),
+        ).toEqual({ worker: 'transbot', zones: [] })
+        expect(
+            resolveTarget({ env: 'x', worker: 'w', zones: ['a.org'] }, undefined, []),
+        ).toEqual({ worker: 'w', zones: ['a.org'] })
+    })
+})

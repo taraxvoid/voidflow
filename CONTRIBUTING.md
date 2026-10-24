@@ -56,13 +56,49 @@ returns 403 (private repos on a plan without rulesets) are skipped and listed.
 
 ## Cloudflare deploy tokens as code
 
-Deploy tokens for the fleet live in [`cloudflare/tokens.ts`](cloudflare/tokens.ts):
-per repo and GitHub environment, the Worker it deploys and the zones of its
-custom domains. An env can set its own `account` (say dev/staging in a
-separate account from prod); otherwise it uses the repo's. Each token is owned
-by its env's account and scoped to that one Worker (the
-Workers Editor role on it), plus Workers Routes Write on those zones only, with
-a 90-day expiry.
+Deploy tokens for the fleet live in [`cloudflare/tokens.ts`](cloudflare/tokens.ts),
+one per repo and env. Each token is owned by its env's account and scoped to
+one Worker (the Workers Editor role on it), plus Workers Routes Write on the
+zones of its routes only, with a 90-day expiry. An env whose Worker lives in
+another account (say a separate preview Worker kept apart from prod) sets its
+own `account`; otherwise it uses the repo's.
+
+The Worker and zones come from the repo's own wrangler config on its default
+branch (`wrangler.jsonc`, or the env's `wrangler` path), read the way wrangler
+reads it: the `env.<name>` block named like the env if there is one (or
+`wranglerEnv`), else the top level. Each route's host maps to the account zone
+it sits in, so a route added to wrangler shows up as drift on the next plan,
+and a host in none of the account's zones fails the plan. An env can still
+spell out `worker` and `zones` instead; `zones: []` grants none, e.g. for a
+Worker Preview token, which deploys no routes.
+
+### Where the secret goes
+
+By default each env's token goes into an environment secret,
+`CLOUDFLARE_API_TOKEN` in the GitHub environment named like the env. Only
+jobs with `environment: <env>` read it, so the environment's deployment
+branch policy (`main` only for `prod`) is what keeps a pull request job from
+reading the prod token. That is the recommended shape: one deploy job for
+`main` with `environment: prod`, one for pull requests with
+`environment: preview`.
+
+```ts
+envs: [
+    { env: 'prod' },                // Worker and zones from wrangler.jsonc
+    { env: 'preview', zones: [] },  // Worker Previews: same Worker, no routes
+],
+```
+
+A repo that deploys without environments sets `secret: 'repo'` on one env: its
+token goes into the repository secret, which every job reads. Only one env
+per repo can do that. When every env uses environments, a plan reports a
+leftover repository `CLOUDFLARE_API_TOKEN` (a pre-voidflow token that jobs
+without an environment still deploy with), and `--prune` deletes it along
+with the `retire` tokens.
+
+A Worker Preview runs on the same Worker as prod, so unless Cloudflare grows a
+preview-only permission, the preview token can deploy to prod too. Keeping it
+in its own environment still scopes and rotates it on its own.
 
 The targets need `CF_TOKEN_ADMIN`: a user-owned token (account-owned tokens
 reach only their own account) that includes every account in the config, with
@@ -85,12 +121,13 @@ just cf-tokens-plan                 # read-only: diff every repo's tokens agains
 just cf-tokens-plan --check         # exit 1 on drift or a token within 14 days of expiry
 just cf-tokens-apply                # create/update, rotate tokens due, set CLOUDFLARE_API_TOKEN per env
 just cf-tokens-apply --rotate       # rotate every token now
-just cf-tokens-apply --prune        # also delete the old tokens a repo lists under `retire`
+just cf-tokens-apply --prune        # also delete `retire` tokens and a leftover repo-wide secret
 just cf-tokens-groups               # live names of the permission group ids the config uses
 ```
 
-New values go straight from the API into `gh secret set CLOUDFLARE_API_TOKEN
---env <env>` and are never printed. A rotation creates the new token, sets the
+A plan needs `gh` as well as `CF_TOKEN_ADMIN`: it reads each repo's wrangler
+config and secret names. New values go straight from the API into `gh secret
+set` and are never printed. A rotation creates the new token, sets the
 secret, then deletes the old token, so a deploy in between still works. If
 the secret can't be set, the new token is deleted again. A run that stops
 partway can leave two tokens with one name, and nothing says which one GitHub
@@ -104,13 +141,13 @@ Limits worth knowing:
 - Custom Domains do not support per-Worker roles yet. If a deploy fails on the
   domain with only the zone grant, add `fallback: { reason, since }` to that
   env. Its token then also gets account-wide Workers Scripts Write, every plan
-  prints it, and `apply` sets the env variable `CF_TOKEN_FALLBACK`. Pass that
-  to the deploy action so every deploy warns:
+  prints it, and `apply` sets the variable `CF_TOKEN_FALLBACK` next to the
+  secret. Pass that to the deploy action so every deploy warns:
 
   ```yaml
   - uses: taraxvoid/voidflow/actions/cloudflare-deploy@<sha> # <version>
     with:
-      env: ${{ needs.resolve-env.outputs.env }}
+      env: prod
       cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       token-fallback: ${{ vars.CF_TOKEN_FALLBACK }}
   ```
@@ -128,15 +165,12 @@ export `REPOS` (or a default) of the same shape, and passes them with
 
 ```ts
 // cf-tokens.ts in the org's own repo
-const DEV = '<dev account id>' // dev and staging
-const PROD = '<prod account id>'
-
 export const REPOS = {
     'example-org/site': {
-        account: PROD,
+        account: '<account id>',
         envs: [
-            { env: 'dev', worker: 'site-dev', zones: [], account: DEV },
-            { env: 'prod', worker: 'site', zones: ['example.com'] },
+            { env: 'prod' }, // env.prod in its wrangler.jsonc, else the top level
+            { env: 'preview', zones: [] },
         ],
         retire: [],
     },

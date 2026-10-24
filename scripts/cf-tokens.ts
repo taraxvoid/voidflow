@@ -16,10 +16,14 @@
  * exporting `REPOS` (or a default) of the same shape (see scripts/lib/config.ts).
  *
  * Needs CF_TOKEN_ADMIN: a user-owned token covering every account in the
- * config (envs can sit in different accounts, e.g. dev/staging apart from
- * prod), with Account API Tokens Edit, Workers Scripts Read (Worker tags) and
- * Zone Read (zone ids) on each. Keep it local; never put it in CI. GitHub writes go through the `gh` CLI. New token values are piped
- * straight into `gh secret set` and never printed.
+ * config (envs can sit in different accounts),
+ * with Account API Tokens Edit, Workers Scripts Read (Worker tags) and Zone
+ * Read (zone ids) on each. Keep it local; never put it in CI.
+ *
+ * GitHub goes through the `gh` CLI, with admin on the repos: even a plan reads
+ * each repo's wrangler config (for envs that don't spell out worker and zones)
+ * and its repo-wide secret names. New token values are piped straight into
+ * `gh secret set` and never printed.
  */
 import { parseArgs } from 'node:util'
 import { loadOrExit } from './lib/config.ts'
@@ -34,6 +38,7 @@ import {
     plan,
     policies,
     repoAccounts,
+    resolveTarget,
     retireTargets,
     tokenName,
     type Action,
@@ -65,7 +70,11 @@ if (!ADMIN) {
 
 const API = 'https://api.cloudflare.com/client/v4'
 
-async function cf<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function cfRaw<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+): Promise<{ result: T; result_info?: { total_pages?: number; total_count?: number } }> {
     const res = await fetch(`${API}${path}`, {
         method,
         headers: {
@@ -78,25 +87,41 @@ async function cf<T>(method: string, path: string, body?: unknown): Promise<T> {
         success: boolean
         errors?: Array<{ code: number; message: string }>
         result: T
+        result_info?: { total_pages?: number; total_count?: number }
     }
     if (!json.success) {
         const why = (json.errors ?? []).map((e) => `${e.code} ${e.message}`)
         throw new Error(`${method} ${path}: ${res.status} ${why.join('; ')}`)
     }
-    return json.result
+    return json
 }
 
-/** Every page of a list endpoint. */
+async function cf<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return (await cfRaw<T>(method, path, body)).result
+}
+
+/**
+ * Every page of a list endpoint, going by `result_info` (total_pages, else
+ * total_count). Without either the endpoint is taken as unpaged: one that
+ * ignores `page` would return its whole list on every page, forever.
+ */
 async function cfAll<T>(path: string): Promise<T[]> {
     const out: T[] = []
     for (let page = 1; ; page++) {
         const sep = path.includes('?') ? '&' : '?'
-        const batch = await cf<T[]>(
+        const { result, result_info } = await cfRaw<T[]>(
             'GET',
             `${path}${sep}per_page=50&page=${page}`,
         )
-        out.push(...batch)
-        if (batch.length < 50) return out
+        out.push(...result)
+        const info = result_info ?? {}
+        const done =
+            info.total_pages !== undefined
+                ? page >= info.total_pages
+                : info.total_count !== undefined
+                  ? out.length >= info.total_count || result.length === 0
+                  : true
+        if (done) return out
     }
 }
 
@@ -156,57 +181,96 @@ const now = new Date()
 let pending = 0
 let failed = 0
 
-async function lookups(acct: string, env: EnvConfig) {
-    const scripts = await cfAll<{ id: string; tag: string }>(
-        `/accounts/${acct}/workers/scripts`,
+/** Per-account lists every env in that account shares, fetched once. */
+const memo = <T>(load: (key: string) => Promise<T>) => {
+    const seen = new Map<string, Promise<T>>()
+    return (key: string) => {
+        if (!seen.has(key)) seen.set(key, load(key))
+        return seen.get(key) as Promise<T>
+    }
+}
+const scriptsIn = memo((acct) =>
+    cfAll<{ id: string; tag: string }>(`/accounts/${acct}/workers/scripts`),
+)
+const zonesIn = memo((acct) =>
+    cfAll<{ id: string; name: string }>(`/zones?account.id=${acct}`),
+)
+/** A repo's wrangler config on its default branch, parsed. Key: repo:path. */
+const wranglerAt = memo(async (key) => {
+    const [repo, path] = key.split(':')
+    const text = await gh([
+        'api',
+        `repos/${repo}/contents/${path}`,
+        '-H',
+        'Accept: application/vnd.github.raw',
+    ])
+    return path.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)
+})
+
+/** The env's Worker and zones, and the ids its policies reference them by. */
+async function lookups(repo: string, acct: string, env: EnvConfig) {
+    const zones = await zonesIn(acct)
+    const wrangler =
+        env.worker && env.zones
+            ? undefined
+            : await wranglerAt(`${repo}:${env.wrangler ?? 'wrangler.jsonc'}`)
+    const t = resolveTarget(
+        env,
+        wrangler,
+        zones.map((z) => z.name),
     )
-    const script = scripts.find((s) => s.id === env.worker)
+    const script = (await scriptsIn(acct)).find((s) => s.id === t.worker)
     if (!script) {
         // Per-Worker grants apply only to Workers that exist; creating one
         // needs product-level Workers Admin, which no deploy token gets.
         throw new Error(
-            `Worker "${env.worker}" does not exist in account ${acct} yet: deploy it once with an admin token, then re-run`,
+            `Worker "${t.worker}" does not exist in account ${acct} yet: deploy it once with an admin token, then re-run`,
         )
     }
     const zoneIds: Record<string, string> = {}
-    for (const name of env.zones) {
-        const [zone] = await cf<Array<{ id: string }>>(
-            'GET',
-            `/zones?name=${encodeURIComponent(name)}&account.id=${acct}`,
-        )
-        if (!zone) {
-            throw new Error(`zone ${name} not found in account ${acct}`)
-        }
+    for (const name of t.zones) {
+        const zone = zones.find((z) => z.name === name)
+        if (!zone) throw new Error(`zone ${name} not found in account ${acct}`)
         zoneIds[name] = zone.id
     }
-    return { scriptTag: script.tag, zoneIds }
+    return { target: t, ids: { scriptTag: script.tag, zoneIds } }
 }
 
-async function setSecret(repo: string, env: string, value: string) {
-    await gh(
-        ['secret', 'set', 'CLOUDFLARE_API_TOKEN', '--env', env, '-R', repo],
-        value,
-    )
+/** `gh` flags for where an env's secret and variable live. */
+const scope = (repo: string, env: EnvConfig) =>
+    env.secret === 'repo' ? ['-R', repo] : ['--env', env.env, '-R', repo]
+
+const scopeLabel = (repo: string, env: EnvConfig) =>
+    env.secret === 'repo' ? `${repo} (repo-wide)` : `${repo} env ${env.env}`
+
+async function setSecret(repo: string, env: EnvConfig, value: string) {
+    await gh(['secret', 'set', 'CLOUDFLARE_API_TOKEN', ...scope(repo, env)], value)
 }
 
-/** Mirror the config's fallback into the env variable the deploy action reads. */
+/** Mirror the config's fallback into the variable the deploy action reads. */
 async function syncFallbackVar(repo: string, env: EnvConfig) {
-    const where = ['--env', env.env, '-R', repo]
     if (env.fallback) {
         const body = `${env.fallback.reason} (since ${env.fallback.since})`
-        await gh(['variable', 'set', 'CF_TOKEN_FALLBACK', ...where, '--body', body])
+        await gh([
+            'variable',
+            'set',
+            'CF_TOKEN_FALLBACK',
+            ...scope(repo, env),
+            '--body',
+            body,
+        ])
     } else {
         // Not set is the normal case: nothing to delete.
-        await gh(['variable', 'delete', 'CF_TOKEN_FALLBACK', ...where]).catch(
+        await gh(['variable', 'delete', 'CF_TOKEN_FALLBACK', ...scope(repo, env)]).catch(
             () => {},
         )
     }
 }
 
 /**
- * Mint a token and put its value in the repo's env secret. If the secret
- * can't be set, delete the new token again, so a token with this name only
- * outlives the call once GitHub holds it.
+ * Mint a token and put its value in the env's secret. If the secret can't be
+ * set, delete the new token again, so a token with this name only outlives
+ * the call once GitHub holds it.
  */
 async function createAndSet(
     repo: string,
@@ -221,7 +285,7 @@ async function createAndSet(
         { name, policies: want, expires_on: expiresOn(now) },
     )
     try {
-        await setSecret(repo, env.env, t.value)
+        await setSecret(repo, env, t.value)
     } catch (e) {
         await cf('DELETE', `/accounts/${acct}/tokens/${t.id}`).catch(
             (d: Error) =>
@@ -255,7 +319,7 @@ async function act(
     switch (a.kind) {
         case 'create': {
             const t = await createAndSet(repo, acct, env, name, want)
-            console.log(`  created ${t.id}, secret set in ${repo} env ${env.env}`)
+            console.log(`  created ${t.id}, secret set in ${scopeLabel(repo, env)}`)
             return
         }
         case 'update':
@@ -288,7 +352,10 @@ async function run(
 ) {
     const acct = envAccount(cfg, env)
     const name = tokenName(repo, env.env)
-    const want = policies(cfg, env, await lookups(acct, env))
+    const { target, ids } = await lookups(repo, acct, env)
+    const want = policies(cfg, env, ids, target.zones)
+    const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
+    console.log(`  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`)
     // The list endpoint omits policies; fetch each match in full.
     const have = await Promise.all(
         (tokens.get(acct) ?? [])
@@ -323,8 +390,14 @@ for (const repo of repos) {
             console.error(`  x ${env.env}: ${(e as Error).message}`)
         }
     }
-    // Retire old tokens only once every env, in every account, has its
-    // replacement.
+    // Retire old tokens (and a shadowed repo secret) only once every env, in
+    // every account, has its replacement.
+    const note = !values.prune
+        ? ' (needs --prune)'
+        : envsOk
+          ? ''
+          : ' (skipped: an env failed above)'
+    const prune = values.apply && values.prune && envsOk
     const old = retireTargets(cfg).flatMap(({ account, name }) =>
         (tokens.get(account) ?? [])
             .filter((t) => t.name === name)
@@ -332,15 +405,26 @@ for (const repo of repos) {
     )
     for (const { account, t } of old) {
         pending++
-        const note = !values.prune
-            ? ' (needs --prune)'
-            : envsOk
-              ? ''
-              : ' (skipped: an env failed above)'
         console.log(`- retire "${t.name}" (${t.id})${note}`)
-        if (values.apply && values.prune && envsOk) {
+        if (prune) {
             await cf('DELETE', `/accounts/${account}/tokens/${t.id}`)
             console.log('  deleted')
+        }
+    }
+    // With every env's secret in an environment, a repo-wide one is a
+    // pre-voidflow leftover: environment jobs never read it, and any job
+    // without an environment that still does is deploying with an old token.
+    if (!cfg.envs.some((e) => e.secret === 'repo')) {
+        const repoSecrets = await gh(['secret', 'list', '-R', repo, '--json', 'name', '-q', '.[].name'])
+        if (repoSecrets.split('\n').includes('CLOUDFLARE_API_TOKEN')) {
+            pending++
+            console.log(
+                `- repo-wide secret CLOUDFLARE_API_TOKEN: every env's is in an environment; jobs without one still read this${note}`,
+            )
+            if (prune) {
+                await gh(['secret', 'delete', 'CLOUDFLARE_API_TOKEN', '-R', repo])
+                console.log('  deleted')
+            }
         }
     }
 }
