@@ -6,6 +6,7 @@ node_modules/
 .env.*
 .env.fish
 !.env.example
+fnox.local.toml
 
 # Editor / bots
 .poolside/

@@ -433,20 +433,13 @@ Account API Tokens Edit, Workers Scripts Read and Zone Read on each, a short
 expiry and an IP filter. Adding a repo in a new account means adding that
 account to this token. It can mint
 deploy tokens, so it stays on a maintainer's machine and never goes into CI.
-[fnox](https://github.com/jdx/fnox) supplies it: the committed
-[`fnox.toml`](fnox.toml) declares the secret and a provider name, `cf-admin`,
-but no value. Each maintainer defines that provider in
-`~/.config/fnox/config.toml`. On macOS the Keychain needs nothing installed:
-
-```toml
-[providers.cf-admin]
-type = "keychain"
-service = "fnox"
-```
-
-Then store the value once with `fnox set -k voidflow-cf-token-admin
-CF_TOKEN_ADMIN` (it prompts with hidden input), and confirm with `just doctor`.
-Any other fnox provider works too (age, 1Password, `pass`...). If
+[fnox](https://github.com/jdx/fnox) (installed by `mise install`) supplies
+it: the committed [`fnox.toml`](fnox.toml) declares the secret, but no value,
+and a `cf-admin` provider backed by the macOS Keychain. Store the value once
+with `fnox set -k voidflow-cf-token-admin CF_TOKEN_ADMIN` (it prompts with
+hidden input), and confirm with `just doctor`. To use another fnox provider
+(age, 1Password, `pass`...), redefine `[providers.cf-admin]` in a gitignored
+`fnox.local.toml` at the repo root (one per checkout or worktree). If
 `CF_TOKEN_ADMIN` is already in the environment, the targets use it and skip
 fnox.
 
