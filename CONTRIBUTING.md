@@ -91,8 +91,11 @@ just cf-tokens-groups               # live names of the permission group ids the
 
 New values go straight from the API into `gh secret set CLOUDFLARE_API_TOKEN
 --env <env>` and are never printed. A rotation creates the new token, sets the
-secret, then deletes the old token, so a deploy in between still works. Policy
-drift is fixed in place without changing the value.
+secret, then deletes the old token, so a deploy in between still works. If
+the secret can't be set, the new token is deleted again. A run that stops
+partway can leave two tokens with one name, and nothing says which one GitHub
+holds, so the next run rotates: a fresh token into the secret, then both old
+ones deleted. Policy drift is fixed in place without changing the value.
 
 Limits worth knowing:
 

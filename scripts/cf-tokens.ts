@@ -203,12 +203,35 @@ async function syncFallbackVar(repo: string, env: EnvConfig) {
     }
 }
 
-function create(acct: string, name: string, want: Policy[]) {
-    return cf<Token & { value: string }>(
+/**
+ * Mint a token and put its value in the repo's env secret. If the secret
+ * can't be set, delete the new token again, so a token with this name only
+ * outlives the call once GitHub holds it.
+ */
+async function createAndSet(
+    repo: string,
+    acct: string,
+    env: EnvConfig,
+    name: string,
+    want: Policy[],
+) {
+    const t = await cf<Token & { value: string }>(
         'POST',
         `/accounts/${acct}/tokens`,
         { name, policies: want, expires_on: expiresOn(now) },
     )
+    try {
+        await setSecret(repo, env.env, t.value)
+    } catch (e) {
+        await cf('DELETE', `/accounts/${acct}/tokens/${t.id}`).catch(
+            (d: Error) =>
+                console.error(
+                    `  x could not delete ${t.id} after the failed secret write; the next run rotates it away: ${d.message}`,
+                ),
+        )
+        throw e
+    }
+    return t
 }
 
 async function act(
@@ -225,14 +248,13 @@ async function act(
         return
     }
     pending++
-    const sign = { create: '+', update: '~', rotate: '@', delete: '-' }[a.kind]
+    const sign = { create: '+', update: '~', rotate: '@' }[a.kind]
     console.log(`${sign} ${a.kind} ${label}: ${a.reason}`)
     if (!values.apply) return
     const path = `/accounts/${acct}/tokens`
     switch (a.kind) {
         case 'create': {
-            const t = await create(acct, name, want)
-            await setSecret(repo, env.env, t.value)
+            const t = await createAndSet(repo, acct, env, name, want)
             console.log(`  created ${t.id}, secret set in ${repo} env ${env.env}`)
             return
         }
@@ -246,17 +268,15 @@ async function act(
             console.log('  updated (value unchanged)')
             return
         case 'rotate': {
-            // New token, then the secret, then delete the old token, so a
-            // deploy in between still has a working token.
-            const t = await create(acct, name, want)
-            await setSecret(repo, env.env, t.value)
-            await cf('DELETE', `${path}/${a.token.id}`)
-            console.log(`  rotated ${a.token.id} to ${t.id}, secret set`)
+            // New token, then the secret, then delete the old ones, so a
+            // deploy in between still has a working token. A stop before the
+            // deletes leaves duplicates, which the next plan rotates away.
+            const t = await createAndSet(repo, acct, env, name, want)
+            for (const old of a.tokens) await cf('DELETE', `${path}/${old.id}`)
+            const ids = a.tokens.map((o) => o.id).join(', ')
+            console.log(`  rotated ${ids} to ${t.id}, secret set`)
             return
         }
-        case 'delete':
-            await cf('DELETE', `${path}/${a.token.id}`)
-            console.log('  deleted')
     }
 }
 

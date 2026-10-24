@@ -174,15 +174,24 @@ describe('plan', () => {
         )
     })
 
-    test('keeps the latest-expiring duplicate and deletes the rest', () => {
+    test('a rotation replaces the token it found', () => {
+        const [a] = plan(want, [token({ id: 'old' })], now, { rotate: true })
+        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual(['old'])
+    })
+
+    // Either duplicate may be the one in the GitHub secret (a stop between
+    // create and secret write leaves the newer one unused), so neither is
+    // kept: a fresh token goes into the secret, then both are deleted.
+    test('rotates away duplicates instead of guessing which one is live', () => {
         const old = token({ id: 'old', expires_on: expiresOn(now, 30) })
         const fresh = token({ id: 'new' })
         const acts = plan(want, [old, fresh], now)
-        expect(
-            acts.map((a) => [a.kind, 'token' in a ? a.token.id : '']),
-        ).toEqual([
-            ['delete', 'old'],
-            ['ok', 'new'],
+        expect(acts).toHaveLength(1)
+        const [a] = acts
+        expect(a.kind).toBe('rotate')
+        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
+            'old',
+            'new',
         ])
     })
 })

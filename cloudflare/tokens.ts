@@ -268,8 +268,8 @@ export function normalise(ps: Policy[]): string {
 export type Action =
     | { kind: 'create'; reason: string }
     | { kind: 'update'; token: Token; reason: string }
-    | { kind: 'rotate'; token: Token; reason: string }
-    | { kind: 'delete'; token: Token; reason: string }
+    /** Create a replacement, set the secret, then delete every `tokens`. */
+    | { kind: 'rotate'; tokens: Token[]; reason: string }
     | { kind: 'ok'; token: Token }
 
 const daysLeft = (iso: string, now: Date) =>
@@ -277,8 +277,9 @@ const daysLeft = (iso: string, now: Date) =>
 
 /**
  * What to do for one env's token. `have` is every account token with the
- * env's name; more than one means a rotation was interrupted, so keep the
- * latest-expiring one and delete the rest.
+ * env's name. More than one means a rotation stopped between creating a token
+ * and deleting the old one, and nothing says which value the GitHub secret
+ * holds, so rotate: once the secret has a fresh value, all of them are unused.
  */
 export function plan(
     want: Policy[],
@@ -287,15 +288,17 @@ export function plan(
     opts: { rotate?: boolean } = {},
 ): Action[] {
     if (have.length === 0) return [{ kind: 'create', reason: 'missing' }]
-    const [keep, ...extra] = [...have].sort((a, b) =>
-        (b.expires_on ?? '').localeCompare(a.expires_on ?? ''),
-    )
-    const out: Action[] = extra.map((token) => ({
-        kind: 'delete',
-        token,
-        reason: 'duplicate (interrupted rotation?)',
-    }))
-    const left = keep.expires_on ? daysLeft(keep.expires_on, now) : null
+    if (have.length > 1) {
+        return [
+            {
+                kind: 'rotate',
+                tokens: have,
+                reason: `${have.length} tokens (interrupted rotation?)`,
+            },
+        ]
+    }
+    const [token] = have
+    const left = token.expires_on ? daysLeft(token.expires_on, now) : null
     if (opts.rotate || left === null || left < RENEW_DAYS) {
         // The replacement is created with the wanted policies, so a rotation
         // also fixes any drift.
@@ -306,11 +309,10 @@ export function plan(
               : left < 0
                 ? 'expired'
                 : `expires in ${Math.floor(left)}d`
-        out.push({ kind: 'rotate', token: keep, reason: why })
-    } else if (normalise(keep.policies) !== normalise(want)) {
-        out.push({ kind: 'update', token: keep, reason: 'policies differ' })
-    } else {
-        out.push({ kind: 'ok', token: keep })
+        return [{ kind: 'rotate', tokens: [token], reason: why }]
     }
-    return out
+    if (normalise(token.policies) !== normalise(want)) {
+        return [{ kind: 'update', token, reason: 'policies differ' }]
+    }
+    return [{ kind: 'ok', token }]
 }
