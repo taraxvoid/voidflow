@@ -123,11 +123,20 @@ export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
 
 export const REPOS: Record<string, RepoConfig> = {
     // One custom domain, no D1/R2/KV: the smallest real deploy, so the first
-    // shakedown. Worker and zone come from its wrangler.jsonc.
+    // shakedown. Worker and zone come from its wrangler.jsonc. Shaken down
+    // 2026-10: the zone grant was enough for its custom domain (no fallback).
     'taraxvoid/transbot': {
         account: TARAXVOID,
         envs: [{ env: 'prod' }],
         retire: ['transbot-deploy-token'],
+    },
+    // The first migration: a KV namespace bound by id, custom domains on two
+    // zones, and its old token in a repo-wide secret (reported by the plan,
+    // deleted with --prune).
+    'taraxvoid/taraxvoid.net': {
+        account: TARAXVOID,
+        envs: [{ env: 'prod' }],
+        retire: [],
     },
 }
 
