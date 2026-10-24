@@ -21,8 +21,11 @@ function site(config: object, files: Record<string, string>): string {
     return dir
 }
 
+// Run Biome's launcher with this Bun rather than its `#!/usr/bin/env node`
+// shebang: on a fresh CI runner the first exec of the image's Node can take
+// over 5s and time the first test out.
 function check(dir: string, ...files: string[]) {
-    const proc = Bun.spawnSync([biome, 'check', ...files], { cwd: dir })
+    const proc = Bun.spawnSync([process.execPath, biome, 'check', ...files], { cwd: dir })
     return { code: proc.exitCode, out: proc.stdout.toString() + proc.stderr.toString() }
 }
 
