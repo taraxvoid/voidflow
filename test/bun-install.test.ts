@@ -64,8 +64,8 @@ describe('site-ci.yml carries the same install script as actions/bun-install', (
     })
 
     test('the inlined bun step only runs for bun; pnpm has its own install', () => {
-        expect(siteCiSteps.find((s: any) => s.id === 'install').if).toBe("inputs.package-manager == 'bun'")
-        const pnpm = siteCiSteps.find((s: any) => s.if === "inputs.package-manager == 'pnpm'" && /pnpm install/.test(s.run ?? ''))
+        expect(siteCiSteps.find((s: any) => s.id === 'install').if).toBe("steps.decide.outputs.validate == 'true' && inputs.package-manager == 'bun'")
+        const pnpm = siteCiSteps.find((s: any) => s.if === "steps.decide.outputs.validate == 'true' && inputs.package-manager == 'pnpm'" && /pnpm install/.test(s.run ?? ''))
         expect(pnpm).toBeDefined()
     })
 

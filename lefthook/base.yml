@@ -29,6 +29,9 @@ pre-commit:
   commands:
     deps-installed:
       priority: 1
+      # Every later step is skipped while node_modules is missing (the
+      # no-deps skip anchor on biome-version), so this message is the only output instead of a pile
+      # of 'command not found' failures.
       run: |
         if [ ! -d node_modules ]; then
           echo "pre-commit: 'node_modules' is missing, dependencies aren't installed."
@@ -36,6 +39,8 @@ pre-commit:
           exit 1
         fi
     biome-version:
+      skip: &no-deps
+        - run: test ! -d node_modules
       priority: 2
       # Advisory only: Biome 1.x can't extend the shared config
       # (@taraxvoid/voidflow/biome), so nudge the repo toward 2.x.
@@ -49,13 +54,16 @@ pre-commit:
         esac
         exit 0
     format:
+      skip: *no-deps
       priority: 2
       run: "{pm} run --if-present format"
       stage_fixed: true
     lint-actions:
+      skip: *no-deps
       priority: 3
       run: "{pm} run --if-present lint:actions"
     typecheck:
+      skip: *no-deps
       priority: 3
       # A repo that can check less than everything pre-commit (e.g. only the
       # workspace packages a commit touches) defines `check:precommit`;
@@ -67,6 +75,7 @@ pre-commit:
           {pm} run --if-present check
         fi
     unit:
+      skip: *no-deps
       priority: 3
       # A repo that can't run its whole suite pre-commit (e.g. tests that need
       # a built dist/) defines `test:unit:precommit`; otherwise test:unit runs.
@@ -78,10 +87,12 @@ pre-commit:
           {pm} run --if-present test:unit
         fi
     licenses:
+      skip: *no-deps
       priority: 3
       glob: "{package.json,bun.lock,pnpm-lock.yaml}"
       run: "{pm} run --if-present check:licenses"
     audit:
+      skip: *no-deps
       # Local only: hits a remote vulnerability database and can hang offline,
       # so it runs when dependencies changed and fails closed.
       priority: 3

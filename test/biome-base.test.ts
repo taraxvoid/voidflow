@@ -5,12 +5,15 @@ import { join } from 'node:path'
 
 const repo = new URL('..', import.meta.url).pathname
 const biome = join(repo, 'node_modules/.bin/biome')
+// Drop inherited GIT_* vars: inside a git hook GIT_DIR points at the real
+// repo, and `git init` would reinitialise it instead of the temp dir.
+const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
 
 // A throwaway site that depends on voidflow and extends the base by package
 // name, the way a real site does.
 function site(config: object, files: Record<string, string>): string {
     const dir = mkdtempSync(join(tmpdir(), 'voidflow-biome-'))
-    Bun.spawnSync(['git', 'init', '-q'], { cwd: dir })
+    Bun.spawnSync(['git', 'init', '-q'], { cwd: dir, env })
     mkdirSync(join(dir, 'node_modules/@taraxvoid'), { recursive: true })
     symlinkSync(repo, join(dir, 'node_modules/@taraxvoid/voidflow'))
     writeFileSync(join(dir, '.gitignore'), 'node_modules\n')
@@ -21,8 +24,11 @@ function site(config: object, files: Record<string, string>): string {
     return dir
 }
 
+// Run Biome's launcher with this Bun rather than its `#!/usr/bin/env node`
+// shebang: on a fresh CI runner the first exec of the image's Node can take
+// over 5s and time the first test out.
 function check(dir: string, ...files: string[]) {
-    const proc = Bun.spawnSync([biome, 'check', ...files], { cwd: dir })
+    const proc = Bun.spawnSync([process.execPath, biome, 'check', ...files], { cwd: dir })
     return { code: proc.exitCode, out: proc.stdout.toString() + proc.stderr.toString() }
 }
 
