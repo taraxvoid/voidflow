@@ -1,5 +1,4 @@
-# Contributor tools for this repo. `mise install`, then `bun install` (its
-# prepare script wires the lefthook hooks). Renovate bumps these.
+# `mise install`, then `bun install` (prepare adds lefthook hooks). Renovate bumps these.
 [tools]
 just = "1.58.0"
 lefthook = "2.2.1"
