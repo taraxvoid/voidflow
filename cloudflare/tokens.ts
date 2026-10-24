@@ -136,7 +136,7 @@ export const REPOS: Record<string, RepoConfig> = {
     'taraxvoid/taraxvoid.net': {
         account: TARAXVOID,
         envs: [{ env: 'prod' }],
-        retire: [],
+        retire: ['taraxvoid-dot-net'],
     },
 }
 
