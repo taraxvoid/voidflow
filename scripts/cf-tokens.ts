@@ -10,6 +10,8 @@
  *   bun scripts/cf-tokens.ts --apply --rotate   # ...and rotate every token now
  *   bun scripts/cf-tokens.ts --apply --prune    # ...and delete the repo's `retire` tokens
  *   bun scripts/cf-tokens.ts --groups           # live names of the permission group ids used
+ *   bun scripts/cf-tokens.ts --repo transbot --try prod -- bunx wrangler deploy
+ *                                               # run a command with a throwaway token scoped like prod's
  *   bun scripts/cf-tokens.ts --config ../infra/cf-tokens.ts   # another fleet's config
  *
  * The config is REPOS in cloudflare/tokens.ts unless --config names a module
@@ -48,16 +50,18 @@ import {
     type Token,
 } from '../cloudflare/tokens.ts'
 
-const { values } = parseArgs({
+const { values, positionals } = parseArgs({
     options: {
         apply: { type: 'boolean', default: false },
         rotate: { type: 'boolean', default: false },
         prune: { type: 'boolean', default: false },
         check: { type: 'boolean', default: false },
         groups: { type: 'boolean', default: false },
+        try: { type: 'string' },
         repo: { type: 'string' },
         config: { type: 'string' },
     },
+    allowPositionals: true,
 })
 
 const REPOS = await loadOrExit(values.config, BUILTIN, checkRepos)
@@ -308,7 +312,8 @@ async function act(
 ) {
     const label = `${env.env} "${name}"`
     if (a.kind === 'ok') {
-        console.log(`  ok ${label}, expires ${a.token.expires_on}`)
+        const used = a.token.last_used_on ?? 'never'
+        console.log(`  ok ${label}, expires ${a.token.expires_on}, last used ${used}`)
         return
     }
     pending++
@@ -372,6 +377,62 @@ async function run(
     }
     if (values.apply) await syncFallbackVar(repo, env)
 }
+
+// ---- --try ------------------------------------------------------------------
+
+/**
+ * Run a command (a deploy, say) with a throwaway token that has exactly the
+ * env's policies, to prove they are enough before CI depends on them. The
+ * real token's value only exists in GitHub, so a local deploy can't use it,
+ * and a shell holding a wider token would hide a missing grant. The child gets
+ * the throwaway token as CLOUDFLARE_API_TOKEN, with CF_TOKEN_ADMIN removed,
+ * runs in the directory `just` was run from, and the token is deleted after
+ * (it expires within the hour regardless).
+ */
+async function tryEnv(envName: string, cmd: string[]) {
+    if (repos.length !== 1 || cmd.length === 0) {
+        console.error('--try needs one --repo, an env, and a command after --')
+        process.exit(2)
+    }
+    const [repo] = repos
+    const cfg = REPOS[repo]
+    const env = cfg.envs.find((e) => e.env === envName)
+    if (!env) {
+        console.error(`${repo} has no env ${envName}`)
+        process.exit(2)
+    }
+    const acct = envAccount(cfg, env)
+    const { target, ids } = await lookups(repo, acct, env)
+    const expires = new Date(now.getTime() + 3_600_000)
+    const t = await cf<Token & { value: string }>('POST', `/accounts/${acct}/tokens`, {
+        name: `${tokenName(repo, env.env)}:try`,
+        policies: policies(cfg, env, ids, target.zones),
+        expires_on: `${expires.toISOString().slice(0, 19)}Z`,
+    })
+    const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
+    console.log(`try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`)
+    let code = 1
+    try {
+        const childEnv: Record<string, string | undefined> = {
+            ...process.env,
+            CLOUDFLARE_API_TOKEN: t.value,
+            CLOUDFLARE_ACCOUNT_ID: acct,
+        }
+        delete childEnv.CF_TOKEN_ADMIN
+        const proc = Bun.spawn(cmd, {
+            cwd: process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
+            env: childEnv,
+            stdio: ['inherit', 'inherit', 'inherit'],
+        })
+        code = await proc.exited
+    } finally {
+        await cf('DELETE', `/accounts/${acct}/tokens/${t.id}`)
+        console.log(`try ${t.id} deleted; the command exited ${code}`)
+    }
+    process.exit(code)
+}
+
+if (values.try !== undefined) await tryEnv(values.try, positionals)
 
 for (const repo of repos) {
     const cfg = REPOS[repo]

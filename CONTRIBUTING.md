@@ -125,6 +125,21 @@ just cf-tokens-apply --prune        # also delete `retire` tokens and a leftover
 just cf-tokens-groups               # live names of the permission group ids the config uses
 ```
 
+The plan prints when each token was last used, so a CI deploy shows up there.
+To prove a token's policies are enough before CI depends on them, run the
+deploy with a throwaway token that has the same policies. From the site's
+checkout:
+
+```sh
+just -f ../voidflow/justfile cf-tokens-try transbot prod bunx wrangler deploy
+```
+
+The real token can't be used locally (its value only exists in GitHub), and
+a shell holding a wider token (an admin token, `wrangler login`) would hide a
+missing grant. The command gets the throwaway token as `CLOUDFLARE_API_TOKEN`,
+with `CF_TOKEN_ADMIN` removed, and the token is deleted afterwards (it
+expires within the hour regardless).
+
 A plan needs `gh` as well as `CF_TOKEN_ADMIN`: it reads each repo's wrangler
 config and secret names. New values go straight from the API into `gh secret
 set` and are never printed. A rotation creates the new token, sets the

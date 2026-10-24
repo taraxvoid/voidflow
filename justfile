@@ -118,6 +118,10 @@ cf-tokens-apply *args:
 cf-tokens-groups *args:
     {{ cf_tokens }} --groups {{ args }}
 
+# Run a command from here with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try transbot prod bunx wrangler deploy`
+cf-tokens-try repo env +cmd:
+    {{ cf_tokens }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
+
 # Open the next -> main promotion PR, set to auto-merge with a merge commit
 promote:
     #!/usr/bin/env bash

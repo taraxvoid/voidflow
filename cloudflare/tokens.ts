@@ -87,6 +87,7 @@ export type Token = {
     status?: string
     policies: Array<Policy & { id?: string }>
     expires_on?: string | null
+    last_used_on?: string | null
 }
 
 export const TAG = 'voidflow'
