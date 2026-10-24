@@ -305,7 +305,9 @@ Needs Biome 2. In the site's `biome.json`:
 
 The base sets formatting (4-space indent, width 80, single quotes, semicolons
 as needed), the `recommended` rules, and turns off unused-import/variable rules
-in `.astro` files. It has no ignore lists. Lists like `files.includes` and
+in `.astro` files. HTML formatting uses `whitespaceSensitivity: "strict"`, so
+the formatter never drops a space at the edge of an element's text (such as
+`<a href="/x">docs </a>and`). It has no ignore lists. Lists like `files.includes` and
 `overrides` merge with the base; single values in the site win.
 
 ## Renovate
