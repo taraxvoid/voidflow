@@ -54,6 +54,10 @@ just rulesets-apply --prune         # also delete rulesets listed under `retire`
 Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.
 
+The `Ruleset drift` workflow runs `--check` weekly and on PRs touching
+`rulesets/`, with the plan in the job summary. It is read-only; applying stays
+a manual `just rulesets-apply`.
+
 ## Cloudflare deploy tokens as code
 
 [`cloudflare/tokens.ts`](cloudflare/tokens.ts) holds the config shape and the

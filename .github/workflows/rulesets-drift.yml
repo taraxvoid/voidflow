@@ -1,0 +1,83 @@
+name: Ruleset drift
+
+# Runs `scripts/apply-rulesets.ts --check` (read-only) and puts the plan in the
+# job summary. Red means a managed repo's branch rulesets differ from
+# rulesets/index.ts: someone edited one by hand, or the config changed and was
+# not applied (`just rulesets-apply`). Never applies or prunes from CI.
+#
+# Weekly, on demand, and on PRs that touch the config so a change shows its
+# plan before merge. A PR that changes rulesets/ is expected to show drift
+# until it merges and is applied, so read the summary rather than the colour.
+#
+# Reading rulesets on the other repos needs a token with `administration: read`
+# on them; GITHUB_TOKEN is scoped to this repo only. This uses the read-only
+# `drifter` App (DRIFTER_CLIENT_ID variable / DRIFTER_APP_PRIVATE_KEY secret,
+# org-level). It needs only Administration (read) and must be installed on every
+# repo listed below, or the token step fails. Keep that list in step with REPOS
+# in rulesets/index.ts.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "rulesets/**"
+      - "scripts/apply-rulesets.ts"
+      - "scripts/lib/config.ts"
+      - ".github/workflows/rulesets-drift.yml"
+
+permissions: {}
+
+concurrency:
+  group: rulesets-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check rulesets
+    # Secrets are not available to PRs from forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DRIFTER_CLIENT_ID }}
+          private-key: ${{ secrets.DRIFTER_APP_PRIVATE_KEY }}
+          owner: taraxvoid
+          repositories: |
+            queeromaha
+            soundry
+            synthomaha
+            taraxvoid.net
+            voidflow
+          permission-administration: read
+
+      - name: Diff rulesets against rulesets/index.ts
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          status=0
+          bun scripts/apply-rulesets.ts --check > plan.txt 2>&1 || status=$?
+          cat plan.txt
+          {
+            echo '## Ruleset plan'
+            echo
+            echo '```'
+            cat plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
