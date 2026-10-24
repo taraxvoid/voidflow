@@ -10,8 +10,9 @@ name: Ruleset drift
 # until it merges and is applied, so read the summary rather than the colour.
 #
 # Reading rulesets on the other repos needs a token with `administration: read`
-# on them; GITHUB_TOKEN is scoped to this repo only. This reuses the release
-# bot App, so its installation must be granted Administration (read) on every
+# on them; GITHUB_TOKEN is scoped to this repo only. This uses the read-only
+# `drifter` App (DRIFTER_CLIENT_ID variable / DRIFTER_APP_PRIVATE_KEY secret,
+# org-level). It needs only Administration (read) and must be installed on every
 # repo listed below, or the token step fails. Keep that list in step with REPOS
 # in rulesets/index.ts.
 on:
@@ -53,8 +54,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.DRIFTER_CLIENT_ID }}
+          private-key: ${{ secrets.DRIFTER_APP_PRIVATE_KEY }}
           owner: taraxvoid
           repositories: |
             queeromaha
