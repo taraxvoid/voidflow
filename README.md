@@ -227,7 +227,9 @@ jobs:
 
 - `actions/cloudflare-deploy`: `wrangler deploy` for the environment, with an
   optional D1 migration first (`migrate-d1`). Other inputs:
-  `cloudflare-account-id`, `working-directory`, `command`.
+  `cloudflare-account-id`, `working-directory`, `command`, and
+  `token-fallback` (warns on every deploy while the repo's token uses the
+  account-wide fallback, see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 - `actions/netlify-deploy`: `prod` is a production deploy, `dev`/`staging` are
   alias deploys. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
   `netlify-site-id`, `working-directory`, `github-token`. Turn off Netlify's
@@ -373,8 +375,7 @@ Upgrading from `lefthook/site.yml` (v0.13 and earlier): change `configs` to
 ## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),
-[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org),
-[ravenflight.io](https://ravenflight.io).
+[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org).
 
 Optional badge for your README (follows light/dark mode):
 

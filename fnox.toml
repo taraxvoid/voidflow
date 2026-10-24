@@ -1,0 +1,12 @@
+# Secrets the repo tooling needs, declared without their values (fnox:
+# https://github.com/jdx/fnox, installed by mise). `cf-admin` defaults to the
+# macOS Keychain; to use another backend (age, a password manager...), redefine
+# [providers.cf-admin] in a gitignored fnox.local.toml. See README "Cloudflare
+# deploy tokens as code". Nothing here is secret.
+
+[providers.cf-admin]
+type = "keychain"
+service = "fnox"
+
+[secrets]
+CF_TOKEN_ADMIN= { provider = "cf-admin", value = "voidflow-cf-token-admin", description = "User-owned Cloudflare token for just cf-tokens-*, covering every account in cloudflare/tokens.ts: Account API Tokens Edit, Workers Scripts Read, Zone Read. Local only, never CI.", if_missing = "error" }
