@@ -9,4 +9,4 @@ type = "keychain"
 service = "fnox"
 
 [secrets]
-CF_TOKEN_ADMIN = { provider = "cf-admin", value = "voidflow-cf-token-admin", description = "User-owned Cloudflare token for just cf-tokens-*, covering every account in cloudflare/tokens.ts: Account API Tokens Edit, Workers Scripts Read, Zone Read. Local only, never CI.", if_missing = "error" }
+CF_TOKEN_ADMIN= { provider = "cf-admin", value = "voidflow-cf-token-admin", description = "User-owned Cloudflare token for just cf-tokens-*, covering every account in cloudflare/tokens.ts: Account API Tokens Edit, Workers Scripts Read, Zone Read. Local only, never CI.", if_missing = "error" }
