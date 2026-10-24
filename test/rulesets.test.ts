@@ -1,5 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { NETLIFY, REPOS, build, desired, diff, isPlanGated, normalise, tool } from '../rulesets/index.ts'
+import {
+    NETLIFY,
+    REPOS,
+    build,
+    checkFleet,
+    desired,
+    diff,
+    isPlanGated,
+    normalise,
+    tool,
+    type Fleet,
+    type Ruleset,
+} from '../rulesets/index.ts'
 
 const statusChecks = (r: ReturnType<typeof build>) =>
     (
@@ -57,7 +69,7 @@ describe('canonical rulesets', () => {
 
 describe('normalise', () => {
     test('ignores the dismissal_restriction default that org-owned repos echo back', () => {
-        const want = build('main', REPOS['ravenflight/ravenflight.io'])
+        const want = build('main', REPOS['taraxvoid/queeromaha'])
         const have = structuredClone(want)
         const pr = have.rules.find((x) => x.type === 'pull_request')
         if (pr?.parameters) pr.parameters.dismissal_restriction = { enabled: false, allowed_actors: [] }
@@ -145,6 +157,97 @@ describe('voidflow release channels', () => {
 
     test('voidflow manages main, prerelease and maintenance', () => {
         expect(cfg.tiers).toEqual(['main', 'prerelease', 'maintenance'])
+    })
+})
+
+describe('raw rulesets (another fleet, --config)', () => {
+    const live: Ruleset = {
+        name: 'prod (live)',
+        target: 'branch',
+        enforcement: 'active',
+        conditions: {
+            ref_name: {
+                include: ['refs/heads/live', 'refs/heads/promote/*'],
+                exclude: [],
+            },
+        },
+        bypass_actors: [
+            { actor_id: null, actor_type: 'OrganizationAdmin', bypass_mode: 'always' },
+        ],
+        rules: [
+            { type: 'deletion' },
+            {
+                type: 'required_deployments',
+                parameters: { required_deployment_environments: ['staging'] },
+            },
+        ],
+    }
+    const fleet: Fleet = {
+        'example-org/site': { rulesets: [live], retire: ['old'] },
+        'taraxvoid/voidflow': REPOS['taraxvoid/voidflow'],
+    }
+
+    test('are wanted verbatim, never adopted under another name', () => {
+        expect(desired('example-org/site', fleet)).toEqual([
+            { ruleset: live, aka: [] },
+        ])
+    })
+
+    test('tiered repos in the same fleet still build from tiers', () => {
+        expect(desired('taraxvoid/voidflow', fleet)).toEqual(
+            desired('taraxvoid/voidflow'),
+        )
+    })
+
+    test("show no drift against GitHub's copy, extra fields and order aside", () => {
+        const fromApi = {
+            ...live,
+            id: 1,
+            source: 'example-org/site',
+            node_id: 'x',
+            rules: [...live.rules].reverse(),
+        }
+        expect(diff(normalise(fromApi), normalise(live))).toEqual([])
+    })
+
+    test('checkFleet accepts the built-in config and raw rulesets', () => {
+        expect(checkFleet(REPOS)).toEqual(REPOS)
+        expect(checkFleet(fleet)).toEqual(fleet)
+    })
+
+    test("checkFleet fills a tiered repo's missing fields from tool()", () => {
+        expect(checkFleet({ 'a/b': {} })['a/b']).toEqual(tool())
+        expect(checkFleet({ 'a/b': { netlify: true } })['a/b']).toEqual(
+            tool({ netlify: true }),
+        )
+    })
+
+    test('checkFleet names every problem by its path', () => {
+        let msg = ''
+        try {
+            checkFleet({
+                nope: { rulesets: [], retire: [] },
+                'a/b': { rulesets: [{ name: '', rules: {} }] },
+                'a/c': { ...REPOS['taraxvoid/voidflow'], tiers: ['main', 'dev'] },
+                'a/d': { checks: 'validate', codeowners: 'yes' },
+                'a/e': { linearhistory: false },
+            })
+        } catch (e) {
+            msg = (e as Error).message
+        }
+        for (const want of [
+            '"nope": key is not owner/name',
+            '"a/b".rulesets[0].name: missing',
+            '"a/b".rulesets[0].conditions.ref_name.include: not a list',
+            '"a/b".rulesets[0].rules: not a list',
+            '"a/b".retire: not a list',
+            '"a/c".tiers[1]: unknown tier "dev"',
+            '"a/d".checks: not a list',
+            '"a/d".codeowners: not a boolean',
+            '"a/e".linearhistory: unknown field',
+        ]) {
+            expect(msg).toContain(want)
+        }
     })
 })
 

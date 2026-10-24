@@ -165,6 +165,38 @@ jobs:
 
 The required status check is `validate / Validate`.
 
+## Code scanning (SARIF)
+
+`site-ci.yml` and `tool-ci.yml` write gitleaks and zizmor results as SARIF
+and keep them as the `voidflow-sarif` artifact (7 days). gitleaks still fails
+the job on a finding; the zizmor SARIF run scans every workflow and never
+fails the job (the zizmor gate in `tool-ci.yml` is unchanged). Both steps run
+after a failure too, so the findings that failed a run are the ones uploaded.
+
+`upload-sarif.yml` sends them to code scanning, which is what voidlight
+counts. It is a separate workflow because it needs `security-events: write`,
+and a reusable workflow can't ask for more than its caller grants: adding it to
+the validate workflows would break every caller that doesn't. Add a second job:
+
+```yaml
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
+  sarif:
+    needs: validate
+    if: ${{ !cancelled() && needs.validate.result != 'skipped' }}
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    uses: taraxvoid/voidflow/.github/workflows/upload-sarif.yml@<sha> # vX.Y.Z
+```
+
+Each tool uploads under its own category (`gitleaks`, `zizmor`), so a later
+run closes only that tool's fixed alerts. gitleaks SARIF is redacted.
+Code scanning is free on public repositories; private ones need GitHub Code
+Security, without which the upload step fails.
+
 ## Deploys
 
 `resolve-env.yml` maps the branch to an environment: `main` to `dev`, `next`
@@ -195,7 +227,9 @@ jobs:
 
 - `actions/cloudflare-deploy`: `wrangler deploy` for the environment, with an
   optional D1 migration first (`migrate-d1`). Other inputs:
-  `cloudflare-account-id`, `working-directory`, `command`.
+  `cloudflare-account-id`, `working-directory`, `command`, and
+  `token-fallback` (warns on every deploy while the repo's token uses the
+  account-wide fallback, see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 - `actions/netlify-deploy`: `prod` is a production deploy, `dev`/`staging` are
   alias deploys. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
   `netlify-site-id`, `working-directory`, `github-token`. Turn off Netlify's
@@ -343,8 +377,7 @@ Upgrading from `lefthook/site.yml` (v0.13 and earlier): change `configs` to
 ## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),
-[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org),
-[ravenflight.io](https://ravenflight.io).
+[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org).
 
 Optional badge for your README (follows light/dark mode):
 
