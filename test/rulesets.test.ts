@@ -77,6 +77,16 @@ describe('normalise', () => {
     })
 })
 
+describe('normalise without bypass_actors', () => {
+    test('a read-only API response (no bypass_actors) neither throws nor drifts when bypass is skipped', () => {
+        const want = build('main', REPOS['taraxvoid/queeromaha'])
+        const have = structuredClone(want) as Partial<Ruleset>
+        delete have.bypass_actors
+        const opts = { bypass: false }
+        expect(diff(normalise(have as Ruleset, opts), normalise(want, opts))).toEqual([])
+    })
+})
+
 describe('diff', () => {
     test('is empty for the same ruleset in a different order', () => {
         const a = build('next', REPOS['taraxvoid/queeromaha'])

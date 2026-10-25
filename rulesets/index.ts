@@ -338,7 +338,7 @@ export function checkFleet(x: unknown): Fleet {
 // ---- normalisation + diff -------------------------------------------------
 
 /** Order-insensitive canonical form so GitHub's ordering never shows as drift. */
-export function normalise(r: Ruleset): unknown {
+export function normalise(r: Ruleset, opts: { bypass?: boolean } = {}): unknown {
     const sortBy = <T>(xs: T[], key: (x: T) => string) =>
         [...xs].sort((a, b) => key(a).localeCompare(key(b)))
     return {
@@ -346,10 +346,17 @@ export function normalise(r: Ruleset): unknown {
         target: r.target,
         enforcement: r.enforcement,
         conditions: r.conditions,
-        bypass_actors: sortBy(
-            r.bypass_actors,
-            (a) => `${a.actor_type}:${a.actor_id}:${a.bypass_mode}`,
-        ),
+        // GitHub omits bypass_actors from tokens without write access to the
+        // repo (the read-only drift App), so the caller can drop the field
+        // from both sides rather than report it as drift.
+        ...(opts.bypass === false
+            ? {}
+            : {
+                  bypass_actors: sortBy(
+                      r.bypass_actors,
+                      (a) => `${a.actor_type}:${a.actor_id}:${a.bypass_mode}`,
+                  ),
+              }),
         rules: sortBy(r.rules, (x) => x.type).map((rule) => {
             const p = rule.parameters as any
             if (rule.type === 'required_status_checks' && p) {
