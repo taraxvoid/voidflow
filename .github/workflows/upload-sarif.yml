@@ -1,0 +1,65 @@
+name: Upload SARIF
+
+# Uploads the gitleaks and zizmor SARIF that site-ci.yml and tool-ci.yml keep
+# as the `voidflow-sarif` artifact, so findings show up in code scanning (and
+# in voidlight's counts) instead of only failing a run.
+#
+# A separate workflow because uploading needs `security-events: write`: a
+# reusable workflow can't ask for more than its caller grants, so adding it to
+# site-ci/tool-ci would break every caller that doesn't grant it. Opt in by
+# adding a second job to the caller:
+#
+#   sarif:
+#     needs: validate
+#     if: ${{ !cancelled() && needs.validate.result != 'skipped' }}
+#     permissions:
+#       contents: read
+#       actions: read
+#       security-events: write
+#     uses: taraxvoid/voidflow/.github/workflows/upload-sarif.yml@<sha> # <version>
+#
+# Code scanning is free on public repositories; private ones need GitHub Code
+# Security, without which the upload fails.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label. Defaults to a GitHub-hosted runner.
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  upload:
+    name: Upload SARIF
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    steps:
+      - name: Fetch SARIF
+        id: fetch
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        # A validate run that stopped before keeping SARIF leaves nothing to upload.
+        continue-on-error: true
+        with:
+          name: voidflow-sarif
+          path: sarif
+
+      # One category per tool, so each upload replaces only its own results.
+      - name: Upload gitleaks
+        if: ${{ steps.fetch.outcome == 'success' && hashFiles('sarif/gitleaks.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: sarif/gitleaks.sarif
+          category: gitleaks
+
+      - name: Upload zizmor
+        if: ${{ steps.fetch.outcome == 'success' && hashFiles('sarif/zizmor.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: sarif/zizmor.sarif
+          category: zizmor

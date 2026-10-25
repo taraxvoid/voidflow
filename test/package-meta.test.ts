@@ -6,6 +6,7 @@ const pkg = JSON.parse(read('package.json'))
 
 describe('package.json', () => {
     test('has good keywords', () => {
+        expect(pkg.keywords).not.toContain('astro')
         for (const k of ['lefthook', 'renovate', 'bun']) expect(pkg.keywords).toContain(k)
     })
 

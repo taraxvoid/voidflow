@@ -144,7 +144,10 @@ jobs:
             "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${tarball}"
           echo "${sha}  $RUNNER_TEMP/$tarball" | sha256sum -c -
           tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" gitleaks
-          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose .
+          # Redacted SARIF for upload-sarif.yml; the scan still fails on findings.
+          mkdir -p "$RUNNER_TEMP/sarif"
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --verbose \
+            --report-format sarif --report-path "$RUNNER_TEMP/sarif/gitleaks.sarif" .
         shell: bash
 
       - name: Check package manager
@@ -448,3 +451,29 @@ jobs:
           path: |
             playwright-report/
             test-results/
+
+      # SARIF for upload-sarif.yml. Runs after failures too, so findings that
+      # failed this job still reach code scanning. zizmor scans every workflow
+      # (not just changed ones) because code scanning closes any alert missing
+      # from the next upload; with --format sarif it never fails the job.
+      - name: Setup uv (SARIF)
+        if: ${{ !cancelled() }}
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: zizmor SARIF
+        if: ${{ !cancelled() && hashFiles('.github/workflows/*.yml', '.github/workflows/*.yaml') != '' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/sarif"
+          uvx zizmor@1.30.1 --format sarif .github > "$RUNNER_TEMP/sarif/zizmor.sarif"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Keep SARIF
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: voidflow-sarif
+          path: ${{ runner.temp }}/sarif/*.sarif
+          if-no-files-found: ignore
+          retention-days: 7

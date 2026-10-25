@@ -8,7 +8,7 @@
 
 export type BypassActor = {
     actor_id: number | null
-    actor_type: 'RepositoryRole' | 'Integration' | 'DeployKey'
+    actor_type: 'RepositoryRole' | 'Integration' | 'DeployKey' | 'OrganizationAdmin'
     bypass_mode: 'always' | 'pull_request'
 }
 
@@ -76,6 +76,21 @@ export type RepoConfig = {
     retire: string[]
 }
 
+/**
+ * A repo whose rulesets are spelled out in full instead of built from tiers,
+ * for fleets whose protection doesn't fit the tier model (see `--config`).
+ */
+export type RawConfig = {
+    rulesets: Ruleset[]
+    /** As in RepoConfig: names to delete with --prune. */
+    retire: string[]
+}
+
+export type Fleet = Record<string, RepoConfig | RawConfig>
+
+const isRaw = (cfg: RepoConfig | RawConfig): cfg is RawConfig =>
+    'rulesets' in cfg
+
 // Reported by both site-ci.yml and tool-ci.yml when the caller job is `validate`.
 const VALIDATE_CHECK = 'validate / Validate'
 
@@ -128,15 +143,6 @@ export const REPOS: Record<string, RepoConfig> = {
     // Deploys to Cloudflare through voidflow, so no Netlify check and no
     // deploy app bypass. Private, so skipped until rulesets are available.
     'taraxvoid/taraxvoid.net': site({ netlify: false }),
-    // Trunk-based: one main deployed to Cloudflare through voidflow (PR previews,
-    // prod environment gate). Its old next/live rulesets are retired at cutover.
-    'ravenflight/ravenflight.io': site({
-        netlify: false,
-        codeowners: false,
-        mergeQueue: true,
-        aka: { main: ['main (dev)'] },
-        retire: ['staging (next)', 'prod (live)'],
-    }),
     'taraxvoid/voidflow': {
         // main (stable), next (prerelease channel), release/* (maintenance).
         // See RELEASING.md. Promotion next -> main uses merge commits, so no
@@ -146,6 +152,7 @@ export const REPOS: Record<string, RepoConfig> = {
         checks: ['Validation', 'Unit tests'],
         codeowners: false,
         linearHistory: false,
+        mergeQueue: false,
         bypass: {},
         aka: { main: ['main/prod'] },
         retire: [],
@@ -267,13 +274,89 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
 }
 
 /** Every ruleset we want, per repo, with the names it may already have. */
-export function desired(repo: string): Array<{ ruleset: Ruleset; aka: string[] }> {
-    const cfg = REPOS[repo]
+export function desired(
+    repo: string,
+    fleet: Fleet = REPOS,
+): Array<{ ruleset: Ruleset; aka: string[] }> {
+    const cfg = fleet[repo]
     if (!cfg) throw new Error(`unknown repo ${repo}`)
+    if (isRaw(cfg)) return cfg.rulesets.map((ruleset) => ({ ruleset, aka: [] }))
     return cfg.tiers.map((tier) => ({
         ruleset: build(tier, cfg),
         aka: cfg.aka[tier] ?? [],
     }))
+}
+
+// ---- config from elsewhere ------------------------------------------------
+
+const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
+
+/**
+ * Check an untyped fleet (another repo's `--config` module) and throw with
+ * every problem, by path. A tiered repo may leave out any field: it gets
+ * `tool()`'s value, so a field added to RepoConfig later defaults for configs
+ * written before it. A field that is given must have the default's type, and
+ * an unknown one (likely a typo) is an error. Returns the filled-in fleet.
+ */
+export function checkFleet(x: unknown): Fleet {
+    const isObj = (v: unknown): v is Record<string, any> =>
+        typeof v === 'object' && v !== null && !Array.isArray(v)
+    const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
+    const strList = (v: unknown) => Array.isArray(v) && v.every(isStr)
+    if (!isObj(x)) throw new Error('config is not an object of repos')
+    const errs: string[] = []
+    const bad = (path: string, why: string) => errs.push(`${path}: ${why}`)
+    const kind = (v: unknown) =>
+        Array.isArray(v) ? 'list' : isObj(v) ? 'object' : typeof v
+    const defaults: Record<string, unknown> = tool()
+    const out: Fleet = {}
+    for (const [repo, cfg] of Object.entries(x)) {
+        const at = JSON.stringify(repo)
+        if (!/^[^/\s]+\/[^/\s]+$/.test(repo)) bad(at, 'key is not owner/name')
+        if (!isObj(cfg)) {
+            bad(at, 'not an object')
+            continue
+        }
+        if ('rulesets' in cfg) {
+            out[repo] = cfg as RawConfig
+            if (!strList(cfg.retire)) bad(`${at}.retire`, 'not a list')
+            if (!Array.isArray(cfg.rulesets)) {
+                bad(`${at}.rulesets`, 'not a list')
+                continue
+            }
+            for (const [i, r] of cfg.rulesets.entries()) {
+                const rs = `${at}.rulesets[${i}]`
+                if (!isObj(r)) {
+                    bad(rs, 'not an object')
+                    continue
+                }
+                if (!isStr(r.name)) bad(`${rs}.name`, 'missing')
+                if (!strList(r.conditions?.ref_name?.include))
+                    bad(`${rs}.conditions.ref_name.include`, 'not a list')
+                if (!Array.isArray(r.bypass_actors))
+                    bad(`${rs}.bypass_actors`, 'not a list')
+                if (!Array.isArray(r.rules) || !r.rules.every((u: any) => isStr(u?.type)))
+                    bad(`${rs}.rules`, 'not a list')
+            }
+            continue
+        }
+        for (const k of Object.keys(cfg)) {
+            if (!(k in defaults)) bad(`${at}.${k}`, 'unknown field')
+        }
+        const full = { ...defaults, ...cfg }
+        for (const [k, d] of Object.entries(defaults)) {
+            if (kind(full[k]) !== kind(d)) bad(`${at}.${k}`, `not a ${kind(d)}`)
+        }
+        for (const k of ['checks', 'retire'])
+            if (Array.isArray(full[k]) && !strList(full[k]))
+                bad(`${at}.${k}`, 'not a list of names')
+        for (const [i, t] of (Array.isArray(full.tiers) ? full.tiers : []).entries()) {
+            if (!TIERS.includes(t)) bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
+        }
+        out[repo] = full as RepoConfig
+    }
+    if (errs.length) throw new Error(errs.join('\n'))
+    return out
 }
 
 // ---- normalisation + diff -------------------------------------------------
