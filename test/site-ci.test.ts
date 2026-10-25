@@ -24,9 +24,12 @@ describe('site-ci.yml job shape', () => {
         expect(validateStep('Secrets Scan')).toBeDefined()
     })
 
+    // The trailing SARIF steps are the exception: they belong to the scan, so a
+    // docs-only PR still keeps its gitleaks and zizmor SARIF (see tool-ci.test.ts).
     test('every step after decide is gated on it, so a docs-only PR stops after the scan', () => {
         const ids = validate.steps.map((s: any) => s.id)
-        const after = validate.steps.slice(ids.indexOf('decide') + 1)
+        const after = validate.steps.slice(ids.indexOf('decide') + 1, -3)
+        expect(validate.steps.slice(-3).map((s: any) => s.name)).toEqual(['Setup uv (SARIF)', 'zizmor SARIF', 'Keep SARIF'])
         expect(after.length).toBeGreaterThan(10)
         for (const s of after) expect(s.if).toContain(GATE)
     })
