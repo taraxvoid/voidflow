@@ -1,75 +1,28 @@
 # voidflow
 
-Shared CI, deploy and repo config for web sites and bun tools. It natively
-supports deployments on Netlify and Cloudflare Workers, and is
-framework-agnostic: any site that exposes the expected `package.json` scripts
-works. bun is the default package manager; pnpm is supported. Playwright and
-Astro defaults are opt-in extras.
+Get a flow state with `voidflow` - handling security, CI/CD, common configs for Typescript projects.
 
-4 sites use it, 253 tests cover it, and it has shipped 27 stable releases.
+Expects the caller to expose `package.json` scripts like `test:e2e:all` or `test:unit` - skipped if they don't exist.
 
-```mermaid
-flowchart LR
-  subgraph caller["Site repo"]
-    ci["ci.yml"]
-    renovate["Renovate config"]
-    hooks["lefthook.yml"]
-    pkg["package.json scripts"]
-  end
-  subgraph voidflow["voidflow"]
-    siteci["site-ci.yml"]
-    subgraph actions["Composite actions"]
-      bi["bun-install"]
-      bem["branch-env-map"]
-      cf["cloudflare-deploy"]
-      nl["netlify-deploy"]
-    end
-    subgraph npm["npm / JSR package"]
-      pw["Playwright config"]
-      cl["check-licenses"]
-      ul["unlighthouse-runner"]
-    end
-    preset["Renovate preset"]
-    remote["lefthook remote"]
-    rp["release-please<br/>(main, next, release/N.x)"]
-  end
-  ci --> siteci
-  siteci --> bi
-  ci --> bem
-  bem --> cf
-  bem --> nl
-  pkg --> pw
-  pkg --> cl
-  pkg --> ul
-  renovate --> preset
-  hooks --> remote
-  rp -. "tags and publishes" .-> npm
-  rp -. "tags" .-> siteci
-```
+Provides sane defaults for Biome, Renovate, Astro, Playwright, and package age/security requirements.
 
-| Piece | What it does |
-|---|---|
-| [`site-ci.yml`](#site-ci) | Lint, typecheck, build, unit, license, Playwright, axe and Unlighthouse for sites |
-| [`tool-ci.yml`](#tool-ci) | gitleaks, lint, typecheck, build, test, workflow audit for bun tools |
-| [`resolve-env.yml`, deploy actions](#deploys) | Map branch to environment, deploy to Cloudflare or Netlify |
-| [`unlighthouse-runner`, `check-licenses`](#npm-package) | Performance budgets and copyleft license check (npm bins) |
-| [`@taraxvoid/voidflow/playwright`](#playwright-config) | Playwright config for `astro preview` |
-| [`@taraxvoid/voidflow/biome`](#biome) | Shared Biome config |
-| [`github>taraxvoid/voidflow`](#renovate) | Shared Renovate preset |
-| [`lefthook/base.yml`](#git-hooks) | Shared git hooks |
+Supports `bun` and `pnpm` packages 
 
-## Pinning
+Exposes composite GitHub Actions and easy-mode Validate/Deploy targets, currently supporting Netlify and Cloudflare Workers.
 
-Pin to a release commit SHA with the version in a comment, like any
-third-party action. Renovate and Dependabot can bump it.
+# Usage
+
+Point your `ci.yaml` to 
+
+## Package versioning / pinning
+
+Use a `vX.Y.Z` tag or pin to a specific version of `voidflow`
 
 ```yaml
 uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
 ```
 
-`@v0` follows the newest stable 0.x release if you'd rather float. To try
-unreleased changes, pin the SHA of a `vX.Y.Z-next.N` tag. Don't use `@main` or
-`@next`. Release channels are described in [`RELEASING.md`](RELEASING.md).
+Canary releases live at the `vX.Y.Z-next.N` tag. See [`RELEASING.md`](RELEASING.md) for more information.
 
 ## Site CI
 
@@ -118,10 +71,8 @@ Pull requests outside `code-paths` skip install, lint and tests but still pass
 
 ### pnpm and aube
 
-pnpm takes its version from `packageManager` and Node from `volta` or
-`engines`. aube needs the site's `mise.toml` to pin it (`aube = "<version>"`),
-then follows `packageManager` and takes Node from `devEngines.runtime`. Both
-use `pnpm-lock.yaml`.
+pnpm takes its version from `packageManager` and Node from `engines`. aube needs the site's `mise.toml` to pin it (`aube = "<version>"`),
+then follows `packageManager` and takes Node from `devEngines.runtime`. Both use `pnpm-lock.yaml`.
 
 ### Single-environment sites
 
