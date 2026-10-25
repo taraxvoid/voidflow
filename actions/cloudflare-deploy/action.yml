@@ -28,8 +28,11 @@ inputs:
       bypasses the redirect and deploys an assets-only Worker.
     default: ''
   migrate-d1:
-    description: If 'true', run 'bun run db:migrate:<env>' before deploying.
+    description: If 'true', run '<package-manager> run db:migrate:<env>' before deploying.
     default: 'false'
+  package-manager:
+    description: "Package manager that runs the D1 migration script: 'bun', 'pnpm' or 'aube'."
+    default: bun
   token-fallback:
     description: >
       Pass vars.CF_TOKEN_FALLBACK. Set by 'just cf-tokens-apply' when the
@@ -64,7 +67,13 @@ runs:
         CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
         CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
         ENV_NAME: ${{ inputs.env }}
-      run: bun run "db:migrate:$ENV_NAME"
+        PM: ${{ inputs.package-manager }}
+      run: |
+        case "$PM" in
+          bun | pnpm | aube) ;;
+          *) echo "::error::package-manager must be 'bun', 'pnpm' or 'aube', got '$PM'" >&2; exit 1 ;;
+        esac
+        "$PM" run "db:migrate:$ENV_NAME"
 
     - id: resolve-command
       shell: bash
