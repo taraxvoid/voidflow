@@ -2,7 +2,7 @@
 
 Shared CI, deploy and repo config for Astro sites on Cloudflare Workers or
 Netlify, and for bun tools and libraries. Defaults assume bun, Astro and
-Playwright; pnpm is supported.
+Playwright; pnpm and aube are supported.
 
 | Piece | What it does |
 |---|---|
@@ -226,8 +226,8 @@ jobs:
 ```
 
 - `actions/cloudflare-deploy`: `wrangler deploy` for the environment, with an
-  optional D1 migration first (`migrate-d1`). Other inputs:
-  `cloudflare-account-id`, `working-directory`, `command`, and
+  optional D1 migration first (`migrate-d1`, run with `package-manager`:
+  `bun`, `pnpm` or `aube`). Other inputs: `cloudflare-account-id`, `working-directory`, `command`, and
   `token-fallback` (warns on every deploy while the repo's token uses the
   account-wide fallback, see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 - `actions/netlify-deploy`: `prod` is a production deploy, `dev`/`staging` are
@@ -327,7 +327,8 @@ grouped updates, Monday mornings. It also bumps the lefthook remote `ref`, and
 
 ## Git hooks
 
-Shared lefthook hooks for bun or pnpm repos. Each step runs the repo's own
+Shared lefthook hooks for bun, pnpm or aube repos (aube is detected from
+`packageManager` in `package.json`). Each step runs the repo's own
 `package.json` script and is skipped if the script is missing.
 
 - `pre-commit`: dependency guard, `format` (re-staged), `lint:actions`,

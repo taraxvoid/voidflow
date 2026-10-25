@@ -43,7 +43,8 @@ describe('lefthook/base.yml', () => {
 
     test('picks the package manager from the lockfile instead of hardcoding bun', async () => {
         const text = await Bun.file(config).text()
-        expect(text).toContain('pnpm-lock.yaml ]; then echo pnpm; else echo bun')
+        expect(text).toContain('then echo aube; elif [ -f pnpm-lock.yaml ]; then echo pnpm; else echo bun')
+        expect(text).toContain("grep -q 'packageManager.*aube@' package.json")
         expect(text).not.toMatch(/\bbun run\b/)
     })
 
