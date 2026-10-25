@@ -22,4 +22,8 @@ pre-push:
     zizmor:
       run: just security
     test:
-      run: bun test
+      # Git exports GIT_DIR, GIT_INDEX_FILE and others to hooks; clear them so
+      # tests that run git in temp repos can't touch this one.
+      run: |
+        unset $(git rev-parse --local-env-vars)
+        bun test

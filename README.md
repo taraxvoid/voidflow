@@ -1,8 +1,51 @@
 # voidflow
 
-Shared CI, deploy and repo config for Astro sites on Cloudflare Workers or
-Netlify, and for bun tools and libraries. Defaults assume bun, Astro and
-Playwright; pnpm is supported.
+Shared CI, deploy and repo config for web sites and bun tools. It natively
+supports deployments on Netlify and Cloudflare Workers, and is
+framework-agnostic: any site that exposes the expected `package.json` scripts
+works. bun is the default package manager; pnpm is supported. Playwright and
+Astro defaults are opt-in extras.
+
+4 sites use it, 253 tests cover it, and it has shipped 27 stable releases.
+
+```mermaid
+flowchart LR
+  subgraph caller["Site repo"]
+    ci["ci.yml"]
+    renovate["Renovate config"]
+    hooks["lefthook.yml"]
+    pkg["package.json scripts"]
+  end
+  subgraph voidflow["voidflow"]
+    siteci["site-ci.yml"]
+    subgraph actions["Composite actions"]
+      bi["bun-install"]
+      bem["branch-env-map"]
+      cf["cloudflare-deploy"]
+      nl["netlify-deploy"]
+    end
+    subgraph npm["npm / JSR package"]
+      pw["Playwright config"]
+      cl["check-licenses"]
+      ul["unlighthouse-runner"]
+    end
+    preset["Renovate preset"]
+    remote["lefthook remote"]
+    rp["release-please<br/>(main, next, release/N.x)"]
+  end
+  ci --> siteci
+  siteci --> bi
+  ci --> bem
+  bem --> cf
+  bem --> nl
+  pkg --> pw
+  pkg --> cl
+  pkg --> ul
+  renovate --> preset
+  hooks --> remote
+  rp -. "tags and publishes" .-> npm
+  rp -. "tags" .-> siteci
+```
 
 | Piece | What it does |
 |---|---|
@@ -150,6 +193,38 @@ jobs:
 
 The required status check is `validate / Validate`.
 
+## Code scanning (SARIF)
+
+`site-ci.yml` and `tool-ci.yml` write gitleaks and zizmor results as SARIF
+and keep them as the `voidflow-sarif` artifact (7 days). gitleaks still fails
+the job on a finding; the zizmor SARIF run scans every workflow and never
+fails the job (the zizmor gate in `tool-ci.yml` is unchanged). Both steps run
+after a failure too, so the findings that failed a run are the ones uploaded.
+
+`upload-sarif.yml` sends them to code scanning, which is what voidlight
+counts. It is a separate workflow because it needs `security-events: write`,
+and a reusable workflow can't ask for more than its caller grants: adding it to
+the validate workflows would break every caller that doesn't. Add a second job:
+
+```yaml
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
+  sarif:
+    needs: validate
+    if: ${{ !cancelled() && needs.validate.result != 'skipped' }}
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    uses: taraxvoid/voidflow/.github/workflows/upload-sarif.yml@<sha> # vX.Y.Z
+```
+
+Each tool uploads under its own category (`gitleaks`, `zizmor`), so a later
+run closes only that tool's fixed alerts. gitleaks SARIF is redacted.
+Code scanning is free on public repositories; private ones need GitHub Code
+Security, without which the upload step fails.
+
 ## Deploys
 
 `actions/branch-env-map` maps `main` to `prod` and pull requests to `preview`;
@@ -178,7 +253,9 @@ requests, each gated with an `if:`.
 - `actions/cloudflare-deploy`: `wrangler deploy --env <env>`, with an optional
   D1 migration first (`migrate-d1`). `preview` needs a matching env block in the
   wrangler config, or pass `command` to deploy previews another way. Other
-  inputs: `cloudflare-account-id`, `working-directory`.
+  inputs: `cloudflare-account-id`, `working-directory`, and `token-fallback`
+  (warns on every deploy while the repo's token uses the account-wide
+  fallback, see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 - `actions/netlify-deploy`: `prod` is a production deploy, anything else (e.g.
   `preview`) is an alias deploy. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
   `netlify-site-id`, `working-directory`, `github-token`. Turn off Netlify's
@@ -253,7 +330,9 @@ Needs Biome 2. In the site's `biome.json`:
 
 The base sets formatting (4-space indent, width 80, single quotes, semicolons
 as needed), the `recommended` rules, and turns off unused-import/variable rules
-in `.astro` files. It has no ignore lists. Lists like `files.includes` and
+in `.astro` files. HTML formatting uses `whitespaceSensitivity: "strict"`, so
+the formatter never drops a space at the edge of an element's text (such as
+`<a href="/x">docs </a>and`). It has no ignore lists. Lists like `files.includes` and
 `overrides` merge with the base; single values in the site win.
 
 ## Renovate
@@ -323,8 +402,7 @@ Upgrading from `lefthook/site.yml` (v0.13 and earlier): change `configs` to
 ## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),
-[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org),
-[ravenflight.io](https://ravenflight.io).
+[Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org).
 
 Optional badge for your README (follows light/dark mode):
 

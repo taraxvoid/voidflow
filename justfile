@@ -87,14 +87,43 @@ doctor:
     @command -v lefthook >/dev/null && echo "lefthook:  $(lefthook version)" || echo "lefthook:  NOT FOUND (needed to run git hooks - run 'just doctor' then 'lefthook install')"
     @command -v gitleaks >/dev/null && echo "gitleaks:  $(gitleaks version)" || echo "gitleaks:  NOT FOUND (needed for 'just lint')"
     @command -v act >/dev/null && echo "act:  $(act --version)" || echo "act:  NOT FOUND (needed for local dry-run - not a blocker to commit/push)"
+    @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (run 'mise install'; holds CF_TOKEN_ADMIN for 'just cf-tokens-*')"
+    @command -v fnox >/dev/null && { fnox check >/dev/null 2>&1 && echo "CF_TOKEN_ADMIN:  resolvable via fnox" || echo "CF_TOKEN_ADMIN:  not resolvable (run 'fnox check'; see README)"; } || true
+
+# So a relative --config (another repo's fleet map) resolves from where `just`
+# was run, not this directory. See scripts/lib/config.ts.
+config_base := "env VOIDFLOW_CONFIG_BASE=" + quote(invocation_directory())
 
 # Show how each repo's branch rulesets differ from rulesets/index.ts (read-only)
 rulesets-plan *args:
-    bun scripts/apply-rulesets.ts {{ args }}
+    {{ config_base }} bun scripts/apply-rulesets.ts {{ args }}
 
 # Create/update branch rulesets to match rulesets/index.ts (needs repo admin via gh)
 rulesets-apply *args:
-    bun scripts/apply-rulesets.ts --apply {{ args }}
+    {{ config_base }} bun scripts/apply-rulesets.ts --apply {{ args }}
+
+# CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
+cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
+cf_tokens := cf_admin + " " + config_base + " bun scripts/cf-tokens.ts"
+
+# The cf-tokens-* recipes all take --config <module>: the fleet map in your
+# infra repo (e.g. taraxvoid/infra), whose justfile wraps these.
+
+# Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
+cf-tokens-plan *args:
+    {{ cf_tokens }} {{ args }}
+
+# Create/update/rotate deploy tokens and set each repo's env secret (needs CF_TOKEN_ADMIN and gh)
+cf-tokens-apply *args:
+    {{ cf_tokens }} --apply {{ args }}
+
+# Print the live names of the permission group ids cloudflare/tokens.ts uses
+cf-tokens-groups *args:
+    {{ cf_tokens }} --groups {{ args }}
+
+# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts transbot prod bunx wrangler deploy`
+cf-tokens-try config repo env +cmd:
+    {{ cf_tokens }} --config {{ quote(config) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 
 # Open the next -> main promotion PR, set to auto-merge with a merge commit
 promote:
