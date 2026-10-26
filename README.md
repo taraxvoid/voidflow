@@ -34,8 +34,10 @@ Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md).
 # .github/workflows/ci.yml
 name: CI
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches: [main, next, live]
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
@@ -44,15 +46,16 @@ jobs:
     uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
 ```
 
+`main` deploys to prod and PRs get previews; there are no other environment
+branches. The `push` trigger validates direct pushes to `main`.
+
 Scripts it runs, if defined:
 
 | Script | When |
 |---|---|
 | `lint`, `check`, `build`, `test:unit` | always |
 | `check:licenses` | lockfile or `scripts/` changed |
-| `test:e2e:full` | PRs into `main` |
-| `test:e2e:all`, `test:e2e:a11y` | PRs into `next` and `live` |
-| `test:e2e:lighthouse` | PRs into `live` |
+| `test:e2e:all`, `test:e2e:a11y`, `test:e2e:lighthouse` | e2e-relevant files changed |
 
 Inputs:
 
@@ -60,7 +63,6 @@ Inputs:
 |---|---|---|
 | `runner` | `ubuntu-latest` | Runner label |
 | `package-manager` | `bun` | `bun`, `pnpm` or `aube` |
-| `single-environment` | `false` | See below |
 | `build` | `true` | `false` if your e2e scripts already build |
 | `build-env` | `{}` | JSON object of build env vars (not for secrets) |
 | `code-paths` | all but Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs that count as code |
@@ -76,9 +78,10 @@ check is `validate / Validate`.
 `engines`. aube must be pinned in `mise.toml` and reads Node from
 `devEngines.runtime`. Both use `pnpm-lock.yaml`.
 
-**Single environment** (`main` is prod, PRs get previews): set
-`single-environment: true` and add `push: { branches: [main] }` to `on:`.
-`main` then runs the `live` test tier.
+**Migrating from main/next/live:** drop `single-environment` from callers
+(GitHub rejects unknown inputs). `branch-env-map` takes no inputs and fails on
+`next`, `live` and pushes to other branches. `test:e2e:full` no longer runs;
+define `test:e2e:all`.
 
 **Socket scanner:** CI strips `install.security.scanner` from `bunfig.toml`
 so a flaky API can't break the build; local installs still use it. Write it as
@@ -136,16 +139,14 @@ Private repos need GitHub Code Security.
 
 ### Deploys
 
-`actions/branch-env-map` maps `main` → `dev`, `next` → `staging`, `live` →
-`prod`. With `single-environment: true`: `main` → `prod`, PRs → `preview`.
-Run it as the first step of the deploy job:
+`actions/branch-env-map` maps `main` → `prod` and PRs → `preview`; any other
+ref fails. Run it as the first step of the deploy job:
 
 ```yaml
 jobs:
   deploy:
     name: Deploy
     needs: validate
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@<sha> # <version>
@@ -158,8 +159,13 @@ jobs:
 ```
 
 A job's `name:` and `environment:` can't read its own step outputs. For
-GitHub deployment environments, use one deploy job per branch, each gated
-with an `if:`.
+GitHub deployment environments, use one deploy job for `main` and one for PRs,
+each gated with an `if:`.
+
+`cloudflare-deploy` runs `wrangler deploy --env <env>`, so `preview` needs a
+matching env block in the wrangler config, or pass `command` to deploy previews
+another way. `netlify-deploy` makes `prod` a production deploy and anything else
+an alias deploy.
 
 | Action | Inputs |
 |---|---|
