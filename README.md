@@ -231,11 +231,42 @@ jobs:
   `bun`, `pnpm` or `aube`). Other inputs: `cloudflare-account-id`, `working-directory`, `command`, and
   `token-fallback` (warns on every deploy while the repo's token uses the
   account-wide fallback, see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
+- `actions/cloudflare-preview`: a [Worker Preview](https://developers.cloudflare.com/workers/previews/)
+  per pull request (`wrangler preview`, named `pr-<number>`), with its URL
+  commented on the PR and updated in place on later pushes (pass
+  `github-token`; the job needs `pull-requests: write`). Outputs
+  `preview-url` and `deployment-url`. Other inputs: `cloudflare-account-id`,
+  `working-directory`, `name`, `secrets` (dotenv lines for the Preview), and
+  `delete: true` for the `closed` event. See the example below.
 - `actions/netlify-deploy`: `prod` is a production deploy, `dev`/`staging` are
   alias deploys. Inputs: `env`, `publish-dir`, `netlify-auth-token`,
   `netlify-site-id`, `working-directory`, `github-token`. Turn off Netlify's
   own GitHub auto-deploy for the site, or the two will double-deploy.
 - `actions/branch-env-map`: the mapping step on its own, for use inside a job.
+
+Worker Previews for pull requests (the caller's `on.pull_request.types` needs
+`closed` for the cleanup to run; forks get no secrets, so skip them):
+
+```yaml
+  preview:
+    needs: validate
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@<sha> # <version>
+      # install and build, unless the event is 'closed'
+      - uses: taraxvoid/voidflow/actions/cloudflare-preview@<sha> # vX.Y.Z
+        with:
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          github-token: ${{ github.token }}
+          delete: ${{ github.event.action == 'closed' }}
+```
 
 ## npm package
 
