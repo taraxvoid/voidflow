@@ -1,9 +1,11 @@
 /**
- * Canonical branch rulesets for the voidflow fleet, as data.
+ * Branch rulesets as code: the fleet config shape and the plan logic.
  *
- * `scripts/apply-rulesets.ts` diffs these against what GitHub has and (with
- * --apply) creates/updates them. Rulesets that exist in a repo but are not
- * described here are reported, never deleted.
+ * The fleet itself (which repos, with which tiers and bypasses) lives in the
+ * org's infra repo and is passed with --config; this module only builds and
+ * checks it. `scripts/apply-rulesets.ts` diffs the result against what GitHub
+ * has and (with --apply) creates/updates it. Rulesets that exist in a repo but
+ * are not described in the config are reported, never deleted.
  */
 
 export type BypassActor = {
@@ -88,21 +90,6 @@ const isRaw = (cfg: RepoConfig | RawConfig): cfg is RawConfig =>
 // Reported by both site-ci.yml and tool-ci.yml when the caller job is `validate`.
 const VALIDATE_CHECK = 'validate / Validate'
 
-// Sites run a single stable `main` that deploys to prod (previews on PRs),
-// i.e. voidflow's `single-environment` mode. Multi-environment repos
-// (main/next/live) list all three tiers instead.
-const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
-    tiers: ['main'],
-    netlify: true,
-    checks: [VALIDATE_CHECK],
-    codeowners: true,
-    linearHistory: true,
-    bypass: {},
-    aka: {},
-    retire: ['next (staging)', 'live (prod)'],
-    ...over,
-})
-
 // Tools (CLIs, libraries) run a single `main` validated by tool-ci.yml, with
 // no Netlify deploy and nothing to retire.
 export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
@@ -116,40 +103,6 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     retire: [],
     ...over,
 })
-
-// Integration bypasses are preserved as-is; they are believed to be the
-// Netlify/Cloudflare apps and come out once deploys run from Actions (see
-// the "Deploy via Actions" issue).
-// Private repos can be listed: on a plan without rulesets for private repos
-// the API returns 403 and the script skips them (see isPlanGated).
-export const REPOS: Record<string, RepoConfig> = {
-    'taraxvoid/queeromaha': site({
-        bypass: { main: [app(NETLIFY), app(85455)] },
-    }),
-    'taraxvoid/soundry': site({
-        bypass: { main: [app(85455), app(1236702)] },
-        aka: { main: ['main (live)'] },
-    }),
-    'taraxvoid/synthomaha': site({
-        bypass: { main: [app(85455)] },
-    }),
-    // Deploys to Cloudflare through voidflow, so no Netlify check and no
-    // deploy app bypass. Private, so skipped until rulesets are available.
-    'taraxvoid/taraxvoid.net': site({ netlify: false }),
-    'taraxvoid/voidflow': {
-        // main (stable), next (prerelease channel), release/* (maintenance).
-        // See RELEASING.md. Promotion next -> main uses merge commits, so no
-        // linear history here.
-        tiers: ['main', 'prerelease', 'maintenance'],
-        netlify: false,
-        checks: ['Validation', 'Unit tests'],
-        codeowners: false,
-        linearHistory: false,
-        bypass: {},
-        aka: { main: ['main/prod'] },
-        retire: [],
-    },
-}
 
 const NAMES: Record<Tier, string> = {
     main: 'main (prod)',
@@ -252,7 +205,7 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
 /** Every ruleset we want, per repo, with the names it may already have. */
 export function desired(
     repo: string,
-    fleet: Fleet = REPOS,
+    fleet: Fleet,
 ): Array<{ ruleset: Ruleset; aka: string[] }> {
     const cfg = fleet[repo]
     if (!cfg) throw new Error(`unknown repo ${repo}`)

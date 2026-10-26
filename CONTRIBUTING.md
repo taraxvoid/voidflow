@@ -39,9 +39,12 @@ for the release flow.
 
 ## Branch rulesets
 
-Rulesets for the fleet's repos are defined in
-[`rulesets/index.ts`](rulesets/index.ts). Sites use `site()`, tools use
-`tool()`. Needs `gh` with admin on the repos.
+[`rulesets/index.ts`](rulesets/index.ts) holds the config shape and the plan
+logic; the fleet (which repos, tiers, checks and bypasses) lives in the org's
+own infra repo (see [Fleet config](#fleet-config---config)). A tiered repo's
+missing fields take `tool()`'s defaults; a repo whose protection doesn't fit
+the tiers spells out its rulesets in full. Needs `gh` with admin on the repos.
+From the infra repo, whose justfile passes `--config`:
 
 ```sh
 just rulesets-plan                  # diff every repo against the config
@@ -54,9 +57,9 @@ just rulesets-apply --prune         # also delete rulesets listed under `retire`
 Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.
 
-The `Ruleset drift` workflow runs `--check` weekly and on PRs touching
-`rulesets/`, with the plan in the job summary. It is read-only; applying stays
-a manual `just rulesets-apply`.
+The infra repo runs `--check` on a schedule (taraxvoid/infra's `Ruleset
+drift` workflow), since the config lives there. Applying stays a manual
+`just rulesets-apply`.
 
 ## Cloudflare deploy tokens as code
 
@@ -184,9 +187,8 @@ tooling, not part of the published package.
 voidflow holds the tools; each org keeps its fleet map (repo names, account
 ids, envs) in its own private infra repo, e.g. `taraxvoid/infra`, as modules
 that export `REPOS` (or a default). The infra repo's justfile wraps voidflow's
-recipes with `--config` pointing at them. `cf-tokens-*` requires it;
-`rulesets-*` still falls back to the built-in `REPOS` in `rulesets/index.ts`
-until that moves out too.
+recipes with `--config` pointing at them; `rulesets-*` and `cf-tokens-*` both
+require it.
 
 ```ts
 // cf-tokens.ts in the org's infra repo

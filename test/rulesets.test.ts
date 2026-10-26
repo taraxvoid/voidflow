@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
     NETLIFY,
-    REPOS,
+    app,
     build,
     checkFleet,
     desired,
@@ -10,8 +10,33 @@ import {
     normalise,
     tool,
     type Fleet,
+    type RepoConfig,
     type Ruleset,
 } from '../rulesets/index.ts'
+
+// A fleet as an infra repo would pass it with --config: Netlify sites on a
+// single main, a site deployed to Cloudflare, and voidflow's release channels.
+const site = (over: Partial<RepoConfig> = {}) =>
+    tool({ netlify: true, retire: ['next (staging)', 'live (prod)'], ...over })
+const REPOS: Record<string, RepoConfig> = {
+    'taraxvoid/queeromaha': site({ bypass: { main: [app(NETLIFY), app(85455)] } }),
+    'taraxvoid/soundry': site({
+        bypass: { main: [app(85455), app(1236702)] },
+        aka: { main: ['main (live)'] },
+    }),
+    'taraxvoid/synthomaha': site({ bypass: { main: [app(85455)] } }),
+    'taraxvoid/taraxvoid.net': site({ netlify: false }),
+    'taraxvoid/voidflow': {
+        tiers: ['main', 'prerelease', 'maintenance'],
+        netlify: false,
+        checks: ['Validation', 'Unit tests'],
+        codeowners: false,
+        linearHistory: false,
+        bypass: {},
+        aka: { main: ['main/prod'] },
+        retire: [],
+    },
+}
 
 const statusChecks = (r: ReturnType<typeof build>) =>
     (
@@ -35,7 +60,7 @@ describe('canonical rulesets', () => {
 
     test('every tier of every site requires the reusable workflow check name', () => {
         for (const repo of Object.keys(REPOS)) {
-            for (const { ruleset } of desired(repo)) {
+            for (const { ruleset } of desired(repo, REPOS)) {
                 const names = statusChecks(ruleset)
                 // Bare "Validate" / "pr-checks" never reports from site-ci.yml.
                 expect(names).not.toContain('Validate')
@@ -61,7 +86,7 @@ describe('canonical rulesets', () => {
 
     test('names within a repo are unique', () => {
         for (const repo of Object.keys(REPOS)) {
-            const names = desired(repo).map((d) => d.ruleset.name)
+            const names = desired(repo, REPOS).map((d) => d.ruleset.name)
             expect(new Set(names).size).toBe(names.length)
         }
     })
@@ -205,7 +230,7 @@ describe('raw rulesets (another fleet, --config)', () => {
 
     test('tiered repos in the same fleet still build from tiers', () => {
         expect(desired('taraxvoid/voidflow', fleet)).toEqual(
-            desired('taraxvoid/voidflow'),
+            desired('taraxvoid/voidflow', REPOS),
         )
     })
 
@@ -220,7 +245,7 @@ describe('raw rulesets (another fleet, --config)', () => {
         expect(diff(normalise(fromApi), normalise(live))).toEqual([])
     })
 
-    test('checkFleet accepts the built-in config and raw rulesets', () => {
+    test('checkFleet accepts tiered and raw rulesets', () => {
         expect(checkFleet(REPOS)).toEqual(REPOS)
         expect(checkFleet(fleet)).toEqual(fleet)
     })

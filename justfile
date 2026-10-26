@@ -94,20 +94,20 @@ doctor:
 # was run, not this directory. See scripts/lib/config.ts.
 config_base := "env VOIDFLOW_CONFIG_BASE=" + quote(invocation_directory())
 
-# Show how each repo's branch rulesets differ from rulesets/index.ts (read-only)
+# The rulesets-* and cf-tokens-* recipes all take --config <module>: the fleet
+# map in your infra repo (e.g. taraxvoid/infra), whose justfile wraps these.
+
+# Show how each repo's branch rulesets differ from the config (read-only; needs gh)
 rulesets-plan *args:
     {{ config_base }} bun scripts/apply-rulesets.ts {{ args }}
 
-# Create/update branch rulesets to match rulesets/index.ts (needs repo admin via gh)
+# Create/update branch rulesets to match the config (needs repo admin via gh)
 rulesets-apply *args:
     {{ config_base }} bun scripts/apply-rulesets.ts --apply {{ args }}
 
 # CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
 cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
 cf_tokens := cf_admin + " " + config_base + " bun scripts/cf-tokens.ts"
-
-# The cf-tokens-* recipes all take --config <module>: the fleet map in your
-# infra repo (e.g. taraxvoid/infra), whose justfile wraps these.
 
 # Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
 cf-tokens-plan *args:
