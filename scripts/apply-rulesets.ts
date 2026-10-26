@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
 /**
- * Plan or apply the branch rulesets described in rulesets/index.ts.
+ * Plan or apply the branch rulesets of the fleet in a --config module (the
+ * org's infra repo), shaped as in rulesets/index.ts. Every invocation takes
+ * --config <module>, e.g. ../infra/rulesets.ts:
  *
- *   bun scripts/apply-rulesets.ts                  # plan (read-only) for every repo
- *   bun scripts/apply-rulesets.ts --repo soundry   # plan for one repo
- *   bun scripts/apply-rulesets.ts --check          # plan, exit 1 on drift (for CI)
- *   bun scripts/apply-rulesets.ts --apply          # create/update to match
- *   bun scripts/apply-rulesets.ts --apply --prune  # ...and delete retired rulesets
- *   bun scripts/apply-rulesets.ts --config ../infra/rulesets.ts   # another fleet's config
+ *   bun scripts/apply-rulesets.ts --config <m>                  # plan (read-only) for every repo
+ *   bun scripts/apply-rulesets.ts --config <m> --repo soundry   # plan for one repo
+ *   bun scripts/apply-rulesets.ts --config <m> --check          # plan, exit 1 on drift (for CI)
+ *   bun scripts/apply-rulesets.ts --config <m> --apply          # create/update to match
+ *   bun scripts/apply-rulesets.ts --config <m> --apply --prune  # ...and delete retired rulesets
  *
- * The config is REPOS in rulesets/index.ts unless --config names a module
- * exporting `REPOS` (or a default) of the same shape, where a repo may also
- * spell out its rulesets in full (see RawConfig and scripts/lib/config.ts).
+ * The module exports `REPOS` (or a default); a repo may be tiered or spell
+ * out its rulesets in full (see RawConfig and scripts/lib/config.ts).
  *
  * Uses the `gh` CLI for auth, so run it as someone with admin on the repos.
  * Rulesets not described in the config are reported and left alone; only the
@@ -22,7 +22,6 @@
 import { parseArgs } from 'node:util'
 import { loadOrExit } from './lib/config.ts'
 import {
-    REPOS as BUILTIN,
     checkFleet,
     desired,
     diff,
@@ -41,7 +40,7 @@ const { values } = parseArgs({
     },
 })
 
-const REPOS = await loadOrExit(values.config, BUILTIN, checkFleet)
+const REPOS = await loadOrExit(values.config, checkFleet)
 
 async function gh(args: string[], body?: unknown): Promise<any> {
     const proc = Bun.spawn(['gh', 'api', ...args], {

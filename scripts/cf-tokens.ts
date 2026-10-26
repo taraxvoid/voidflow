@@ -62,7 +62,7 @@ const { values, positionals } = parseArgs({
     allowPositionals: true,
 })
 
-const REPOS = await loadOrExit(values.config, undefined, checkRepos)
+const REPOS = await loadOrExit(values.config, checkRepos)
 
 const ADMIN = process.env.CF_TOKEN_ADMIN
 if (!ADMIN) {
