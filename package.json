@@ -27,6 +27,7 @@
         "provenance": true
     },
     "bin": {
+        "voidflow": "scripts/cli.ts",
         "unlighthouse-runner": "scripts/unlighthouse/run.ts",
         "check-licenses": "scripts/check-licenses.ts"
     },
@@ -36,13 +37,21 @@
             "default": "./playwright/index.mjs"
         },
         "./biome": "./biome/base.json",
+        "./cloudflare": "./cloudflare/tokens.ts",
+        "./rulesets": "./rulesets/index.ts",
         "./package.json": "./package.json"
     },
     "files": [
         "biome",
         "playwright",
         "scripts/unlighthouse",
-        "scripts/check-licenses.ts"
+        "scripts/check-licenses.ts",
+        "scripts/cli.ts",
+        "scripts/cf-tokens.ts",
+        "scripts/apply-rulesets.ts",
+        "scripts/lib",
+        "cloudflare",
+        "rulesets"
     ],
     "engines": {
         "bun": ">=1.4.0",

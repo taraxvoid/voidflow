@@ -10,6 +10,7 @@ Playwright; pnpm and aube are supported.
 | [`tool-ci.yml`](#tool-ci) | gitleaks, lint, typecheck, build, test, workflow audit for bun tools |
 | [`resolve-env.yml`, deploy actions](#deploys) | Map branch to environment, deploy to Cloudflare or Netlify |
 | [`unlighthouse-runner`, `check-licenses`](#npm-package) | Performance budgets and copyleft license check (npm bins) |
+| [`voidflow`](#fleet-tools) | Branch rulesets and scoped Cloudflare deploy tokens as code, for an org's infra repo (npm bin) |
 | [`@taraxvoid/voidflow/playwright`](#playwright-config) | Playwright config for `astro preview` |
 | [`@taraxvoid/voidflow/biome`](#biome) | Shared Biome config |
 | [`github>taraxvoid/voidflow`](#renovate) | Shared Renovate preset |
@@ -245,7 +246,7 @@ bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
 Also published unscoped as `voidflow` with identical contents.
 
 Call the bins from `package.json` scripts rather than `bunx --package ...`, so
-the version stays in the lockfile and the site's `bunfig.toml` applies. Both
+the version stays in the lockfile and the site's `bunfig.toml` applies. All
 bins need `bun` on `PATH`, even in npm or pnpm projects.
 
 ### Unlighthouse budgets
@@ -271,6 +272,18 @@ Add `.unlighthouse/` to `.gitignore`.
 ```
 
 Fails on GPL, AGPL, SSPL and similar copyleft licenses. LGPL is allowed.
+
+### Fleet tools
+
+```sh
+bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts            # plan; --check, --apply, --prune
+bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts          # plan; --check, --apply, --rotate, --try
+```
+
+Run from an org's infra repo, which holds the fleet map (`--config`) and pins
+the version. `rulesets` needs `gh` with admin on the repos; `cf-tokens` also
+needs `CF_TOKEN_ADMIN`. Config shapes and flags are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config).
 
 ### Playwright config
 
