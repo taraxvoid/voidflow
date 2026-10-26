@@ -179,16 +179,25 @@ Limits worth knowing:
   ```
 
 Cut over one repo at a time: `just cf-tokens-apply --repo <name>`, deploy, then
-`just cf-tokens-apply --repo <name> --prune` to delete its old token. Repo
-tooling, not part of the published package.
+`just cf-tokens-apply --repo <name> --prune` to delete its old token.
 
 ## Fleet config (`--config`)
 
 voidflow holds the tools; each org keeps its fleet map (repo names, account
 ids, envs) in its own private infra repo, e.g. `taraxvoid/infra`, as modules
-that export `REPOS` (or a default). The infra repo's justfile wraps voidflow's
-recipes with `--config` pointing at them; `rulesets-*` and `cf-tokens-*` both
-require it.
+that export `REPOS` (or a default). The package's `voidflow` bin runs both
+tools, so the infra repo needs a pinned release rather than a voidflow
+checkout; `rulesets` and `cf-tokens` both require `--config`.
+
+```sh
+bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts --check
+bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts --apply --repo transbot
+```
+
+Each command takes its script's flags (`scripts/apply-rulesets.ts`,
+`scripts/cf-tokens.ts`). The bin needs `bun` on `PATH`, `npx` included. In
+this repo, the `rulesets-*` and `cf-tokens-*` recipes run the same scripts
+from the checkout.
 
 ```ts
 // cf-tokens.ts in the org's infra repo
@@ -206,17 +215,20 @@ export const REPOS = {
 
 ```just
 # justfile in the org's infra repo
-voidflow := env_var_or_default("VOIDFLOW", home_directory() / "projects/personal/voidflow")
-vf := "just -f " + quote(voidflow / "justfile")
+vf := "bunx @taraxvoid/voidflow@<version>"
 tokens := justfile_directory() / "cf-tokens.ts"
+# CF_TOKEN_ADMIN from fnox unless already set. fnox.toml is a copy of
+# voidflow's; -c finds it from a [no-cd] recipe too.
+fnox := "fnox -c " + quote(justfile_directory() / "fnox.toml") + " exec -- "
+cf := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { fnox + vf } else { vf }
 
 cf-tokens-plan *args:
-    {{ vf }} cf-tokens-plan --config {{ quote(tokens) }} {{ args }}
+    {{ cf }} cf-tokens --config {{ quote(tokens) }} {{ args }}
 
 # [no-cd]: the command runs in the site checkout `just -f` was called from
 [no-cd]
 cf-tokens-try repo env +cmd:
-    {{ vf }} cf-tokens-try {{ quote(tokens) }} {{ repo }} {{ env }} {{ cmd }}
+    {{ cf }} cf-tokens --config {{ quote(tokens) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 ```
 
 A rulesets config can use the tier model, where any field left out takes

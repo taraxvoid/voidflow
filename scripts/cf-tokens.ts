@@ -66,7 +66,7 @@ const REPOS = await loadOrExit(values.config, checkRepos)
 
 const ADMIN = process.env.CF_TOKEN_ADMIN
 if (!ADMIN) {
-    console.error('CF_TOKEN_ADMIN is not set (see the header of this script)')
+    console.error('CF_TOKEN_ADMIN is not set (see CONTRIBUTING.md, Cloudflare deploy tokens as code)')
     process.exit(2)
 }
 
