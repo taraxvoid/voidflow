@@ -10,7 +10,8 @@
       "skip-changelog": true,
       "extra-files": [
         "jsr.json"
-      ]
+      ],
+      "bump-minor-pre-major": true
     }
   }
 }

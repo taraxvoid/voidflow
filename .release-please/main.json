@@ -6,7 +6,8 @@
       "include-component-in-tag": false,
       "extra-files": [
         "jsr.json"
-      ]
+      ],
+      "bump-minor-pre-major": true
     }
   }
 }
