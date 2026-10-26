@@ -56,6 +56,9 @@ ones are skipped with a notice):
 | `test:e2e:all`, `test:e2e:a11y` | PRs into `next` and `live` |
 | `test:e2e:lighthouse` | PRs into `live` |
 
+When workflows change it also runs jactionlint and
+[zizmor](https://github.com/zizmorcore/zizmor) (`--min-severity medium`).
+
 Inputs:
 
 | Input | Default | |
@@ -171,7 +174,7 @@ The required status check is `validate / Validate`.
 `site-ci.yml` and `tool-ci.yml` write gitleaks and zizmor results as SARIF
 and keep them as the `voidflow-sarif` artifact (7 days). gitleaks still fails
 the job on a finding; the zizmor SARIF run scans every workflow and never
-fails the job (the zizmor gate in `tool-ci.yml` is unchanged). Both steps run
+fails the job (the zizmor gate that runs when workflows change is separate). Both steps run
 after a failure too, so the findings that failed a run are the ones uploaded.
 
 `upload-sarif.yml` sends them to code scanning, which is what voidlight
