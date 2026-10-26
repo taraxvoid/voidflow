@@ -97,7 +97,10 @@ for (const repo of repos) {
         }
         matched.add(hit.id)
         const have: Ruleset = await gh([`repos/${repo}/rulesets/${hit.id}`])
-        const lines = diff(normalise(have), normalise(ruleset))
+        // A read-only token gets no bypass_actors back; compare the rest.
+        const bypass = Array.isArray(have.bypass_actors)
+        if (!bypass) console.log(`  note "${ruleset.name}": bypass_actors not visible to this token, not compared`)
+        const lines = diff(normalise(have, { bypass }), normalise(ruleset, { bypass }))
         if (lines.length === 0) {
             console.log(`  ok "${ruleset.name}"`)
             continue
