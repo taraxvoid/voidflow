@@ -5,8 +5,9 @@ Shared CI/CD, security checks and repo config for TypeScript projects.
 ## What this is
 
 - **Reusable workflows** for sites (`site-ci.yml`) and bun tools (`tool-ci.yml`),
-  plus SARIF upload and branch-to-environment mapping
-- **Deploy actions** for Netlify and Cloudflare Workers
+  plus SARIF upload
+- **Deploy actions** for Netlify and Cloudflare Workers, and
+  branch-to-environment mapping
 - **npm package** with Lighthouse budgets, a copyleft license check, and
   Playwright and Biome configs
 - **Renovate preset** and **lefthook hooks**
@@ -135,35 +136,35 @@ Private repos need GitHub Code Security.
 
 ### Deploys
 
-`resolve-env.yml` maps `main` → `dev`, `next` → `staging`, `live` → `prod`.
-With `single-environment: true`: `main` → `prod`, PRs → `preview`.
+`actions/branch-env-map` maps `main` → `dev`, `next` → `staging`, `live` →
+`prod`. With `single-environment: true`: `main` → `prod`, PRs → `preview`.
+Run it as the first step of the deploy job:
 
 ```yaml
 jobs:
-  resolve-env:
+  deploy:
+    name: Deploy
     needs: validate
     if: github.event_name == 'push'
-    uses: taraxvoid/voidflow/.github/workflows/resolve-env.yml@<sha> # vX.Y.Z
-
-  deploy:
-    name: Deploy [${{ needs.resolve-env.outputs.env }}]
-    needs: resolve-env
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve-env.outputs.env }}
     steps:
       - uses: actions/checkout@<sha> # <version>
+      - id: env
+        uses: taraxvoid/voidflow/actions/branch-env-map@<sha> # vX.Y.Z
       - uses: taraxvoid/voidflow/actions/cloudflare-deploy@<sha> # vX.Y.Z
         with:
-          env: ${{ needs.resolve-env.outputs.env }}
+          env: ${{ steps.env.outputs.env }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 ```
+
+A job's `name:` and `environment:` can't read its own step outputs. For
+GitHub deployment environments, use one deploy job per branch, each gated
+with an `if:`.
 
 | Action | Inputs |
 |---|---|
 | `actions/cloudflare-deploy` | `env`, `cloudflare-api-token`, `cloudflare-account-id`, `migrate-d1`, `working-directory`, `command`, `token-fallback` ([details](CONTRIBUTING.md)) |
 | `actions/netlify-deploy` | `env`, `publish-dir`, `netlify-auth-token`, `netlify-site-id`, `working-directory`, `github-token` |
-| `actions/branch-env-map` | the mapping step alone, for use inside a job |
 
 For Netlify, turn off the site's own GitHub auto-deploy or it will deploy twice.
 
