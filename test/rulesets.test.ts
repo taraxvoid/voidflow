@@ -10,6 +10,7 @@ import {
     normalise,
     tool,
     type Fleet,
+    type RepoConfig,
     type Ruleset,
 } from '../rulesets/index.ts'
 
@@ -57,6 +58,14 @@ describe('canonical rulesets', () => {
             expect(cfg.tiers).toEqual(['main'])
             expect(cfg.retire).toEqual(['next (staging)', 'live (prod)'])
         }
+    })
+
+    test('merge queue is only required where configured (org-owned repos)', () => {
+        const queueOf = (cfg: RepoConfig) => build('main', cfg).rules.find((x) => x.type === 'merge_queue')
+        for (const repo of Object.keys(REPOS)) expect(queueOf(REPOS[repo])).toBeUndefined()
+        expect(queueOf(tool({ mergeQueue: true }))?.parameters?.merge_method).toBe('SQUASH')
+        expect(queueOf(tool({ mergeQueue: true, linearHistory: false }))?.parameters?.merge_method).toBe('MERGE')
+        expect(build('next', tool({ mergeQueue: true })).rules.some((x) => x.type === 'merge_queue')).toBe(false)
     })
 
     test('names within a repo are unique', () => {
@@ -261,6 +270,7 @@ describe('tool()', () => {
             checks: ['validate / Validate'],
             codeowners: true,
             linearHistory: true,
+            mergeQueue: false,
             bypass: {},
             aka: {},
             retire: [],

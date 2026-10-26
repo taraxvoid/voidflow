@@ -55,7 +55,10 @@ Scripts it runs, if defined:
 |---|---|
 | `lint`, `check`, `build`, `test:unit` | always |
 | `check:licenses` | lockfile or `scripts/` changed |
-| `test:e2e:all`, `test:e2e:a11y`, `test:e2e:lighthouse` | e2e-relevant files changed |
+| `test:e2e:all` (or `test:e2e:full` if there's no `:all`) | e2e-relevant files changed; always on `merge_group`, `schedule` and `workflow_dispatch` |
+| `test:e2e:a11y`, `test:e2e:lighthouse` | `schedule` and `workflow_dispatch` only |
+
+Draft PRs skip the job.
 
 Inputs:
 
@@ -80,8 +83,21 @@ check is `validate / Validate`.
 
 **Migrating from main/next/live:** drop `single-environment` from callers
 (GitHub rejects unknown inputs). `branch-env-map` takes no inputs and fails on
-`next`, `live` and pushes to other branches. `test:e2e:full` no longer runs;
-define `test:e2e:all`.
+`next`, `live` and pushes to other branches. a11y and Lighthouse no longer run
+on PRs; add a `schedule` (below) to keep them.
+
+**Merge queue:** org-owned repos can use one (personal accounts can't). Set
+`mergeQueue: true` on the repo's ruleset config and add `merge_group:` to
+`on:` so the required check reports on the queue's branch.
+
+**Scheduled a11y and Lighthouse:** these run only on a schedule or a manual
+dispatch. The cron is the caller's; drop it to stop running them:
+
+```yaml
+on:
+  schedule:
+    - cron: '17 6 * * *'
+```
 
 **Socket scanner:** CI strips `install.security.scanner` from `bunfig.toml`
 so a flaky API can't break the build; local installs still use it. Write it as
