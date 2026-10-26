@@ -19,7 +19,7 @@
  * Private repos on a plan without rulesets (GitHub answers 403) are skipped
  * and reported, never counted as drift, so --check stays green for them.
  */
-import { parseArgs } from 'node:util'
+import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
 import {
     checkFleet,
@@ -30,17 +30,21 @@ import {
     type Ruleset,
 } from '../rulesets/index.ts'
 
-const { values } = parseArgs({
-    options: {
-        apply: { type: 'boolean', default: false },
-        prune: { type: 'boolean', default: false },
-        check: { type: 'boolean', default: false },
-        repo: { type: 'string' },
-        config: { type: 'string' },
-    },
-})
+const OPTIONS = {
+    apply: { type: 'boolean', default: false },
+    prune: { type: 'boolean', default: false },
+    check: { type: 'boolean', default: false },
+    repo: { type: 'string' },
+    config: { type: 'string' },
+} as const
 
-const REPOS = await loadOrExit(values.config, checkFleet)
+const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
+
+  --config <module>  the fleet map: a module exporting REPOS (or a default)
+  --repo <name>      only this repo (owner/name, or just name)
+  --check            exit 1 on drift
+  --apply            create and update rulesets to match
+  --prune            with --apply, also delete the rulesets listed under retire`
 
 async function gh(args: string[], body?: unknown): Promise<any> {
     const proc = Bun.spawn(['gh', 'api', ...args], {
@@ -57,84 +61,93 @@ async function gh(args: string[], body?: unknown): Promise<any> {
     return out ? JSON.parse(out) : null
 }
 
-const repos = Object.keys(REPOS).filter(
-    (r) => !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
-)
-if (repos.length === 0) {
-    console.error(`no repo matches --repo ${values.repo}`)
-    process.exit(2)
-}
+/** `prog` names the command in the --help usage. */
+export async function main(argv: string[], prog = 'bun scripts/apply-rulesets.ts') {
+    const { values } = parseOrExit(argv, { options: OPTIONS }, usage(prog))
 
-let drift = 0
-const gated: string[] = []
+    const REPOS = await loadOrExit(values.config, checkFleet)
 
-for (const repo of repos) {
-    console.log(`\n== ${repo}`)
-    let listed: Array<{ id: number; name: string }>
-    try {
-        listed = await gh([`repos/${repo}/rulesets`])
-    } catch (e) {
-        if (!isPlanGated(String(e))) throw e
-        gated.push(repo)
-        console.log('  skipped: private repo on a plan without rulesets (HTTP 403)')
-        continue
+    const repos = Object.keys(REPOS).filter(
+        (r) => !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
+    )
+    if (repos.length === 0) {
+        console.error(`no repo matches --repo ${values.repo}`)
+        process.exit(2)
     }
-    const matched = new Set<number>()
 
-    for (const { ruleset, aka } of desired(repo, REPOS)) {
-        const hit = listed.find(
-            (r) => r.name === ruleset.name || aka.includes(r.name),
-        )
-        if (!hit) {
-            drift++
-            console.log(`+ create "${ruleset.name}"`)
-            if (values.apply) {
-                await gh(['-X', 'POST', `repos/${repo}/rulesets`, '--input', '-'], ruleset)
-                console.log('  created')
-            }
+    let drift = 0
+    const gated: string[] = []
+
+    for (const repo of repos) {
+        console.log(`\n== ${repo}`)
+        let listed: Array<{ id: number; name: string }>
+        try {
+            listed = await gh([`repos/${repo}/rulesets`])
+        } catch (e) {
+            if (!isPlanGated(String(e))) throw e
+            gated.push(repo)
+            console.log('  skipped: private repo on a plan without rulesets (HTTP 403)')
             continue
         }
-        matched.add(hit.id)
-        const have: Ruleset = await gh([`repos/${repo}/rulesets/${hit.id}`])
-        // A read-only token gets no bypass_actors back; compare the rest.
-        const bypass = Array.isArray(have.bypass_actors)
-        if (!bypass) console.log(`  note "${ruleset.name}": bypass_actors not visible to this token, not compared`)
-        const lines = diff(normalise(have, { bypass }), normalise(ruleset, { bypass }))
-        if (lines.length === 0) {
-            console.log(`  ok "${ruleset.name}"`)
-            continue
-        }
-        drift++
-        console.log(`~ update "${hit.name}" (id ${hit.id})`)
-        for (const l of lines) console.log(`    ${l}`)
-        if (values.apply) {
-            await gh(
-                ['-X', 'PUT', `repos/${repo}/rulesets/${hit.id}`, '--input', '-'],
-                ruleset,
+        const matched = new Set<number>()
+
+        for (const { ruleset, aka } of desired(repo, REPOS)) {
+            const hit = listed.find(
+                (r) => r.name === ruleset.name || aka.includes(r.name),
             )
-            console.log('  updated')
+            if (!hit) {
+                drift++
+                console.log(`+ create "${ruleset.name}"`)
+                if (values.apply) {
+                    await gh(['-X', 'POST', `repos/${repo}/rulesets`, '--input', '-'], ruleset)
+                    console.log('  created')
+                }
+                continue
+            }
+            matched.add(hit.id)
+            const have: Ruleset = await gh([`repos/${repo}/rulesets/${hit.id}`])
+            // A read-only token gets no bypass_actors back; compare the rest.
+            const bypass = Array.isArray(have.bypass_actors)
+            if (!bypass) console.log(`  note "${ruleset.name}": bypass_actors not visible to this token, not compared`)
+            const lines = diff(normalise(have, { bypass }), normalise(ruleset, { bypass }))
+            if (lines.length === 0) {
+                console.log(`  ok "${ruleset.name}"`)
+                continue
+            }
+            drift++
+            console.log(`~ update "${hit.name}" (id ${hit.id})`)
+            for (const l of lines) console.log(`    ${l}`)
+            if (values.apply) {
+                await gh(
+                    ['-X', 'PUT', `repos/${repo}/rulesets/${hit.id}`, '--input', '-'],
+                    ruleset,
+                )
+                console.log('  updated')
+            }
+        }
+
+        const retire = new Set(REPOS[repo].retire)
+        for (const r of listed.filter((r) => !matched.has(r.id))) {
+            if (!retire.has(r.name)) {
+                console.log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
+                continue
+            }
+            drift++
+            console.log(`- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`)
+            if (values.apply && values.prune) {
+                await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
+                console.log('  deleted')
+            }
         }
     }
 
-    const retire = new Set(REPOS[repo].retire)
-    for (const r of listed.filter((r) => !matched.has(r.id))) {
-        if (!retire.has(r.name)) {
-            console.log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
-            continue
-        }
-        drift++
-        console.log(`- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`)
-        if (values.apply && values.prune) {
-            await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
-            console.log('  deleted')
-        }
+    if (gated.length > 0) {
+        console.log(`\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`)
     }
+    console.log(
+        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
+    )
+    if (values.check && drift > 0) process.exit(1)
 }
 
-if (gated.length > 0) {
-    console.log(`\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`)
-}
-console.log(
-    `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
-)
-if (values.check && drift > 0) process.exit(1)
+if (import.meta.main) await main(process.argv.slice(2))

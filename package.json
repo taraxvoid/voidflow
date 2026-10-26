@@ -37,6 +37,8 @@
             "default": "./playwright/index.mjs"
         },
         "./biome": "./biome/base.json",
+        "./cloudflare": "./cloudflare/tokens.ts",
+        "./rulesets": "./rulesets/index.ts",
         "./package.json": "./package.json"
     },
     "files": [

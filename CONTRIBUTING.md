@@ -195,9 +195,20 @@ bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts --apply --rep
 ```
 
 Each command takes its script's flags (`scripts/apply-rulesets.ts`,
-`scripts/cf-tokens.ts`). The bin needs `bun` on `PATH`, `npx` included. In
-this repo, the `rulesets-*` and `cf-tokens-*` recipes run the same scripts
-from the checkout.
+`scripts/cf-tokens.ts`) and lists them with `--help`. The bin needs `bun` on
+`PATH`, `npx` included. In this repo, the `rulesets-*` and `cf-tokens-*`
+recipes run the same scripts from the checkout.
+
+With `@taraxvoid/voidflow` as a devDependency of the infra repo (the same
+version the recipes pin), a config module can type its map against its
+shapes and use its helpers (`tool()` for rulesets, say). Type-only imports
+need nothing at run time; value imports resolve from the infra repo's
+`node_modules`:
+
+```ts
+import type { RepoConfig } from '@taraxvoid/voidflow/cloudflare'
+import { tool, type Fleet } from '@taraxvoid/voidflow/rulesets'
+```
 
 ```ts
 // cf-tokens.ts in the org's infra repo
@@ -239,7 +250,12 @@ the tiers. A snapshot of what GitHub has now (`gh api
 repos/<repo>/rulesets/<id>`, keeping `name`, `target`, `enforcement`,
 `conditions`, `bypass_actors` and `rules`) plans with no drift.
 
-A relative path resolves from the directory `just` runs in. Each config is
+A relative `--config` resolves from `VOIDFLOW_CONFIG_BASE` when that is set,
+else the current directory. This repo's recipes set it to the directory
+`just` was run from; the bin doesn't, so with the infra justfile above a
+relative path resolves from the infra repo, or from the site checkout for the
+`[no-cd]` recipe (hence `justfile_directory()`). `--try` runs its command
+in the same directory. Each config is
 checked before any API call, and every problem is reported by its path.
 `CF_TOKEN_ADMIN` then needs to cover that org's accounts, and `gh` needs admin
 on its repos.

@@ -7,17 +7,20 @@
  *   bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts [--check ...]
  *
  * Each command takes the same flags as its script (scripts/cf-tokens.ts,
- * scripts/apply-rulesets.ts); a relative --config resolves from the current
+ * scripts/apply-rulesets.ts) and lists them with --help. A relative --config
+ * resolves from VOIDFLOW_CONFIG_BASE when that is set, else the current
  * directory.
  */
 
-const COMMANDS: Record<string, { script: string; about: string }> = {
+type Main = (argv: string[], prog: string) => Promise<void>
+
+const COMMANDS: Record<string, { load: () => Promise<{ main: Main }>; about: string }> = {
     'cf-tokens': {
-        script: './cf-tokens.ts',
+        load: () => import('./cf-tokens.ts'),
         about: 'plan, apply or rotate scoped Cloudflare deploy tokens',
     },
     rulesets: {
-        script: './apply-rulesets.ts',
+        load: () => import('./apply-rulesets.ts'),
         about: 'plan or apply branch rulesets',
     },
 }
@@ -30,19 +33,21 @@ const usage = () =>
             ([name, c]) => `  ${name.padEnd(10)} ${c.about}`,
         ),
         '',
-        "Flags are those of the command's script; see voidflow's CONTRIBUTING.md.",
+        'Run `voidflow <command> --help` for its flags.',
     ].join('\n')
 
-const name = process.argv[2]
+const [name, ...rest] = process.argv.slice(2)
 if (name === undefined || name === '-h' || name === '--help') {
     console.log(usage())
     process.exit(name === undefined ? 2 : 0)
+}
+if (name.startsWith('-')) {
+    console.error(`the command comes before its flags, got ${JSON.stringify(name)}\n\n${usage()}`)
+    process.exit(2)
 }
 const cmd = COMMANDS[name]
 if (!cmd) {
     console.error(`unknown command ${JSON.stringify(name)}\n\n${usage()}`)
     process.exit(2)
 }
-// The scripts parse process.argv.slice(2), so drop the command name.
-process.argv.splice(2, 1)
-await import(cmd.script)
+await (await cmd.load()).main(rest, `voidflow ${name}`)
