@@ -34,6 +34,17 @@ describe('site-ci.yml job shape', () => {
         for (const s of after) expect(s.if).toContain(GATE)
     })
 
+    test('workflow linting and zizmor run only when workflows changed', () => {
+        for (const name of ['Lint CI workflows', 'Setup uv', 'Audit CI workflows']) {
+            expect(validateStep(name).if).toBe(`${GATE} && steps.changes.outputs.workflows == 'true'`)
+        }
+    })
+
+    test('zizmor gate uses the justfile pin', () => {
+        const pinned = read('justfile').match(/^zizmor_version := "([^"]+)"/m)![1]
+        expect(validateStep('Audit CI workflows').run).toBe(`uvx zizmor@${pinned} --min-severity medium .github`)
+    })
+
     test('every action is pinned to a full SHA', () => {
         for (const s of validate.steps.filter((s: any) => s.uses)) {
             expect(s.uses).toMatch(/@[0-9a-f]{40}$/)
