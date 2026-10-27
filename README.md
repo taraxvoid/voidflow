@@ -198,7 +198,7 @@ bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
 
 Also published as `voidflow`. The bins need `bun` on `PATH`.
 
-**Lighthouse budgets** — runs [Unlighthouse](https://unlighthouse.dev/) against
+**Lighthouse budgets** - runs [Unlighthouse](https://unlighthouse.dev/) against
 the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 `dist/client` for the Cloudflare adapter), `--config` (default
 `unlighthouse.config.ts`, see [example](scripts/unlighthouse/unlighthouse.config.example.ts)),
@@ -208,13 +208,13 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 "test:e2e:lighthouse": "bun run build && unlighthouse-runner --dir dist"
 ```
 
-**License check** — fails on GPL, AGPL, SSPL and similar. LGPL is allowed.
+**License check** - fails on GPL, AGPL, SSPL and similar. LGPL is allowed.
 
 ```json
 "check:licenses": "check-licenses"
 ```
 
-**Playwright** — for Astro sites testing against `astro preview`. Needs
+**Playwright** - for Astro sites testing against `astro preview`. Needs
 `@playwright/test`. Options: `ciPort` (required in CI), `runner` (`bun`),
 `timeout` (`30000`), `projects` (Pixel 7, Desktop Chrome), `testDir`
 (`./test/e2e`). Skips `webServer` when `PLAYWRIGHT_BASE_URL` is set.
@@ -226,7 +226,7 @@ import { definePreviewConfig } from '@taraxvoid/voidflow/playwright'
 export default definePreviewConfig({ ciPort: 4141 })
 ```
 
-**Biome** (v2) — 4-space indent, width 80, single quotes, `recommended` rules.
+**Biome** (v2) - 4-space indent, width 80, single quotes, `recommended` rules.
 Lists merge with the base; scalar values in your config win.
 
 ```json
