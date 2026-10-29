@@ -27,6 +27,8 @@ uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
 ```
 
 Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md).
+[`STABILITY.md`](STABILITY.md) says what minors, patches and majors may change
+and how deprecations reach you before a removal.
 
 ### Site CI
 
