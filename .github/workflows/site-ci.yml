@@ -2,13 +2,17 @@ name: Validation
 
 # Validation job for sites using a Astro/Playwright stack (bun, pnpm or aube)
 # for self-hosted runners pass `runner`
-# Callers need pull_request/workflow_dispatch triggers, plus push on main/next/live
-# so direct pushes are validated too
+# Callers need pull_request/workflow_dispatch triggers, plus push on main
+# so direct pushes are validated too, and merge_group if the repo uses a
+# merge queue (the required check must report there or the queue stalls)
+# e2e:all runs on ready (non-draft) PRs, merge_group and push; the heavy,
+# non-blocking a11y and lighthouse suites run only on schedule and
+# workflow_dispatch. The cron lives in the caller; remove it to stop paying.
 # Caller is expected to define referenced package.json scripts
 #
 # The secrets scan and changed-file filter run first; later steps are gated on
 # the `decide` step, so a pull request that only touches docs stops after the
-# scan and still reports success. Pushes and manual runs always validate.
+# scan and still reports success. Other events always validate.
 
 on:
   workflow_call:
@@ -69,15 +73,6 @@ on:
           config, package.json, lockfile, tsconfig.json and workflows.
         type: string
         default: '["wrangler.jsonc", "site.vars.json"]'
-      single-environment:
-        description: >
-          For sites with one production environment and no next/live
-          branches (same meaning as in resolve-env): `main` is production,
-          so PRs and pushes to `main` run the production test tier (all e2e,
-          accessibility, Lighthouse) instead of only `test:e2e:full`.
-          Defaults to false (main/next/live run dev/staging/prod tiers).
-        type: boolean
-        default: false
       build-env:
         description: >
           JSON object of environment variables for the build step, e.g.
@@ -110,7 +105,9 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only superseded PR pushes are cancelled: on trunk, a second quick merge to
+  # main must not cancel the first one's validation (and so its deploy).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -162,6 +159,8 @@ jobs:
 
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
+        # merge_group and schedule have no meaningful diff base; they always run e2e.
+        if: github.event_name != 'merge_group' && github.event_name != 'schedule'
         with:
           # Lets `code` below use `!` excludes; the other filters have none, so
           # they match as before.
@@ -189,16 +188,16 @@ jobs:
 
       - name: Resolve e2e relevance
         id: e2e
-        run: echo "relevant=$([[ "$MAIN" == true || "$EXTRA" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: echo "relevant=$([[ "$ALWAYS" == true || "$MAIN" == true || "$EXTRA" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
         env:
+          ALWAYS: ${{ contains(fromJSON('["merge_group", "schedule", "workflow_dispatch"]'), github.event_name) }}
           MAIN: ${{ steps.changes.outputs.e2e_relevant }}
           EXTRA: ${{ steps.changes.outputs.e2e_extra }}
 
       - name: Decide whether to validate
         id: decide
-        # Only pull requests are filtered. Pushes and manual runs have no
-        # reliable base to diff against, and a caller's deploy job needs a
-        # validate that ran.
+        # Only pull requests are filtered. Other events have no reliable base to
+        # diff against, and a caller's deploy job needs a validate that ran.
         run: |
           if [[ "$EVENT" == pull_request* && "$CODE" != true ]]; then
             echo "::notice::Only docs changed; skipping validate."
@@ -321,7 +320,7 @@ jobs:
         if: steps.decide.outputs.validate == 'true'
         # Fail open: a check whose script the caller doesn't define is skipped, not failed.
         run: |
-          for name in lint check build test:unit check:licenses test:e2e:full test:e2e:all test:e2e:a11y test:e2e:lighthouse; do
+          for name in lint check build test:unit check:licenses test:e2e:all test:e2e:full test:e2e:a11y test:e2e:lighthouse; do
             if jq -e --arg n "$name" '.scripts // {} | has($n)' package.json >/dev/null; then
               echo "${name//:/_}=true" >> "$GITHUB_OUTPUT"
             else
@@ -427,41 +426,22 @@ jobs:
         env:
           WITH_DEPS: ${{ inputs.playwright-install-with-deps }}
 
-      - name: Resolve test tier
-        id: tier
-        if: steps.decide.outputs.validate == 'true'
-        # Which branch's test tier applies: the PR base on pull requests, the
-        # pushed branch on pushes. Single-environment sites treat main as live.
-        run: |
-          target="$BASE_REF"
-          if [[ "$SINGLE" == "true" && "$target" == main ]]; then target=live; fi
-          echo "target=$target" >> "$GITHUB_OUTPUT"
-        env:
-          BASE_REF: ${{ github.base_ref || github.ref_name }}
-          SINGLE: ${{ inputs.single-environment }}
+      - name: E2E
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true')
+        run: '"$PM" run test:e2e:all'
 
-      - name: E2E - Dev
-        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'main')
+      - name: E2E (full)
+        # Sites that only define test:e2e:full keep getting e2e coverage.
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all != 'true' && steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true')
         run: '"$PM" run test:e2e:full'
 
-      - name: E2E - Staging
-        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next')
-        run: '"$PM" run test:e2e:all'
-
-      - name: E2E - Accessibility (staging)
-        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'next')
+      # Heavy and non-blocking in spirit: only on the caller's cron or a manual run.
+      - name: E2E - Accessibility
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
         run: '"$PM" run test:e2e:a11y'
 
-      - name: E2E - Production
-        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live')
-        run: '"$PM" run test:e2e:all'
-
-      - name: E2E - Accessibility (production)
-        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live')
-        run: '"$PM" run test:e2e:a11y'
-
-      - name: E2E - Lighthouse (production)
-        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'pull_request' || github.event_name=='push') && steps.tier.outputs.target == 'live')
+      - name: E2E - Lighthouse
+        if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
         run: '"$PM" run test:e2e:lighthouse'
 
       - name: E2E - Extra scripts

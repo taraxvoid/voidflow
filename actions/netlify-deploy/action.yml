@@ -1,15 +1,14 @@
 name: Netlify deploy
 description: >
-  Deploys via nwtgck/actions-netlify, honoring the main/next/live
-  branch convention: 'prod' is a real production deploy, 'dev'/'staging' are
-  alias deploys under that environment name. NOTE: this assumes deploys are
-  driven from here, not Netlify's own GitHub App auto-deploy — the two will
+  Deploys via nwtgck/actions-netlify: 'prod' is a real production deploy,
+  any other env (e.g. 'preview') is an alias deploy under that name. NOTE: this assumes deploys are
+  driven from here, not Netlify's own GitHub App auto-deploy - the two will
   race/double-deploy if both are enabled on the same site. Confirm which
   model a given repo uses before wiring this in.
 
 inputs:
   env:
-    description: Resolved environment name (dev/staging/prod) — e.g. branch-env-map's output.
+    description: Resolved environment name (prod or preview), e.g. branch-env-map's output.
     required: true
   publish-dir:
     description: Directory to deploy, relative to working-directory.
