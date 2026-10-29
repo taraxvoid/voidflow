@@ -7,7 +7,11 @@ description: >
 
 inputs:
   env:
-    description: Target environment name (dev/staging/prod) — e.g. branch-env-map's output.
+    description: >
+      Target environment name (prod or preview), e.g. branch-env-map's output.
+      The default command runs 'deploy --env <env>', so 'preview' needs a
+      matching env block in wrangler config; pass 'command' (for example a
+      'wrangler preview' invocation) to deploy previews another way.
     required: true
   cloudflare-api-token:
     description: Cloudflare API token with permission to deploy the target Worker.
