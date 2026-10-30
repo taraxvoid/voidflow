@@ -91,18 +91,6 @@ on:
           ignored for pnpm.
         type: boolean
         default: false
-    secrets:
-      GITLEAKS_LICENSE:
-        description: >
-          Deprecated and unused: the scan now uses the OSS gitleaks binary, which needs
-          no license. Kept so existing callers that pass it don't fail. Formerly: optional
-          gitleaks Organization license (gitleaks.io). Cross-account
-          `secrets: inherit` doesn't reliably forward repo secrets to a
-          reusable workflow owned by a different account, so callers on a
-          gitleaks Organization plan should pass this explicitly via
-          `secrets: { GITLEAKS_LICENSE: secrets.GITLEAKS_LICENSE }` (wrapped
-          in the caller's own expression syntax).
-        required: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
