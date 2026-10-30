@@ -106,6 +106,15 @@ describe('site-ci.yml docs-only filtering', () => {
     })
 })
 
+describe('site-ci.yml Bun version', () => {
+    test('comes from the caller: .bun-version if present, else setup-bun reads package.json', () => {
+        expect(validateStep('Setup Bun').with['bun-version-file']).toBe(
+            "${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}",
+        )
+        expect(validateStep('Setup Bun').with['bun-version']).toBeUndefined()
+    })
+})
+
 describe('site-ci.yml aube', () => {
     test('documents aube among the package managers and accepts it', () => {
         expect(inputs['package-manager'].description).toContain('aube')

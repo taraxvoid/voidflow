@@ -28,6 +28,14 @@ Not covered: anything the README doesn't document, `scripts/` other than the
 published bins, `rulesets/`, `cloudflare/`, tests, this repo's own CI, and
 prerelease `-next.N` versions, which may change or break between prereleases.
 
+**Pinning your runtime is your job.** voidflow sets minimums, not versions.
+Pin Bun with a `.bun-version` file or `"packageManager": "bun@x.y.z"` in
+`package.json` (`tool-ci.yml` also honors a `bun` entry in `mise.toml`).
+Without a pin, CI installs the latest Bun, so a Bun release can change your CI
+without a voidflow release. pnpm and aube versions already come from
+`packageManager`, and Node from `engines`/`volta` or `devEngines.runtime` (see
+the README).
+
 ## What each release may change
 
 **Patch** (`1.2.3` to `1.2.4`): bug fixes, docs, pinned dependency bumps that

@@ -86,6 +86,9 @@ Inputs:
 PRs that only touch non-code paths skip the work but still pass. The required
 check is `validate / Validate`.
 
+**Bun:** pin it with `.bun-version` or `"packageManager": "bun@x.y.z"`.
+Without either, CI takes the latest Bun.
+
 **pnpm / aube:** pnpm reads its version from `packageManager` and Node from
 `engines`. aube must be pinned in `mise.toml` and reads Node from
 `devEngines.runtime`. Both use `pnpm-lock.yaml`.
