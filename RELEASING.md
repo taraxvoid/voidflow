@@ -23,6 +23,10 @@ gitGraph
   merge main id: "back-merge"
 ```
 
+Which bump a change gets is set by [`STABILITY.md`](STABILITY.md): breaking
+changes (`feat!:` or a `BREAKING CHANGE:` footer) go out only in a major, after
+a deprecating minor.
+
 ## Ship a feature
 
 1. Branch from `next`, open the PR against `next`, squash-merge it.
