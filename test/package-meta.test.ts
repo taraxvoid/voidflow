@@ -21,6 +21,29 @@ describe('package.json', () => {
     })
 })
 
+// Every published entry point is either covered or explicitly experimental, so
+// a new bin or export can't ship without a stability decision.
+describe('STABILITY.md', () => {
+    const stability = read('STABILITY.md')
+    const experimental = stability.slice(stability.indexOf('### Experimental'))
+    const covered = stability.slice(0, stability.indexOf('### Experimental'))
+
+    test.each(Object.keys(pkg.bin))('classifies bin %s', (name) => {
+        expect(covered.includes(`\`${name}\``) || experimental.includes(`\`${name}\``)).toBe(true)
+    })
+
+    test.each(Object.keys(pkg.exports).filter((e) => e !== './package.json'))('classifies export %s', (name) => {
+        expect(covered.includes(`\`${name}\``) || experimental.includes(`\`${name}\``)).toBe(true)
+    })
+
+    test('the fleet tools are experimental, not covered', () => {
+        for (const name of ['voidflow', './cloudflare', './rulesets']) {
+            expect(experimental).toContain(`\`${name}\``)
+            expect(covered).not.toContain(`\`${name}\``)
+        }
+    })
+})
+
 describe('mise.toml', () => {
     test('pins every contributor tool to an exact version', () => {
         expect(existsSync(new URL('../mise.toml', import.meta.url))).toBe(true)

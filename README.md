@@ -258,7 +258,10 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 run from an org's infra repo that holds the fleet map (`--config`) and pins the
 version. `rulesets` needs `gh` with admin on the repos; `cf-tokens` also needs
 `CF_TOKEN_ADMIN`. Config shapes and flags are in
-[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config).
+[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental:
+they're expected to move to their own CLI, so the `voidflow` bin and the
+`./cloudflare` and `./rulesets` exports may change or go away in a minor
+([`STABILITY.md`](STABILITY.md#experimental)). Pin an exact version.
 
 ```sh
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
