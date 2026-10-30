@@ -62,7 +62,7 @@ Scripts it runs, if defined:
 |---|---|
 | `lint`, `check`, `build`, `test:unit` | always |
 | `check:licenses` | lockfile or `scripts/` changed |
-| `test:e2e:all` (or `test:e2e:full` if there's no `:all`) | e2e-relevant files changed; always on `merge_group`, `schedule` and `workflow_dispatch` |
+| `test:e2e:all` (or `test:e2e:full` if there's no `:all`) | code outside `e2e-ignore-paths` changed; always on `merge_group`, `schedule` and `workflow_dispatch` |
 | `test:e2e:a11y`, `test:e2e:lighthouse` | `schedule` and `workflow_dispatch` only |
 
 When workflows change it also runs jactionlint and
@@ -79,7 +79,7 @@ Inputs:
 | `build-env` | `{}` | JSON object of build env vars (not for secrets) |
 | `code-paths` | all but Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs that count as code |
 | `e2e-scripts` | `[]` | JSON array of extra e2e scripts, run in order. Missing ones fail |
-| `e2e-extra-paths` | `["wrangler.jsonc", "site.vars.json"]` | JSON array of globs that also trigger e2e |
+| `e2e-ignore-paths` | linter, git hook, Renovate, editor and vitest config | JSON array of globs whose changes alone skip e2e |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
 
@@ -97,6 +97,10 @@ Without either, CI takes the latest Bun.
 (GitHub rejects unknown inputs). `branch-env-map` takes no inputs and fails on
 `next`, `live` and pushes to other branches. a11y and Lighthouse no longer run
 on PRs; add a `schedule` (below) to keep them.
+
+**Migrating from `e2e-extra-paths`:** drop it (GitHub rejects unknown inputs).
+e2e now runs for any code change outside `e2e-ignore-paths`, so paths you
+listed there are already covered.
 
 **Merge queue:** org-owned repos can use one (personal accounts can't). Set
 `mergeQueue: true` on the repo's ruleset config and add `merge_group:` to
