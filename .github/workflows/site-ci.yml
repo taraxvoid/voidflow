@@ -4,7 +4,8 @@ name: Validation
 # for self-hosted runners pass `runner`
 # Callers need pull_request/workflow_dispatch triggers, plus push on main
 # so direct pushes are validated too, and merge_group if the repo uses a
-# merge queue (the required check must report there or the queue stalls)
+# merge queue (the required check must report there or the queue stalls),
+# and must grant `contents: read` and `pull-requests: read`.
 # e2e:all runs on ready (non-draft) PRs, merge_group and push; the heavy,
 # non-blocking a11y and lighthouse suites run only on schedule and
 # workflow_dispatch. The cron lives in the caller; remove it to stop paying.
@@ -92,18 +93,6 @@ on:
           ignored for pnpm.
         type: boolean
         default: false
-    secrets:
-      GITLEAKS_LICENSE:
-        description: >
-          Deprecated and unused: the scan now uses the OSS gitleaks binary, which needs
-          no license. Kept so existing callers that pass it don't fail. Formerly: optional
-          gitleaks Organization license (gitleaks.io). Cross-account
-          `secrets: inherit` doesn't reliably forward repo secrets to a
-          reusable workflow owned by a different account, so callers on a
-          gitleaks Organization plan should pass this explicitly via
-          `secrets: { GITLEAKS_LICENSE: secrets.GITLEAKS_LICENSE }` (wrapped
-          in the caller's own expression syntax).
-        required: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -113,7 +102,7 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read # paths-filter lists PR files through the API
 
 jobs:
   validate:
@@ -210,12 +199,10 @@ jobs:
       - name: Setup Bun
         if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'bun'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        # XXX holding off on pinning here until 1.4.x is stable
-        # in caller: specify version in package.json or .bun-version to override
-        # falls through to 'latest' if not provided
-        # with:
-          # bun-version: 1.4.2
-          # bun-version-file: ".bun-version"
+        # The caller pins Bun (STABILITY.md). Without a .bun-version, setup-bun
+        # reads package.json `packageManager`, then `engines.bun`, then takes latest.
+        with:
+          bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
 
       - name: Setup pnpm
         if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'pnpm'
@@ -350,7 +337,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: 2.1.0
+          VERSION: 2.3.0 # renovate: datasource=github-releases depName=jdx/jactionlint
 
       - name: Setup uv
         if: steps.decide.outputs.validate == 'true' && steps.changes.outputs.workflows == 'true'

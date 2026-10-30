@@ -1,4 +1,35 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>taraxvoid/voidflow"]
+  "extends": ["local>taraxvoid/voidflow"],
+  "customManagers": [
+    {
+      "description": "Tool versions pinned in this repo's workflows: `X.Y.Z # renovate: datasource=... depName=...` on the same line",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "extractVersionTemplate": "^v?(?<version>.+)$",
+      "matchStrings": [
+        "(?<currentValue>\\d+\\.\\d+\\.\\d+) # renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)"
+      ]
+    },
+    {
+      "description": "zizmor run through uvx in this repo's workflows",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "extractVersionTemplate": "^v?(?<version>.+)$",
+      "matchStrings": ["uvx zizmor@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "zizmorcore/zizmor",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "One PR per tool across mise.toml, the justfile and the workflows; test/tool-pins.test.ts fails if they disagree",
+      "matchDepNames": ["/(^|/|:)jactionlint$/"],
+      "groupName": "jactionlint"
+    },
+    {
+      "matchDepNames": ["/(^|/|:)zizmor$/"],
+      "groupName": "zizmor"
+    }
+  ]
 }

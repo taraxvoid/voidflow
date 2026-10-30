@@ -44,6 +44,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   validate:
     uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
@@ -81,6 +85,9 @@ Inputs:
 
 PRs that only touch non-code paths skip the work but still pass. The required
 check is `validate / Validate`.
+
+**Bun:** pin it with `.bun-version` or `"packageManager": "bun@x.y.z"`.
+Without either, CI takes the latest Bun.
 
 **pnpm / aube:** pnpm reads its version from `packageManager` and Node from
 `engines`. aube must be pinned in `mise.toml` and reads Node from
@@ -255,7 +262,10 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 run from an org's infra repo that holds the fleet map (`--config`) and pins the
 version. `rulesets` needs `gh` with admin on the repos; `cf-tokens` also needs
 `CF_TOKEN_ADMIN`. Config shapes and flags are in
-[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config).
+[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental:
+they're expected to move to their own CLI, so the `voidflow` bin and the
+`./cloudflare` and `./rulesets` exports may change or go away in a minor
+([`STABILITY.md`](STABILITY.md#experimental)). Pin an exact version.
 
 ```sh
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
