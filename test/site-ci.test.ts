@@ -101,6 +101,77 @@ describe('site-ci.yml docs-only filtering', () => {
     })
 })
 
+describe('site-ci.yml e2e relevance', () => {
+    const build = changesStep('e2e-filter')
+    const globsFor = (CODE: string, IGNORE: string) => {
+        const out = join(mkdtempSync(join(tmpdir(), 'site-ci-')), 'output')
+        const r = Bun.spawnSync(['bash', '-c', build.run], {
+            env: { CODE, IGNORE, GITHUB_OUTPUT: out, PATH: process.env.PATH },
+        })
+        if (r.exitCode !== 0) throw new Error(r.stderr.toString())
+        return JSON.parse(readFileSync(out, 'utf8').trim().replace(/^globs=/, '')) as string[]
+    }
+    const matcher = (globs: string[]) => {
+        const includes = globs.filter((g) => !g.startsWith('!')).map((g) => new Bun.Glob(g))
+        const excludes = globs.filter((g) => g.startsWith('!')).map((g) => new Bun.Glob(g.slice(1)))
+        return (file: string) => includes.some((g) => g.match(file)) && !excludes.some((g) => g.match(file))
+    }
+    const isE2e = matcher(globsFor(inputs['code-paths'].default, inputs['e2e-ignore-paths'].default))
+
+    test('the e2e filter is code-paths plus each ignore path as an exclude', () => {
+        expect(build.env).toEqual({ CODE: '${{ inputs.code-paths }}', IGNORE: '${{ inputs.e2e-ignore-paths }}' })
+        expect(globsFor('["**", "!docs/**"]', '["biome.json", "!lefthook.yml"]')).toEqual([
+            '**',
+            '!docs/**',
+            '!biome.json',
+            '!lefthook.yml',
+        ])
+        expect(changesStep('changes').with.filters).toContain('e2e: ${{ steps.e2e-filter.outputs.globs }}')
+    })
+
+    test('e2e-extra-paths is gone', () => {
+        expect(inputs['e2e-extra-paths']).toBeUndefined()
+    })
+
+    // Files the old allowlist missed: a denylist runs e2e for anything unlisted.
+    test.each([
+        'src/pages/index.astro',
+        'wrangler.jsonc',
+        'mise.toml',
+        'bunfig.toml',
+        'pnpm-workspace.yaml',
+        'netlify/functions/form.ts',
+        'seed/seed.json',
+        'worker/index.ts',
+        '.github/workflows/ci.yml',
+    ])('runs e2e when %s changes', (file) => expect(isE2e(file)).toBe(true))
+
+    test.each(['README.md', 'biome.json', 'lefthook.yml', 'renovate.json', 'vitest.config.ts', '.vscode/settings.json'])(
+        'skips e2e when only %s changes',
+        (file) => expect(isE2e(file)).toBe(false),
+    )
+
+    describe('resolve step', () => {
+        const run = validateStep('Resolve e2e relevance').run as string
+        const resolve = (event: string, CHANGED: string) => {
+            const out = join(mkdtempSync(join(tmpdir(), 'site-ci-')), 'output')
+            const ALWAYS = String(['merge_group', 'schedule', 'workflow_dispatch'].includes(event))
+            Bun.spawnSync(['bash', '-c', run], { env: { ALWAYS, CHANGED, GITHUB_OUTPUT: out, PATH: process.env.PATH } })
+            return readFileSync(out, 'utf8').trim()
+        }
+
+        test('follows the e2e filter on pull requests and pushes', () => {
+            expect(resolve('pull_request', 'true')).toBe('relevant=true')
+            expect(resolve('pull_request', 'false')).toBe('relevant=false')
+            expect(resolve('push', 'false')).toBe('relevant=false')
+        })
+
+        test.each(['merge_group', 'schedule', 'workflow_dispatch'])('always runs on %s', (event) => {
+            expect(resolve(event, '')).toBe('relevant=true')
+        })
+    })
+})
+
 describe('site-ci.yml aube', () => {
     test('documents aube among the package managers and accepts it', () => {
         expect(inputs['package-manager'].description).toContain('aube')

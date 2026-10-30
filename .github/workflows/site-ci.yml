@@ -55,8 +55,8 @@ on:
       e2e-scripts:
         description: >
           JSON array of extra package.json script names to run, in order,
-          after the built-in e2e tiers whenever e2e-relevant files changed,
-          e.g. '["test:e2e", "test:e2e:gtm"]'. Unlike the built-in tiers, a
+          after the built-in e2e tiers whenever e2e-relevant files changed
+          (see e2e-ignore-paths), e.g. '["test:e2e", "test:e2e:gtm"]'. Unlike the built-in tiers, a
           listed script that is missing fails the job.
         type: string
         default: '[]'
@@ -66,13 +66,15 @@ on:
           scripts already build, to avoid building twice.
         type: boolean
         default: true
-      e2e-extra-paths:
+      e2e-ignore-paths:
         description: >
-          JSON array of extra globs that count as e2e-relevant changes, on top
-          of the built-in src/, public/, test/, scripts/, astro/playwright
-          config, package.json, lockfile, tsconfig.json and workflows.
+          JSON array of globs for files that can't affect an e2e run. A pull
+          request or push runs the e2e tiers when it changes any code (see
+          code-paths) outside these. The default skips linter, git hook,
+          Renovate, editor and unit-test-runner config. A path missing here
+          only costs an extra e2e run, so list only files you're sure of.
         type: string
-        default: '["wrangler.jsonc", "site.vars.json"]'
+        default: '["biome.json", "biome.jsonc", "lefthook.yml", "renovate.json", "vitest.config.*", "unlighthouse.config.*", ".editorconfig", ".gitignore", ".gitleaksignore", ".vscode/**", ".cursor/**", ".claude/**", ".agents/**"]'
       build-env:
         description: >
           JSON object of environment variables for the build step, e.g.
@@ -157,42 +159,39 @@ jobs:
             *) echo "::error::package-manager must be 'bun', 'pnpm' or 'aube', got '$PM'" >&2; exit 1 ;;
           esac
 
+      # e2e relevance is code-paths minus e2e-ignore-paths, so a changed file
+      # nobody listed runs e2e rather than skipping it.
+      - name: Build e2e filter
+        id: e2e-filter
+        run: echo "globs=$(jq -cn --argjson code "$CODE" --argjson ignore "$IGNORE" '$code + ($ignore | map("!" + ltrimstr("!")))')" >> "$GITHUB_OUTPUT"
+        env:
+          CODE: ${{ inputs.code-paths }}
+          IGNORE: ${{ inputs.e2e-ignore-paths }}
+
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
         # merge_group and schedule have no meaningful diff base; they always run e2e.
         if: github.event_name != 'merge_group' && github.event_name != 'schedule'
         with:
-          # Lets `code` below use `!` excludes; the other filters have none, so
-          # they match as before.
+          # Lets `code` and `e2e` below use `!` excludes; the other filters have
+          # none, so they match as before.
           predicate-quantifier: some-with-excludes
           filters: |
             code: ${{ inputs.code-paths }}
+            e2e: ${{ steps.e2e-filter.outputs.globs }}
             lockfile:
               - '${{ env.LOCKFILE }}'
             scripts:
               - 'scripts/**'
             workflows:
               - '.github/workflows/**'
-            e2e_relevant:
-              - 'src/**'
-              - 'public/**'
-              - 'test/**'
-              - 'scripts/**'
-              - 'astro.config.*'
-              - 'playwright.config.*'
-              - 'package.json'
-              - '${{ env.LOCKFILE }}'
-              - 'tsconfig.json'
-              - '.github/workflows/**'
-            e2e_extra: ${{ inputs.e2e-extra-paths }}
 
       - name: Resolve e2e relevance
         id: e2e
-        run: echo "relevant=$([[ "$ALWAYS" == true || "$MAIN" == true || "$EXTRA" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: echo "relevant=$([[ "$ALWAYS" == true || "$CHANGED" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
         env:
           ALWAYS: ${{ contains(fromJSON('["merge_group", "schedule", "workflow_dispatch"]'), github.event_name) }}
-          MAIN: ${{ steps.changes.outputs.e2e_relevant }}
-          EXTRA: ${{ steps.changes.outputs.e2e_extra }}
+          CHANGED: ${{ steps.changes.outputs.e2e }}
 
       - name: Decide whether to validate
         id: decide
