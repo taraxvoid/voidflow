@@ -22,12 +22,14 @@ jobs:
 
       - name: jactionlint
         run: |
-          gh release download --repo jdx/jactionlint --pattern '*_linux_amd64.tar.gz' v2.1.0 --dir "$RUNNER_TEMP"
-          gh attestation verify -R jdx/jactionlint "$RUNNER_TEMP/jactionlint_2.1.0_linux_amd64.tar.gz"
-          tar xf "$RUNNER_TEMP"/jactionlint_2.1.0_linux_amd64.tar.gz -C "$RUNNER_TEMP"
+          tarball="jactionlint_${VERSION}_linux_amd64.tar.gz"
+          gh release download --repo jdx/jactionlint --pattern "$tarball" "v$VERSION" --dir "$RUNNER_TEMP"
+          gh attestation verify -R jdx/jactionlint "$RUNNER_TEMP/$tarball"
+          tar xf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" jactionlint
           "$RUNNER_TEMP/jactionlint" --color
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: 2.3.0 # renovate: datasource=github-releases depName=jdx/jactionlint
 
       # shellcheck ships on ubuntu-latest; jactionlint also picks it up from PATH
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
