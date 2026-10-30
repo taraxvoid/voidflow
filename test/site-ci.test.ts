@@ -18,6 +18,11 @@ describe('site-ci.yml job shape', () => {
         expect(validate.needs).toBeUndefined()
     })
 
+    // Callers must grant at least this, so anything wider is forced on all of them.
+    test('only reads: nothing in the job writes to the repo or PRs', () => {
+        expect(wf.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' })
+    })
+
     test('skips drafts and keeps full history for gitleaks', () => {
         expect(validate.if).toBe('github.event.pull_request.draft == false')
         expect(validate.steps[0].with['fetch-depth']).toBe(0)

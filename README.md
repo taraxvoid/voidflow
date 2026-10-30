@@ -44,6 +44,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   validate:
     uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z

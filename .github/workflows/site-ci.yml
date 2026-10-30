@@ -4,7 +4,8 @@ name: Validation
 # for self-hosted runners pass `runner`
 # Callers need pull_request/workflow_dispatch triggers, plus push on main
 # so direct pushes are validated too, and merge_group if the repo uses a
-# merge queue (the required check must report there or the queue stalls)
+# merge queue (the required check must report there or the queue stalls),
+# and must grant `contents: read` and `pull-requests: read`.
 # e2e:all runs on ready (non-draft) PRs, merge_group and push; the heavy,
 # non-blocking a11y and lighthouse suites run only on schedule and
 # workflow_dispatch. The cron lives in the caller; remove it to stop paying.
@@ -111,7 +112,7 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read # paths-filter lists PR files through the API
 
 jobs:
   validate:
