@@ -162,12 +162,21 @@ jobs:
           ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           persist-credentials: false
 
-      # Trusted publishing needs npm >= 11.5.1, which ships with Node 24.
+      # Trusted publishing needs npm >= 11.5.1; `npm stage publish` needs
+      # >= 11.15.0, which Node 24's bundled npm may not reach, so upgrade.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+
+      - name: Ensure npm supports staged publishing
+        run: |
+          set -euo pipefail
+          if ! npx --yes semver -r '>=11.15.0' "$(npm --version)" >/dev/null; then
+            npm install -g npm@^11.15.0
+          fi
+          npm --version
 
       - name: Check package.json version matches tag
         env:
@@ -210,7 +219,7 @@ jobs:
           if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
             echo "${NAME}@${VERSION} is already on npm, skipping."
           else
-            npm publish --tag "$DIST_TAG" "${flags[@]}"
+            npm stage publish --tag "$DIST_TAG" "${flags[@]}"
           fi
 
       # Unscoped mirror with the same code and version. It mainly reserves the
@@ -232,7 +241,7 @@ jobs:
           fi
           npm pkg set name=voidflow
           cp scripts/mirror-readme.md README.md
-          npm publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}"
+          npm stage publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}"
 
   # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
   # release. Prereleases and maintenance releases never move it. Immutable
