@@ -17,7 +17,7 @@ Covered by this policy:
 | Reusable workflows (`site-ci.yml`, `tool-ci.yml`, `upload-sarif.yml`) | Workflow paths, inputs and their defaults, secrets, outputs, job names (the required check `validate / Validate`), artifact names (`voidflow-sarif`) |
 | Composite actions (`actions/*`) | Action paths, inputs and their defaults, outputs |
 | `package.json` scripts CI runs | The script names CI looks for (`lint`, `test:unit`, `test:e2e:all`, ...) and when each runs |
-| npm / JSR package | `exports` entries and their options (`./playwright`, `./biome`), `bin` names and their flags |
+| npm / JSR package | The `./playwright` and `./biome` exports and their options; the `unlighthouse-runner` and `check-licenses` bins and their flags |
 | Biome config (`./biome`) | The rules and formatter options it sets on top of Biome's own (Biome itself is your dependency, so its upgrades are yours) |
 | Renovate preset (`default.json`) | That it validates and extends `config:best-practices` |
 | lefthook config (`lefthook/base.yml`) | Its path, the hooks it installs, the script names each runs |
@@ -25,8 +25,24 @@ Covered by this policy:
 | Tags | `vX.Y.Z` release tags, the floating `vN` major tag |
 
 Not covered: anything the README doesn't document, `scripts/` other than the
-published bins, `rulesets/`, `cloudflare/`, tests, this repo's own CI, and
+covered bins, the experimental parts below, tests, this repo's own CI, and
 prerelease `-next.N` versions, which may change or break between prereleases.
+
+### Experimental
+
+The fleet tools are published but outside this policy: the `voidflow` bin
+(`cf-tokens`, `rulesets`) and the `./cloudflare` and `./rulesets` exports that
+type their configs. They're expected to move to their own CLI, so their
+commands, flags and config shapes may change, and they may be removed, in any
+minor. The changelog says when. Pin an exact version where you run them.
+
+**Pinning your runtime is your job.** voidflow sets minimums, not versions.
+Pin Bun with a `.bun-version` file or `"packageManager": "bun@x.y.z"` in
+`package.json` (`tool-ci.yml` also honors a `bun` entry in `mise.toml`).
+Without a pin, CI installs the latest Bun, so a Bun release can change your CI
+without a voidflow release. pnpm and aube versions already come from
+`packageManager`, and Node from `engines`/`volta` or `devEngines.runtime` (see
+the README).
 
 ## What each release may change
 
@@ -79,9 +95,9 @@ When a rename would otherwise fail silently, the old name stays as a stub
 that fails loudly with the fix, as `lefthook/site.yml` does for
 `lefthook/base.yml`.
 
-Inputs that become no-ops are kept and accepted until the next major (GitHub
-rejects unknown inputs, so removing one breaks every caller that passes it), as
-`GITLEAKS_LICENSE` is in `site-ci.yml`.
+Inputs and secrets that become no-ops are kept and accepted until the next
+major (GitHub rejects unknown ones, so removing one breaks every caller that
+passes it).
 
 ## Security exception
 
