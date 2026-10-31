@@ -240,7 +240,9 @@ skip forks, which get no secrets:
 bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
 ```
 
-Also published as `voidflow`. The bins need `bun` on `PATH`.
+Also published as `voidflow`. The bins need `bun` on `PATH`. Each npm tarball
+has a GitHub build attestation; [`RELEASING.md`](RELEASING.md#verify-an-npm-tarball)
+shows how to check one.
 
 **Lighthouse budgets** - runs [Unlighthouse](https://unlighthouse.dev/) against
 the build and fails on a missed budget. Options: `--dir` (default `dist`, use
