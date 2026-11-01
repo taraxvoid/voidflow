@@ -241,3 +241,55 @@ describe('site-ci.yml extra e2e scripts and build', () => {
         expect(validateStep('Build Code').if).toBe(`${GATE} && steps.scripts.outputs.build == 'true' && inputs.build`)
     })
 })
+
+// Scheduled a11y and Lighthouse audits warn instead of failing the run unless
+// the caller sets red-audits: true.
+describe('site-ci.yml informational audits', () => {
+    const audits = [
+        ['E2E - Accessibility', 'a11y'],
+        ['E2E - Lighthouse', 'lighthouse'],
+    ] as const
+
+    test('red-audits is a boolean that defaults to false', () => {
+        expect(inputs['red-audits'].type).toBe('boolean')
+        expect(inputs['red-audits'].default).toBe(false)
+    })
+
+    test.each(audits)('%s continues on error when informational', (name, id) => {
+        const step = validateStep(name)
+        expect(step.id).toBe(id)
+        expect(step['continue-on-error']).toBe('${{ !inputs.red-audits }}')
+    })
+
+    test('a failed audit becomes a warning and a summary line', () => {
+        const step = validateStep('Report informational audit failures')
+        // No status function, so it only runs while the job is still green:
+        // with red-audits true the failure already failed the job.
+        expect(step.if).toBe(`${GATE} && (steps.a11y.outcome == 'failure' || steps.lighthouse.outcome == 'failure')`)
+        expect(step.env).toEqual({ A11Y: '${{ steps.a11y.outcome }}', LIGHTHOUSE: '${{ steps.lighthouse.outcome }}' })
+        expect(step.run).toContain('::warning ')
+        expect(step.run).toContain('$GITHUB_STEP_SUMMARY')
+        const names = validate.steps.map((s: any) => s.name)
+        for (const [audit] of audits) expect(names.indexOf(audit)).toBeLessThan(names.indexOf(step.name))
+    })
+
+    test('failure reports upload after an informational audit failure too', () => {
+        expect(validateStep('Upload failure reports').if).toBe(
+            `${GATE} && (failure() || steps.a11y.outcome == 'failure' || steps.lighthouse.outcome == 'failure')`,
+        )
+    })
+
+    test('the report step prints a warning per failed audit and exits 0', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'site-ci-audits-'))
+        const summary = join(dir, 'summary.md')
+        const r = Bun.spawnSync(['bash', '-eo', 'pipefail', '-c', validateStep('Report informational audit failures').run], {
+            env: { PATH: process.env.PATH, A11Y: 'success', LIGHTHOUSE: 'failure', GITHUB_STEP_SUMMARY: summary },
+            stdout: 'pipe',
+            stderr: 'pipe',
+        })
+        expect(r.exitCode).toBe(0)
+        expect(r.stdout.toString()).toContain('::warning title=E2E - Lighthouse failed::')
+        expect(r.stdout.toString()).not.toContain('Accessibility')
+        expect(readFileSync(summary, 'utf8')).toContain('**E2E - Lighthouse** failed')
+    })
+})
