@@ -162,20 +162,21 @@ jobs:
           ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
           persist-credentials: false
 
-      # Trusted publishing needs npm >= 11.5.1; `npm stage publish` needs
-      # >= 11.15.0, which Node 24's bundled npm may not reach, so upgrade.
+      # `npm stage publish` needs npm >= 11.15.0, newer than Node 24's bundled
+      # npm, so install an exact pinned version (npm 12 needs Node >= 24.15).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Ensure npm supports staged publishing
+      - name: Install pinned npm
+        env:
+          # renovate: datasource=npm depName=npm
+          NPM_VERSION: 12.2.1
         run: |
           set -euo pipefail
-          if ! npx --yes semver -r '>=11.15.0' "$(npm --version)" >/dev/null; then
-            npm install -g npm@^11.15.0
-          fi
+          npm install -g "npm@${NPM_VERSION}"
           npm --version
 
       - name: Check package.json version matches tag
@@ -218,9 +219,20 @@ jobs:
           VERSION=$(jq -r .version package.json)
           if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
             echo "${NAME}@${VERSION} is already on npm, skipping."
-          else
-            npm stage publish --tag "$DIST_TAG" "${flags[@]}"
+            exit 0
           fi
+          log=$(mktemp)
+          if npm stage publish --tag "$DIST_TAG" "${flags[@]}" 2>&1 | tee "$log"; then
+            exit 0
+          fi
+          # Staged versions share the published-version index, so restaging is
+          # a 409. Trusted-publishing tokens cannot run `npm stage list`, and
+          # `npm view` cannot see unapproved versions, so the 409 is the check.
+          if grep -qE '\bE409\b|409 Conflict' "$log"; then
+            echo "::notice::${NAME}@${VERSION} is already staged; approve it on npmjs.com."
+            exit 0
+          fi
+          exit 1
 
       # Unscoped mirror with the same code and version. It mainly reserves the
       # bare `voidflow` name; the README is swapped for a short pointer to the
@@ -241,7 +253,16 @@ jobs:
           fi
           npm pkg set name=voidflow
           cp scripts/mirror-readme.md README.md
-          npm stage publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}"
+          log=$(mktemp)
+          if npm stage publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}" 2>&1 | tee "$log"; then
+            exit 0
+          fi
+          # See the scoped step: a 409 means this version is already staged.
+          if grep -qE '\bE409\b|409 Conflict' "$log"; then
+            echo "::notice::voidflow@${VERSION} is already staged; approve it on npmjs.com."
+            exit 0
+          fi
+          exit 1
 
   # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
   # release. Prereleases and maintenance releases never move it. Immutable

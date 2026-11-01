@@ -74,6 +74,11 @@ floating `v0` tag are created before approval; actions consumers pin git tags,
 so this is fine, but `npm install` of the new version works only after
 approval. JSR publishes directly.
 
+Rerunning the publish job is safe: a version that is already published is
+skipped, and one that is already staged makes the registry return a 409,
+which the job reports as a notice. To restage a version (for example with a
+different dist-tag), first reject it with `npm stage reject <id>`.
+
 ## Hotfix
 
 Fix on a branch off `main`, PR to `main`, squash-merge, release as above. The
