@@ -108,3 +108,23 @@ backwards. Commit, push, open the PR against `next` and merge it with a merge co
 ## Consuming
 
 See [Pinning](README.md#pinning) for pinning options.
+
+### Verify an npm tarball
+
+The publish job packs each npm tarball (`@taraxvoid/voidflow` and the
+`voidflow` mirror), attests it with
+[`actions/attest`](https://github.com/actions/attest), then publishes that same
+file. The attestation is SLSA build provenance in GitHub's attestation store,
+separate from npm's own `--provenance`, so `gh` can check a tarball from the
+registry against this repo's release workflow:
+
+```sh
+npm pack @taraxvoid/voidflow@<version>
+gh attestation verify taraxvoid-voidflow-<version>.tgz \
+  --repo taraxvoid/voidflow \
+  --signer-workflow taraxvoid/voidflow/.github/workflows/release-please.yml
+```
+
+`npm pack <spec>` downloads the registry's tarball as is. Releases before the
+first one with this change have no attestation. A republish (`workflow_dispatch`)
+attests only what it actually publishes, and a dry run attests nothing.
