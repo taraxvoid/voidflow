@@ -23,8 +23,8 @@ describe('site-ci.yml job shape', () => {
         expect(wf.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' })
     })
 
-    test('skips drafts and keeps full history for gitleaks', () => {
-        expect(validate.if).toBe('github.event.pull_request.draft == false')
+    test('skips drafts and closed PRs, keeps full history for gitleaks', () => {
+        expect(validate.if).toBe("github.event.pull_request.draft == false && github.event.action != 'closed'")
         expect(validate.steps[0].with['fetch-depth']).toBe(0)
         expect(validateStep('Secrets Scan')).toBeDefined()
     })
