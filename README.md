@@ -260,13 +260,14 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 "check:licenses": "check-licenses"
 ```
 
-**Fleet tools** - branch rulesets and scoped Cloudflare deploy tokens as code,
-run from an org's infra repo that holds the fleet map (`--config`) and pins the
-version. `rulesets` needs `gh` with admin on the repos; `cf-tokens` also needs
-`CF_TOKEN_ADMIN`. Config shapes and flags are in
-[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental:
-they're expected to move to their own CLI, so the `voidflow` bin and the
-`./cloudflare` and `./rulesets` exports may change or go away in a minor
+**Fleet tools** - the `voidflow` CLI, for branch rulesets and scoped
+Cloudflare deploy tokens as code. Run it with `bunx` from an org's infra repo
+that holds the fleet map (`--config`) and pins the version; no voidflow
+checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
+also needs `CF_TOKEN_ADMIN`. Config shapes and flags are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental while
+they settle: the CLI's commands and flags and the `./cloudflare` and
+`./rulesets` exports may change in a minor
 ([`STABILITY.md`](STABILITY.md#experimental)). Pin an exact version.
 
 ```sh

@@ -30,11 +30,11 @@ prerelease `-next.N` versions, which may change or break between prereleases.
 
 ### Experimental
 
-The fleet tools are published but outside this policy: the `voidflow` bin
+The fleet tools are published but outside this policy: the `voidflow` CLI
 (`cf-tokens`, `rulesets`) and the `./cloudflare` and `./rulesets` exports that
-type their configs. They're expected to move to their own CLI, so their
-commands, flags and config shapes may change, and they may be removed, in any
-minor. The changelog says when. Pin an exact version where you run them.
+type their configs. They're new and still settling, so their commands, flags
+and config shapes may change in any minor. The changelog says when. Pin an
+exact version where you run them.
 
 **Pinning your runtime is your job.** voidflow sets minimums, not versions.
 Pin Bun with a `.bun-version` file or `"packageManager": "bun@x.y.z"` in
