@@ -36,6 +36,17 @@ describe('release-please.yml publish: npm tarballs are attested', () => {
         expect(cond).toContain("steps.pack.outputs.mirror != ''")
     })
 
+    // dist/ (the voidflow bin, the fleet exports' Node entry points) is
+    // gitignored, and npm skips `prepack` under --ignore-scripts, so the job
+    // builds before packing and checks each bin made it into the tarball.
+    test('builds dist before packing, and checks every bin is packed', () => {
+        expect(index('Build dist')).toBeLessThan(index('Pack npm tarballs'))
+        expect(steps[index('Build dist')].run).toContain('bun run build')
+        const pack: string = steps[index('Pack npm tarballs')].run
+        expect(pack).toContain(".bin // {} | .[]")
+        expect(pack).toContain('tar -tzf "$file" "package/${bin}"')
+    })
+
     test('packs, then attests, before anything is published', () => {
         const attest = index('Attest npm tarballs')
         expect(index('Pack npm tarballs')).toBeLessThan(attest)

@@ -243,9 +243,10 @@ skip forks, which get no secrets:
 bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
 ```
 
-Also published as `voidflow`. The bins need `bun` on `PATH`. Each npm tarball
-has a GitHub build attestation; [`RELEASING.md`](RELEASING.md#verify-an-npm-tarball)
-shows how to check one.
+Also published as `voidflow`. `check-licenses` and `unlighthouse-runner` need
+`bun` on `PATH`; the `voidflow` CLI (below) runs under Bun or Node 24+. Each
+npm tarball has a GitHub build attestation;
+[`RELEASING.md`](RELEASING.md#verify-an-npm-tarball) shows how to check one.
 
 **Lighthouse budgets** - runs [Unlighthouse](https://unlighthouse.dev/) against
 the build and fails on a missed budget. Options: `--dir` (default `dist`, use
@@ -264,9 +265,9 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 ```
 
 **Fleet tools** - the `voidflow` CLI, for branch rulesets and scoped
-Cloudflare deploy tokens as code. Run it with `bunx` from an org's infra repo
-that holds the fleet map (`--config`) and pins the version; no voidflow
-checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
+Cloudflare deploy tokens as code. Run it with `bunx` or `npx` (Node 24+) from
+an org's infra repo that holds the fleet map (`--config`) and pins the version;
+no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
 also needs `CF_TOKEN_ADMIN`. Config shapes and flags are in
 [`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental while
 they settle: the CLI's commands and flags and the `./cloudflare` and
@@ -276,6 +277,7 @@ they settle: the CLI's commands and flags and the `./cloudflare` and
 ```sh
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
 bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
+npx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts     # the same, under Node 24+
 ```
 
 **Playwright** - for Astro sites testing against `astro preview`. Needs

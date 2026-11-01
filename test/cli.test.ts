@@ -1,16 +1,48 @@
-import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, beforeAll, describe, expect, test } from 'bun:test'
+import {
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs'
 import { builtinModules } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dir, '..')
-const CLI = join(ROOT, 'scripts/cli.ts')
+const SRC_CLI = join(ROOT, 'scripts/cli.ts')
+const DIST_CLI = join(ROOT, 'dist/scripts/cli.js')
 
-async function voidflow(args: string[], cwd = ROOT) {
-    const proc = Bun.spawn(['bun', CLI, ...args], {
+// Node runs the built bin and loads .ts configs by stripping types, which it
+// does by default from 22.18 / 23.6 (`engines` asks for 24). CI installs Node
+// 24, so there a missing or too-old node fails instead of skipping.
+const nodeStrips =
+    Bun.spawnSync(
+        ['node', '-e', 'process.exit(process.features.typescript ? 0 : 1)'],
+        {
+            stdout: 'ignore',
+            stderr: 'ignore',
+        },
+    ).exitCode === 0
+if (process.env.CI && !nodeStrips)
+    throw new Error('CI needs Node 24+ on PATH for the bin tests')
+
+type Runtime = [name: string, cmd: string[]]
+const RUNTIMES: Runtime[] = [
+    ['bun (source)', ['bun', SRC_CLI]],
+    ...(nodeStrips ? ([['node (dist)', ['node', DIST_CLI]]] as Runtime[]) : []),
+]
+
+async function run(
+    cmd: string[],
+    cwd: string,
+    env: Record<string, string> = {},
+) {
+    const proc = Bun.spawn(cmd, {
         cwd,
-        env: { ...process.env, CF_TOKEN_ADMIN: '', VOIDFLOW_CONFIG_BASE: '' },
+        env: { ...process.env, ...env },
         stdout: 'pipe',
         stderr: 'pipe',
     })
@@ -27,7 +59,22 @@ afterEach(() => {
     for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true })
 })
 
-describe('voidflow bin', () => {
+beforeAll(() => {
+    const r = Bun.spawnSync(['bun', 'run', 'build'], {
+        cwd: ROOT,
+        stdout: 'pipe',
+        stderr: 'pipe',
+    })
+    if (r.exitCode !== 0) throw new Error(`bun run build failed:\n${r.stderr}`)
+})
+
+describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
+    const voidflow = (args: string[], cwd = ROOT) =>
+        run([...cli, ...args], cwd, {
+            CF_TOKEN_ADMIN: '',
+            VOIDFLOW_CONFIG_BASE: '',
+        })
+
     test('without a command, prints usage and exits 2', async () => {
         const r = await voidflow([])
         expect(r.code).toBe(2)
@@ -92,6 +139,60 @@ describe('voidflow bin', () => {
         expect(r.code).toBe(2)
         expect(r.err).toContain(`${join(dir, 'rulesets.ts')}:`)
         expect(r.err).toContain('unknown tier "nope"')
+    })
+})
+
+// The published shape: Node won't strip types inside node_modules, so the bin
+// and the `default` export condition must be plain JS there, while Bun takes
+// the `bun` condition (the .ts source). A config's value import of
+// '@taraxvoid/voidflow/rulesets' has to resolve under both.
+describe('packed tarball, installed in node_modules', () => {
+    test('runs the bin and resolves the fleet exports under each runtime', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'voidflow-pack-'))
+        roots.push(dir)
+        const pack = Bun.spawnSync(
+            ['bun', 'pm', 'pack', '--destination', dir, '--quiet'],
+            {
+                cwd: ROOT,
+                stdout: 'pipe',
+                stderr: 'pipe',
+            },
+        )
+        expect(pack.exitCode).toBe(0)
+        const tgz = pack.stdout.toString().trim().split('\n').pop()!
+        const scope = join(dir, 'node_modules/@taraxvoid')
+        mkdirSync(scope, { recursive: true })
+        expect(
+            Bun.spawnSync(['tar', 'xzf', resolve(dir, tgz), '-C', scope])
+                .exitCode,
+        ).toBe(0)
+        renameSync(join(scope, 'package'), join(scope, 'voidflow'))
+
+        writeFileSync(join(dir, 'package.json'), '{"type": "module"}')
+        writeFileSync(
+            join(dir, 'rulesets.ts'),
+            [
+                "import { tool } from '@taraxvoid/voidflow/rulesets'",
+                "export const REPOS = { 'o/r': tool({ tiers: ['nope'] as never }) }",
+            ].join('\n'),
+        )
+        const bin = join(scope, 'voidflow/dist/scripts/cli.js')
+        const env = { CF_TOKEN_ADMIN: '', VOIDFLOW_CONFIG_BASE: '' }
+        for (const runtime of nodeStrips ? ['node', 'bun'] : ['bun']) {
+            const help = await run(
+                [runtime, bin, 'rulesets', '--help'],
+                dir,
+                env,
+            )
+            expect({ runtime, code: help.code }).toEqual({ runtime, code: 0 })
+            const r = await run(
+                [runtime, bin, 'rulesets', '--config', 'rulesets.ts'],
+                dir,
+                env,
+            )
+            expect({ runtime, code: r.code }).toEqual({ runtime, code: 2 })
+            expect(r.err).toContain('unknown tier "nope"')
+        }
     })
 })
 

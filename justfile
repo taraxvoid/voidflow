@@ -99,15 +99,15 @@ config_base := "env VOIDFLOW_CONFIG_BASE=" + quote(invocation_directory())
 
 # Show how each repo's branch rulesets differ from the config (read-only; needs gh)
 rulesets-plan *args:
-    {{ config_base }} bun scripts/apply-rulesets.ts {{ args }}
+    {{ config_base }} bun scripts/cli.ts rulesets {{ args }}
 
 # Create/update branch rulesets to match the config (needs repo admin via gh)
 rulesets-apply *args:
-    {{ config_base }} bun scripts/apply-rulesets.ts --apply {{ args }}
+    {{ config_base }} bun scripts/cli.ts rulesets --apply {{ args }}
 
 # CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
 cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
-cf_tokens := cf_admin + " " + config_base + " bun scripts/cf-tokens.ts"
+cf_tokens := cf_admin + " " + config_base + " bun scripts/cli.ts cf-tokens"
 
 # Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
 cf-tokens-plan *args:
@@ -121,7 +121,7 @@ cf-tokens-apply *args:
 cf-tokens-groups *args:
     {{ cf_tokens }} --groups {{ args }}
 
-# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts transbot prod bunx wrangler deploy`
+# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts example_project prod bunx wrangler deploy`
 cf-tokens-try config repo env +cmd:
     {{ cf_tokens }} --config {{ quote(config) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 

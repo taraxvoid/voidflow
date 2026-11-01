@@ -1,14 +1,13 @@
-#!/usr/bin/env bun
 /**
  * Plan or apply the branch rulesets of the fleet in a --config module (the
  * org's infra repo), shaped as in rulesets/index.ts. Every invocation takes
  * --config <module>, e.g. ../infra/rulesets.ts:
  *
- *   bun scripts/apply-rulesets.ts --config <m>                  # plan (read-only) for every repo
- *   bun scripts/apply-rulesets.ts --config <m> --repo soundry   # plan for one repo
- *   bun scripts/apply-rulesets.ts --config <m> --check          # plan, exit 1 on drift (for CI)
- *   bun scripts/apply-rulesets.ts --config <m> --apply          # create/update to match
- *   bun scripts/apply-rulesets.ts --config <m> --apply --prune  # ...and delete retired rulesets
+ *   voidflow rulesets --config <m>                              # plan (read-only) for every repo
+ *   voidflow rulesets --config <m> --repo soundry               # plan for one repo
+ *   voidflow rulesets --config <m> --check                      # plan, exit 1 on drift (for CI)
+ *   voidflow rulesets --config <m> --apply                      # create/update to match
+ *   voidflow rulesets --config <m> --apply --prune              # ...and delete retired rulesets
  *
  * The module exports `REPOS` (or a default); a repo may be tiered or spell
  * out its rulesets in full (see RawConfig and scripts/lib/config.ts).
@@ -21,6 +20,7 @@
  */
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
+import { capture } from './lib/proc.ts'
 import {
     checkFleet,
     desired,
@@ -47,22 +47,16 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
   --prune            with --apply, also delete the rulesets listed under retire`
 
 async function gh(args: string[], body?: unknown): Promise<any> {
-    const proc = Bun.spawn(['gh', 'api', ...args], {
-        stdin: body === undefined ? 'ignore' : new Blob([JSON.stringify(body)]),
-        stdout: 'pipe',
-        stderr: 'pipe',
-    })
-    const [out, err, code] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-    ])
+    const { code, out, err } = await capture(
+        ['gh', 'api', ...args],
+        body === undefined ? undefined : JSON.stringify(body),
+    )
     if (code !== 0) throw new Error(`gh api ${args.join(' ')}: ${err || out}`)
     return out ? JSON.parse(out) : null
 }
 
 /** `prog` names the command in the --help usage. */
-export async function main(argv: string[], prog = 'bun scripts/apply-rulesets.ts') {
+export async function main(argv: string[], prog = 'voidflow rulesets') {
     const { values } = parseOrExit(argv, { options: OPTIONS }, usage(prog))
 
     const REPOS = await loadOrExit(values.config, checkFleet)
@@ -149,5 +143,3 @@ export async function main(argv: string[], prog = 'bun scripts/apply-rulesets.ts
     )
     if (values.check && drift > 0) process.exit(1)
 }
-
-if (import.meta.main) await main(process.argv.slice(2))

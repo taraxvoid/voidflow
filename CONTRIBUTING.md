@@ -142,7 +142,7 @@ deploy with a throwaway token that has the same policies. From the site's
 checkout:
 
 ```sh
-just -f ../infra/justfile cf-tokens-try transbot prod bunx wrangler deploy
+just -f ../infra/justfile cf-tokens-try example_project prod bunx wrangler deploy
 ```
 
 The real token can't be used locally (its value only exists in GitHub), and
@@ -191,13 +191,19 @@ checkout; `rulesets` and `cf-tokens` both require `--config`.
 
 ```sh
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts --check
-bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts --apply --repo transbot
+npx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts --apply --repo example_project
 ```
 
 Each command takes its script's flags (`scripts/apply-rulesets.ts`,
-`scripts/cf-tokens.ts`) and lists them with `--help`. The bin needs `bun` on
-`PATH`, `npx` included. In this repo, the `rulesets-*` and `cf-tokens-*`
-recipes run the same scripts from the checkout.
+`scripts/cf-tokens.ts`) and lists them with `--help`. The bin runs under Bun or
+Node 24+ (`bunx` or `npx`); the package ships it built to `dist/`. In this repo,
+the `rulesets-*` and `cf-tokens-*` recipes run the same entry point
+(`scripts/cli.ts`) from the checkout.
+
+The config modules stay TypeScript under either runtime. Node 24 loads them by
+stripping types, which covers erasable syntax only: type annotations, `type` /
+`interface`, `as` and `satisfies`, but no `enum`, `namespace` or constructor
+parameter properties. Write configs as plain data plus types, as below.
 
 With `@taraxvoid/voidflow` as a devDependency of the infra repo (the same
 version the recipes pin), a config module can type its map against its
