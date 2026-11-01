@@ -102,10 +102,7 @@ export const RENEW_DAYS = 14
 //
 // WORKER_EDITOR is the set the dashboard produced for "Specified Workers >
 // Editor" (2026-10, twice). It mixes the new Workers role groups with legacy
-// ones (KV, R2, Scripts, Account Settings). Shaken down 2026-10 on transbot
-// (custom domain, zone grant only) and taraxvoid.net (KV bound by id, two
-// zones): both deployed with no fallback. Whether every group is needed is
-// untested.
+// ones (KV, R2, Scripts, Account Settings). 
 export const WORKER_EDITOR = [
     'cb142f7fbc3540f0bade0cbe75f606dc',
     'bdbcd690c763475a985e8641dddc09f7',

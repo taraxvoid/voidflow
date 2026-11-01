@@ -142,7 +142,7 @@ deploy with a throwaway token that has the same policies. From the site's
 checkout:
 
 ```sh
-just -f ../infra/justfile cf-tokens-try transbot prod bunx wrangler deploy
+just -f ../infra/justfile cf-tokens-try example_project prod bunx wrangler deploy
 ```
 
 The real token can't be used locally (its value only exists in GitHub), and
@@ -191,7 +191,7 @@ checkout; `rulesets` and `cf-tokens` both require `--config`.
 
 ```sh
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts --check
-npx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts --apply --repo transbot
+npx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts --apply --repo example_project
 ```
 
 Each command takes its script's flags (`scripts/apply-rulesets.ts`,

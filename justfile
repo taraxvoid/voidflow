@@ -121,7 +121,7 @@ cf-tokens-apply *args:
 cf-tokens-groups *args:
     {{ cf_tokens }} --groups {{ args }}
 
-# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts transbot prod bunx wrangler deploy`
+# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts example_project prod bunx wrangler deploy`
 cf-tokens-try config repo env +cmd:
     {{ cf_tokens }} --config {{ quote(config) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 

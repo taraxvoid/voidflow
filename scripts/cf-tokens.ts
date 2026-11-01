@@ -4,13 +4,13 @@
  * Every invocation takes --config <module>, e.g. ../infra/cf-tokens.ts:
  *
  *   voidflow cf-tokens                          # plan (read-only), every repo
- *   voidflow cf-tokens --repo transbot          # plan one repo
+ *   voidflow cf-tokens --repo example_project          # plan one repo
  *   voidflow cf-tokens --check                  # plan, exit 1 on drift or a token due to rotate
  *   voidflow cf-tokens --apply                  # create/update/rotate, set the GitHub env secrets
  *   voidflow cf-tokens --apply --rotate         # ...and rotate every token now
  *   voidflow cf-tokens --apply --prune          # ...and delete the repo's `retire` tokens
  *   voidflow cf-tokens --groups                 # live names of the permission group ids used
- *   voidflow cf-tokens --repo transbot --try prod -- bunx wrangler deploy
+ *   voidflow cf-tokens --repo example_project --try prod -- bunx wrangler deploy
  *                                               # run a command with a throwaway token scoped like prod's
  *
  * The module exports `REPOS` (or a default); see scripts/lib/config.ts.
