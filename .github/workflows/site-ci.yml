@@ -93,14 +93,14 @@ on:
           ignored for pnpm.
         type: boolean
         default: false
-      audits-informational:
+      red-audits:
         description: >
           Report a failed accessibility or Lighthouse audit (test:e2e:a11y,
           test:e2e:lighthouse, run on schedule and workflow_dispatch) as a
           warning and a job-summary line instead of failing the run. The
           failure reports still upload. Set false to make a red audit fail CI.
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -429,22 +429,20 @@ jobs:
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all != 'true' && steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true')
         run: '"$PM" run test:e2e:full'
 
-      # Heavy, only on the caller's cron or a manual run, and informational by
-      # default (audits-informational): a failure is reported below, not fatal.
+      # a11y and lighthouse checks run on a cron / manually
+      # Set 'red-audits' = true to have them fail CI instead of warning
       - name: E2E - Accessibility
         id: a11y
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
-        continue-on-error: ${{ inputs.audits-informational }}
+        continue-on-error: ${{ !inputs.red-audits }}
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Lighthouse
         id: lighthouse
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
-        continue-on-error: ${{ inputs.audits-informational }}
+        continue-on-error: ${{ !inputs.red-audits }}
         run: '"$PM" run test:e2e:lighthouse'
 
-      # With continue-on-error a failed audit leaves the job green, so say so
-      # where people look: an annotation on the run and a job-summary line.
       - name: Report informational audit failures
         if: steps.decide.outputs.validate == 'true' && (steps.a11y.outcome == 'failure' || steps.lighthouse.outcome == 'failure')
         env:
@@ -454,7 +452,7 @@ jobs:
           for audit in "Accessibility:${A11Y}" "Lighthouse:${LIGHTHOUSE}"; do
             name=${audit%%:*}
             if [ "${audit#*:}" = failure ]; then
-              echo "::warning title=E2E - ${name} failed::The ${name} audit failed. It is informational (audits-informational), so the run stays green; see that step's log and the ci-reports artifact."
+              echo "::warning title=E2E - ${name} failed::The ${name} audit failed. It is informational (red-audits not set), so the run stays green; see that step's log and the ci-reports artifact."
               echo "- :warning: **E2E - ${name}** failed (informational; see the step log and the \`ci-reports\` artifact)" >> "$GITHUB_STEP_SUMMARY"
             fi
           done
@@ -468,7 +466,6 @@ jobs:
         env:
           SCRIPTS: ${{ inputs.e2e-scripts }}
 
-      # Also after an informational audit failure, which leaves the job green.
       - name: Upload failure reports
         if: steps.decide.outputs.validate == 'true' && (failure() || steps.a11y.outcome == 'failure' || steps.lighthouse.outcome == 'failure')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

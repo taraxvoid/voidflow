@@ -243,28 +243,28 @@ describe('site-ci.yml extra e2e scripts and build', () => {
 })
 
 // Scheduled a11y and Lighthouse audits warn instead of failing the run unless
-// the caller sets audits-informational: false.
+// the caller sets red-audits: true.
 describe('site-ci.yml informational audits', () => {
     const audits = [
         ['E2E - Accessibility', 'a11y'],
         ['E2E - Lighthouse', 'lighthouse'],
     ] as const
 
-    test('audits-informational is a boolean that defaults to true', () => {
-        expect(inputs['audits-informational'].type).toBe('boolean')
-        expect(inputs['audits-informational'].default).toBe(true)
+    test('red-audits is a boolean that defaults to false', () => {
+        expect(inputs['red-audits'].type).toBe('boolean')
+        expect(inputs['red-audits'].default).toBe(false)
     })
 
     test.each(audits)('%s continues on error when informational', (name, id) => {
         const step = validateStep(name)
         expect(step.id).toBe(id)
-        expect(step['continue-on-error']).toBe('${{ inputs.audits-informational }}')
+        expect(step['continue-on-error']).toBe('${{ !inputs.red-audits }}')
     })
 
     test('a failed audit becomes a warning and a summary line', () => {
         const step = validateStep('Report informational audit failures')
         // No status function, so it only runs while the job is still green:
-        // with audits-informational false the failure already failed the job.
+        // with red-audits true the failure already failed the job.
         expect(step.if).toBe(`${GATE} && (steps.a11y.outcome == 'failure' || steps.lighthouse.outcome == 'failure')`)
         expect(step.env).toEqual({ A11Y: '${{ steps.a11y.outcome }}', LIGHTHOUSE: '${{ steps.lighthouse.outcome }}' })
         expect(step.run).toContain('::warning ')

@@ -81,7 +81,7 @@ Inputs:
 | `e2e-scripts` | `[]` | JSON array of extra e2e scripts, run in order. Missing ones fail |
 | `e2e-ignore-paths` | linter, git hook, Renovate, editor and vitest config | JSON array of globs whose changes alone skip e2e |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI |
-| `audits-informational` | `true` | A failed a11y or Lighthouse audit warns instead of failing the run |
+| `red-audits` | `false` | A failed a11y or Lighthouse audit turns its CI job red |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
 
 PRs that only touch non-code paths skip the work but still pass. The required
@@ -107,11 +107,10 @@ listed there are already covered.
 `mergeQueue: true` on the repo's ruleset config and add `merge_group:` to
 `on:` so the required check reports on the queue's branch.
 
-**Scheduled a11y and Lighthouse:** these run only on a schedule or a manual
-dispatch, and are informational: a failed audit adds a warning annotation and
+**Scheduled a11y and Lighthouse:** jobs run on a schedule or manual
+dispatch - by default a failed audit adds a warning annotation and
 a job-summary line, uploads the failure reports, and leaves the run green. Set
-`audits-informational: false` to make a failed audit fail the run (the
-behaviour before 1.0). The cron is the caller's; drop it to stop running them:
+`red-audits: true` to make a failed audit fail the run instead.
 
 ```yaml
 on:
