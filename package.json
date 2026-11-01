@@ -2,6 +2,7 @@
     "name": "@taraxvoid/voidflow",
     "version": "1.0.0-next",
     "description": "Reusable GitHub Actions CI/CD for TypeScript sites and tools: supply-chain and security gates, accessibility and performance budgets, Cloudflare and Netlify deploys.",
+    "type": "module",
     "license": "MIT",
     "keywords": [
         "github-actions",
@@ -27,7 +28,7 @@
         "provenance": true
     },
     "bin": {
-        "voidflow": "scripts/cli.ts",
+        "voidflow": "dist/scripts/cli.js",
         "unlighthouse-runner": "scripts/unlighthouse/run.ts",
         "check-licenses": "scripts/check-licenses.ts"
     },
@@ -37,8 +38,16 @@
             "default": "./playwright/index.mjs"
         },
         "./biome": "./biome/base.json",
-        "./cloudflare": "./cloudflare/tokens.ts",
-        "./rulesets": "./rulesets/index.ts",
+        "./cloudflare": {
+            "types": "./cloudflare/tokens.ts",
+            "bun": "./cloudflare/tokens.ts",
+            "default": "./dist/cloudflare/tokens.js"
+        },
+        "./rulesets": {
+            "types": "./rulesets/index.ts",
+            "bun": "./rulesets/index.ts",
+            "default": "./dist/rulesets/index.js"
+        },
         "./package.json": "./package.json"
     },
     "files": [
@@ -46,18 +55,17 @@
         "playwright",
         "scripts/unlighthouse",
         "scripts/check-licenses.ts",
-        "scripts/cli.ts",
-        "scripts/cf-tokens.ts",
-        "scripts/apply-rulesets.ts",
-        "scripts/lib",
+        "dist",
         "cloudflare",
         "rulesets"
     ],
     "engines": {
         "bun": ">=1.4.0",
-        "node": ">=22"
+        "node": ">=24"
     },
     "scripts": {
+        "build": "bun build ./scripts/cli.ts ./cloudflare/tokens.ts ./rulesets/index.ts --outdir=dist --root=. --target=node --format=esm --splitting --packages=external",
+        "prepack": "rm -rf dist && bun run build",
         "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
         "test": "bun test"
     },

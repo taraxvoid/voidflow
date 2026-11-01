@@ -189,6 +189,19 @@ jobs:
             exit 1
           fi
 
+      # The voidflow bin and the fleet exports' Node entry points live in dist/,
+      # which is gitignored. Packing runs `prepack` (which builds too), but npm's
+      # script handling under --ignore-scripts is not something to lean on, so
+      # build here. A tag from before dist/ existed has no build script.
+      - name: Build dist
+        run: |
+          set -euo pipefail
+          if jq -e '.scripts.build' package.json >/dev/null; then
+            bun run build
+          else
+            echo "No build script at this tag; nothing to build."
+          fi
+
       # Pack each package that isn't on npm yet. The mirror is the same code
       # under the bare `voidflow` name with a pointer README; the working tree
       # is restored afterwards so JSR publishes the real README. npm still runs
@@ -210,6 +223,14 @@ jobs:
             file="${PACK_DIR}/$(echo "${name#@}" | tr / -)-${VERSION}.tgz"
             npm pack --ignore-scripts --pack-destination "$PACK_DIR" >&2
             test -f "$file"
+            # Every bin must be in the tarball (dist/ is built, not committed).
+            local bin
+            for bin in $(jq -r '.bin // {} | .[]' package.json); do
+              if ! tar -tzf "$file" "package/${bin}" >/dev/null 2>&1; then
+                echo "::error::${file##*/} is missing its bin ${bin}" >&2
+                exit 1
+              fi
+            done
             echo "$file"
           }
 

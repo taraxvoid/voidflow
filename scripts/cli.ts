@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * The `voidflow` bin: the fleet tools, for an org's infra repo to run from a
  * pinned release instead of a voidflow checkout.

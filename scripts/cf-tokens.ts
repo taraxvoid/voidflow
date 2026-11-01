@@ -1,17 +1,16 @@
-#!/usr/bin/env bun
 /**
  * Plan, apply or rotate scoped Cloudflare deploy tokens for the fleet in the
  * --config module (the org's infra repo), shaped as in cloudflare/tokens.ts.
  * Every invocation takes --config <module>, e.g. ../infra/cf-tokens.ts:
  *
- *   bun scripts/cf-tokens.ts                    # plan (read-only), every repo
- *   bun scripts/cf-tokens.ts --repo transbot    # plan one repo
- *   bun scripts/cf-tokens.ts --check            # plan, exit 1 on drift or a token due to rotate
- *   bun scripts/cf-tokens.ts --apply            # create/update/rotate, set the GitHub env secrets
- *   bun scripts/cf-tokens.ts --apply --rotate   # ...and rotate every token now
- *   bun scripts/cf-tokens.ts --apply --prune    # ...and delete the repo's `retire` tokens
- *   bun scripts/cf-tokens.ts --groups           # live names of the permission group ids used
- *   bun scripts/cf-tokens.ts --repo transbot --try prod -- bunx wrangler deploy
+ *   voidflow cf-tokens                          # plan (read-only), every repo
+ *   voidflow cf-tokens --repo transbot          # plan one repo
+ *   voidflow cf-tokens --check                  # plan, exit 1 on drift or a token due to rotate
+ *   voidflow cf-tokens --apply                  # create/update/rotate, set the GitHub env secrets
+ *   voidflow cf-tokens --apply --rotate         # ...and rotate every token now
+ *   voidflow cf-tokens --apply --prune          # ...and delete the repo's `retire` tokens
+ *   voidflow cf-tokens --groups                 # live names of the permission group ids used
+ *   voidflow cf-tokens --repo transbot --try prod -- bunx wrangler deploy
  *                                               # run a command with a throwaway token scoped like prod's
  *
  * The module exports `REPOS` (or a default); see scripts/lib/config.ts.
@@ -28,6 +27,7 @@
  */
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
+import { capture, inherit } from './lib/proc.ts'
 import {
     WORKERS_ROUTES_WRITE,
     checkRepos,
@@ -76,7 +76,7 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
 Needs CF_TOKEN_ADMIN and gh with admin on the repos.`
 
 /** `prog` names the command in the --help usage. */
-export async function main(argv: string[], prog = 'bun scripts/cf-tokens.ts') {
+export async function main(argv: string[], prog = 'voidflow cf-tokens') {
     const { values, positionals } = parseOrExit(
         argv,
         { options: OPTIONS, allowPositionals: true },
@@ -149,16 +149,7 @@ export async function main(argv: string[], prog = 'bun scripts/cf-tokens.ts') {
     }
 
     async function gh(args: string[], stdin?: string): Promise<string> {
-        const proc = Bun.spawn(['gh', ...args], {
-            stdin: stdin === undefined ? 'ignore' : new Blob([stdin]),
-            stdout: 'pipe',
-            stderr: 'pipe',
-        })
-        const [out, err, code] = await Promise.all([
-            new Response(proc.stdout).text(),
-            new Response(proc.stderr).text(),
-            proc.exited,
-        ])
+        const { code, out, err } = await capture(['gh', ...args], stdin)
         if (code !== 0) throw new Error(`gh ${args.join(' ')}: ${err || out}`)
         return out
     }
@@ -438,12 +429,10 @@ export async function main(argv: string[], prog = 'bun scripts/cf-tokens.ts') {
                 CLOUDFLARE_ACCOUNT_ID: acct,
             }
             delete childEnv.CF_TOKEN_ADMIN
-            const proc = Bun.spawn(cmd, {
+            code = await inherit(cmd, {
                 cwd: process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
                 env: childEnv,
-                stdio: ['inherit', 'inherit', 'inherit'],
             })
-            code = await proc.exited
         } finally {
             await cf('DELETE', `/accounts/${acct}/tokens/${t.id}`)
             console.log(`try ${t.id} deleted; the command exited ${code}`)
@@ -516,5 +505,3 @@ export async function main(argv: string[], prog = 'bun scripts/cf-tokens.ts') {
     console.log(`\n${summary}${failed ? `, ${failed} env(s) failed` : ''}`)
     if (failed > 0 || (values.check && pending > 0)) process.exit(1)
 }
-
-if (import.meta.main) await main(process.argv.slice(2))

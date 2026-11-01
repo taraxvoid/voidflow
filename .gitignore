@@ -37,3 +37,6 @@ npm-debug.log*
 
 # Unlighthouse
 .unlighthouse/
+
+# Built CLI and fleet exports (bun run build; packed, never committed)
+dist/
