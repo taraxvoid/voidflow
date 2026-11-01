@@ -30,6 +30,11 @@
       "groupName": "github actions"
     },
     {
+      "description": "shellcheck is actively developed but releases roughly once a year, so the default abandonment check false-positives",
+      "matchPackageNames": ["shellcheck", "koalaman/shellcheck"],
+      "abandonmentThreshold": "2 years"
+    },
+    {
       "matchPackageNames": ["astro", "@astrojs/**"],
       "groupName": "astro"
     },
