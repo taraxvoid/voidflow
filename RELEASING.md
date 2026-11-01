@@ -63,6 +63,22 @@ patch bump. Fix it with a squash-merged PR to `main` whose body ends with a
 `Release-As: X.Y.Z` footer (the squash commit message is the PR body), then
 add the missed entries to the release PR's `CHANGELOG.md` by hand.
 
+## Approve the npm release
+
+npm packages are published with `npm stage publish`: the workflow uploads each
+version to npm's staging area and it is not live until a human approves it
+with 2FA. Each release stages two packages (`@taraxvoid/voidflow` and the
+unscoped `voidflow` mirror), so approve both, via the Staged Packages tab on
+npmjs.com or `npm stage approve <id>`. The GitHub release, `vX.Y.Z` tag and
+floating `v0` tag are created before approval; actions consumers pin git tags,
+so this is fine, but `npm install` of the new version works only after
+approval. JSR publishes directly.
+
+Rerunning the publish job is safe: a version that is already published is
+skipped, and one that is already staged makes the registry return a 409,
+which the job reports as a notice. To restage a version (for example with a
+different dist-tag), first reject it with `npm stage reject <id>`.
+
 ## Hotfix
 
 Fix on a branch off `main`, PR to `main`, squash-merge, release as above. The

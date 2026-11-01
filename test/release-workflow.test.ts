@@ -49,7 +49,9 @@ describe('release-please.yml publish: npm tarballs are attested', () => {
         expect(mirror.env.TARBALL).toBe('${{ steps.pack.outputs.mirror }}')
         for (const s of [scoped, mirror]) {
             expect(s.if).toBe(`${s.env.TARBALL.replace(/^\$\{\{ | \}\}$/g, '')} != ''`)
-            expect(s.run).toContain('npm publish "$TARBALL" ')
+            // Staged: a human approves each version with 2FA before it goes live.
+            expect(s.run).toContain('npm stage publish "$TARBALL" ')
+            expect(s.run).not.toMatch(/(^|\s)npm publish /m)
             expect(s.run).not.toContain('npm pkg set')
         }
     })
