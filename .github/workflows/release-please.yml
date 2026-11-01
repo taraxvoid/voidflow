@@ -17,7 +17,10 @@ name: Release Please
 # RELEASE_BOT_APP_PRIVATE_KEY are org-level secrets shared with the sibling
 # repos.
 #
-# npm publishing uses trusted publishing (OIDC)
+# npm publishing uses trusted publishing (OIDC). Each npm tarball is packed
+# once, attested with actions/attest (SLSA build provenance in GitHub's
+# attestation store), and that same file is published, so the bytes on npm are
+# the bytes the attestation covers. RELEASING.md shows how to verify one.
 #
 on:
   push:
@@ -122,6 +125,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
 
     steps:
       # Tooling comes from the branch that triggered the run, not the tag, so
@@ -195,6 +199,60 @@ jobs:
             exit 1
           fi
 
+      # Pack each package that isn't on npm yet. The mirror is the same code
+      # under the bare `voidflow` name with a pointer README; the working tree
+      # is restored afterwards so JSR publishes the real README. npm still runs
+      # `prepare` despite --ignore-scripts (it only installs git hooks here) and
+      # prints it on stdout, so the tarball path is derived, not parsed.
+      - name: Pack npm tarballs
+        id: pack
+        env:
+          PACK_DIR: ${{ runner.temp }}/npm-pack
+        run: |
+          set -euo pipefail
+          mkdir -p "$PACK_DIR"
+          NAME=$(jq -r .name package.json)
+          VERSION=$(jq -r .version package.json)
+          # npm names the tarball <name>-<version>.tgz, @scope/pkg as scope-pkg.
+          pack() {
+            local name file
+            name=$(jq -r .name package.json)
+            file="${PACK_DIR}/$(echo "${name#@}" | tr / -)-${VERSION}.tgz"
+            npm pack --ignore-scripts --pack-destination "$PACK_DIR" >&2
+            test -f "$file"
+            echo "$file"
+          }
+
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${NAME}@${VERSION} is already on npm, skipping."
+          else
+            # Assign first: set -e ignores a failure inside `echo "x=$(...)"`.
+            file=$(pack)
+            echo "scoped=${file}" >> "$GITHUB_OUTPUT"
+          fi
+
+          if npm view "voidflow@${VERSION}" version >/dev/null 2>&1; then
+            echo "voidflow@${VERSION} is already on npm, skipping."
+          else
+            npm pkg set name=voidflow
+            cp scripts/mirror-readme.md README.md
+            file=$(pack)
+            echo "mirror=${file}" >> "$GITHUB_OUTPUT"
+            git checkout -- package.json README.md
+          fi
+          ls -l "$PACK_DIR"
+
+      # Before any publish, so a version never reaches npm without its
+      # attestation. Skipped on a dry run, which would otherwise write real
+      # attestations for tarballs that are never published.
+      - name: Attest npm tarballs
+        if: >-
+          !inputs.dry-run &&
+          (steps.pack.outputs.scoped != '' || steps.pack.outputs.mirror != '')
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/npm-pack/*.tgz
+
       # JSR is linked to this repo so trusted publishing Just Works^TM
       - name: Publish @taraxvoid/voidflow to JSR
         env:
@@ -207,29 +265,26 @@ jobs:
           npx --yes jsr publish "${flags[@]}"
 
       - name: Publish @taraxvoid/voidflow to NPM (scoped canonical package)
+        if: steps.pack.outputs.scoped != ''
         env:
           DIST_TAG: ${{ needs.channel.outputs.dist_tag }}
           DRY_RUN: ${{ inputs.dry-run }}
+          TARBALL: ${{ steps.pack.outputs.scoped }}
         run: |
           set -euo pipefail
           flags=()
           if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
           : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
-          NAME=$(jq -r .name package.json)
-          VERSION=$(jq -r .version package.json)
-          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
-            echo "${NAME}@${VERSION} is already on npm, skipping."
-            exit 0
-          fi
           log=$(mktemp)
-          if npm stage publish --tag "$DIST_TAG" "${flags[@]}" 2>&1 | tee "$log"; then
+          if npm stage publish "$TARBALL" --tag "$DIST_TAG" "${flags[@]}" 2>&1 | tee "$log"; then
             exit 0
           fi
           # Staged versions share the published-version index, so restaging is
           # a 409. Trusted-publishing tokens cannot run `npm stage list`, and
-          # `npm view` cannot see unapproved versions, so the 409 is the check.
+          # `npm view` (in the pack step) cannot see unapproved versions, so the
+          # 409 is the check.
           if grep -qE '\bE409\b|409 Conflict' "$log"; then
-            echo "::notice::${NAME}@${VERSION} is already staged; approve it on npmjs.com."
+            echo "::notice::${TARBALL##*/} is already staged; approve it on npmjs.com."
             exit 0
           fi
           exit 1
@@ -238,28 +293,23 @@ jobs:
       # bare `voidflow` name; the README is swapped for a short pointer to the
       # scoped package so the npm page reads as intentional.
       - name: Publish voidflow (unscoped mirror)
+        if: steps.pack.outputs.mirror != ''
         env:
           DIST_TAG: ${{ needs.channel.outputs.dist_tag }}
           DRY_RUN: ${{ inputs.dry-run }}
+          TARBALL: ${{ steps.pack.outputs.mirror }}
         run: |
           set -euo pipefail
           flags=()
           if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
           : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
-          VERSION=$(jq -r .version package.json)
-          if npm view "voidflow@${VERSION}" version >/dev/null 2>&1; then
-            echo "voidflow@${VERSION} is already on npm, skipping."
-            exit 0
-          fi
-          npm pkg set name=voidflow
-          cp scripts/mirror-readme.md README.md
           log=$(mktemp)
-          if npm stage publish --tag "$DIST_TAG" --loglevel verbose "${flags[@]}" 2>&1 | tee "$log"; then
+          if npm stage publish "$TARBALL" --tag "$DIST_TAG" --loglevel verbose "${flags[@]}" 2>&1 | tee "$log"; then
             exit 0
           fi
           # See the scoped step: a 409 means this version is already staged.
           if grep -qE '\bE409\b|409 Conflict' "$log"; then
-            echo "::notice::voidflow@${VERSION} is already staged; approve it on npmjs.com."
+            echo "::notice::${TARBALL##*/} is already staged; approve it on npmjs.com."
             exit 0
           fi
           exit 1
