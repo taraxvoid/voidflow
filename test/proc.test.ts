@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { capture, inherit } from '../scripts/lib/proc.ts'
 
 describe('capture', () => {
@@ -22,11 +24,14 @@ describe('capture', () => {
 
 describe('inherit', () => {
     test('resolves with the exit code, in cwd, with env', async () => {
+        // Resolve symlinks: on macOS /tmp -> /private/tmp, and a child with no
+        // inherited PWD reports the physical path.
+        const dir = realpathSync(tmpdir())
         const code = await inherit(
-            ['sh', '-c', 'test "$PWD" = /tmp && test "$X" = y && exit 4'],
+            ['sh', '-c', 'test "$PWD" = "$WANT" && test "$X" = y && exit 4'],
             {
-                cwd: '/tmp',
-                env: { PATH: process.env.PATH, X: 'y' },
+                cwd: dir,
+                env: { PATH: process.env.PATH, X: 'y', WANT: dir },
             },
         )
         expect(code).toBe(4)
