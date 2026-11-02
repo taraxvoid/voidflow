@@ -25,7 +25,6 @@ export type Ruleset = {
 
 // Integration (GitHub App) ids as they appear in required status checks.
 export const GITHUB_ACTIONS = 15368
-export const NETLIFY = 13473
 
 // RepositoryRole 5 is "Admin".
 const ADMIN_VIA_PR: BypassActor = {
@@ -50,8 +49,6 @@ export type Tier = 'main' | 'next' | 'live' | 'prerelease' | 'maintenance'
 export type RepoConfig = {
     /** Tiers to manage; a tier not listed gets no ruleset. */
     tiers: Tier[]
-    /** Require Netlify's deploy status (sites deployed via Netlify). */
-    netlify: boolean
     /** Status check contexts from GitHub Actions. */
     checks: string[]
     /** Require CODEOWNERS review. */
@@ -97,10 +94,9 @@ const isRaw = (cfg: RepoConfig | RawConfig): cfg is RawConfig =>
 const VALIDATE_CHECK = 'validate / Validate'
 
 // Tools (CLIs, libraries) run a single `main` validated by tool-ci.yml, with
-// no Netlify deploy and nothing to retire.
+// nothing to retire.
 export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     tiers: ['main'],
-    netlify: false,
     checks: [VALIDATE_CHECK],
     codeowners: true,
     linearHistory: true,
@@ -157,9 +153,6 @@ function bypassFor(tier: Tier, cfg: RepoConfig): BypassActor[] {
 
 export function build(tier: Tier, cfg: RepoConfig): Ruleset {
     const contexts = [
-        ...(cfg.netlify
-            ? [{ context: 'deploy/netlify', integration_id: NETLIFY }]
-            : []),
         ...cfg.checks.map((context) => ({
             context,
             integration_id: GITHUB_ACTIONS,
