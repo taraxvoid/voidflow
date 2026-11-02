@@ -9,14 +9,9 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { packageRoot } from './lib/package-root.ts'
+import { json, TEMPLATE_PLACEHOLDERS } from './lib/template-format.ts'
 
-export const TEMPLATE_PLACEHOLDERS = [
-    '{{version}}',
-    '{{sha}}',
-    '{{kind}}',
-    '{{cron_minute}}',
-    '{{repo}}',
-] as const
+export { TEMPLATE_PLACEHOLDERS }
 
 const read = (root: string, p: string) => readFileSync(join(root, p), 'utf8')
 
@@ -35,31 +30,6 @@ function need<T>(v: T | undefined, what: string): T {
     if (v === undefined) throw new Error(`build-templates: ${what} not found`)
     return v
 }
-
-/**
- * JSON as biome prints it with biome/base.json (4-space indent, width 80):
- * objects expanded, arrays on one line when they fit. Generated repos run
- * `biome check .`, so the written files must already be formatted.
- */
-function fmt(v: unknown, indent: string, used: number): string {
-    if (Array.isArray(v)) {
-        const flat = `[${v.map((x) => JSON.stringify(x)).join(', ')}]`
-        const scalars = !v.some((x) => typeof x === 'object' && x !== null)
-        if (scalars && used + flat.length + 1 <= 80) return flat
-        const inner = `${indent}    `
-        return `[\n${v.map((x) => inner + fmt(x, inner, inner.length)).join(',\n')}\n${indent}]`
-    }
-    if (typeof v === 'object' && v !== null) {
-        const inner = `${indent}    `
-        const rows = Object.entries(v).map(([k, x]) => {
-            const key = `${JSON.stringify(k)}: `
-            return inner + key + fmt(x, inner, inner.length + key.length)
-        })
-        return `{\n${rows.join(',\n')}\n${indent}}`
-    }
-    return JSON.stringify(v)
-}
-const json = (v: unknown) => `${fmt(v, '', 0)}\n`
 
 const sarifJob = `# Uncomment to upload gitleaks/zizmor results to code scanning (public repos, or private with GitHub Code Security).
 #   sarif:
