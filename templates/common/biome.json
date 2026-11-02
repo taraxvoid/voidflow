@@ -1,0 +1,12 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
+  "extends": [
+    "@taraxvoid/voidflow/biome"
+  ],
+  "files": {
+    "includes": [
+      "**",
+      "!**/bun.lock"
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+name: CI
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  # Add `merge_group:` here if you use a merge queue.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@{{sha}} # v{{version}}
+
+# Uncomment to upload gitleaks/zizmor results to code scanning (public repos, or private with GitHub Code Security).
+#   sarif:
+#     needs: validate
+#     if: ${{ !cancelled() && needs.validate.result != 'skipped' }}
+#     permissions:
+#       contents: read
+#       actions: read
+#       security-events: write
+#     uses: taraxvoid/voidflow/.github/workflows/upload-sarif.yml@{{sha}} # v{{version}}

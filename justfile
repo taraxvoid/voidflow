@@ -77,6 +77,10 @@ validate: lint security
 dry-run *ARGS:
     act pull_request -W .github/workflows/ci.yml {{ ARGS }}
 
+# Regenerate templates/ (the files `voidflow init` writes) from their sources
+templates:
+    bun scripts/build-templates.ts
+
 # Install lefthook git hooks
 install-hooks:
     lefthook install
