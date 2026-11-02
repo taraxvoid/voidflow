@@ -25,6 +25,7 @@ function fmt(v: unknown, indent: string, used: number): string {
         return `[\n${v.map((x) => inner + fmt(x, inner, inner.length)).join(',\n')}\n${indent}]`
     }
     if (typeof v === 'object' && v !== null) {
+        if (Object.keys(v).length === 0) return '{}'
         const inner = `${indent}    `
         const rows = Object.entries(v).map(([k, x]) => {
             const key = `${JSON.stringify(k)}: `

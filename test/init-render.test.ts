@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import {
     type RenderCtx,
     render,
+    resolveSha,
     sameIgnoringMarkerVersion,
     withMarker,
 } from '../scripts/init/render.ts'
+import { json } from '../scripts/lib/template-format.ts'
 
 const ctx: RenderCtx = {
     version: '1.2.3',
@@ -34,6 +36,75 @@ describe('render', () => {
     })
     test('null repo becomes OWNER/REPO', () => {
         expect(render('{{repo}}', { ...ctx, repo: null })).toBe('OWNER/REPO')
+    })
+})
+
+describe('render (null sha, repeated)', () => {
+    test('pins every occurrence', () => {
+        const t = 'a@{{sha}} # v{{version}}\nb@{{sha}} # v{{version}}\n'
+        expect(render(t, { ...ctx, sha: null })).toBe('a@v1.2.3\nb@v1.2.3\n')
+    })
+})
+
+describe('json', () => {
+    test('empty object prints as {}', () => {
+        expect(json({})).toBe('{}\n')
+        expect(json({ a: {} })).toBe('{\n    "a": {}\n}\n')
+    })
+})
+
+describe('resolveSha', () => {
+    const sha = 'a'.repeat(40)
+    const peeled = 'b'.repeat(40)
+    const ok = (out: string) => async () => ({ code: 0, out, err: '' })
+    test('returns the peeled commit for an annotated tag', async () => {
+        const out = `${sha}\trefs/tags/v1.2.3\n${peeled}\trefs/tags/v1.2.3^{}\n`
+        expect(await resolveSha('1.2.3', { run: ok(out) })).toBe(peeled)
+    })
+    test('returns the lightweight tag sha', async () => {
+        expect(
+            await resolveSha('1.2.3', {
+                run: ok(`${sha}\trefs/tags/v1.2.3\n`),
+            }),
+        ).toBe(sha)
+    })
+    test('null on non-zero exit, empty output, or a thrown runner', async () => {
+        expect(
+            await resolveSha('1.2.3', {
+                run: async () => ({ code: 128, out: '', err: 'x' }),
+            }),
+        ).toBeNull()
+        expect(await resolveSha('1.2.3', { run: ok('') })).toBeNull()
+        expect(
+            await resolveSha('1.2.3', {
+                run: async () => {
+                    throw new Error('ENOENT')
+                },
+            }),
+        ).toBeNull()
+    })
+    test('null within the timeout when the runner never resolves', async () => {
+        const t0 = Date.now()
+        const res = await resolveSha('1.2.3', {
+            run: () => new Promise(() => {}),
+            timeoutMs: 50,
+        })
+        expect(res).toBeNull()
+        expect(Date.now() - t0).toBeLessThan(1000)
+    })
+    test('passes timeout and GIT_TERMINAL_PROMPT=0 to the runner', async () => {
+        let seen: unknown
+        await resolveSha('1.2.3', {
+            timeoutMs: 1234,
+            run: async (_c, _s, o) => {
+                seen = o
+                return { code: 1, out: '', err: '' }
+            },
+        })
+        expect(seen).toEqual({
+            timeoutMs: 1234,
+            env: { GIT_TERMINAL_PROMPT: '0' },
+        })
     })
 })
 

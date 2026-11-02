@@ -57,7 +57,7 @@ export function withMarker(
     }
     if (name === 'biome.json' || name === 'tsconfig.json')
         return prefixed('// ')
-    if (name === 'package.json' || ext === '.json') return content
+    if (ext === '.json') return content
     if (HASH.has(ext) || name === '.gitignore' || name === 'gitignore')
         return prefixed('# ')
     if (SLASH.has(ext)) return prefixed('// ')
@@ -78,27 +78,50 @@ export function sameIgnoringMarkerVersion(a: string, b: string): boolean {
  * The commit SHA that tag v<version> points at in the voidflow repo, or null
  * on any failure (offline, unknown tag, git missing).
  */
-export async function resolveSha(version: string): Promise<string | null> {
+export async function resolveSha(
+    version: string,
+    opts: { run?: typeof capture; timeoutMs?: number } = {},
+): Promise<string | null> {
+    const run = opts.run ?? capture
+    const timeoutMs = opts.timeoutMs ?? 10_000
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
         const ref = `refs/tags/v${version}`
-        const { code, out } = await capture([
-            'git',
-            'ls-remote',
-            'https://github.com/taraxvoid/voidflow',
-            ref,
-            `${ref}^{}`,
-        ])
+        const ls = run(
+            [
+                'git',
+                'ls-remote',
+                'https://github.com/taraxvoid/voidflow',
+                ref,
+                `${ref}^{}`,
+            ],
+            undefined,
+            { timeoutMs, env: { GIT_TERMINAL_PROMPT: '0' } },
+        )
+        // Backstop for runners that ignore timeoutMs; capture itself kills the child.
+        const timeout = new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), timeoutMs)
+        })
+        const res = await Promise.race([ls, timeout])
+        if (res === null) {
+            ls.catch(() => {})
+            return null
+        }
+        const { code, out } = res
         if (code !== 0) return null
         const rows = out
             .split('\n')
             .map((l) => l.split(/\s+/))
             .filter(
                 ([sha, name]) =>
-                    /^[0-9a-f]{40}$/.test(sha ?? '') && name?.startsWith(ref),
+                    /^[0-9a-f]{40}$/.test(sha ?? '') &&
+                    (name === ref || name === `${ref}^{}`),
             )
         const peeled = rows.find(([, name]) => name === `${ref}^{}`)
         return (peeled ?? rows[0])?.[0] ?? null
     } catch {
         return null
+    } finally {
+        clearTimeout(timer)
     }
 }

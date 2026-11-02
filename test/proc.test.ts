@@ -4,6 +4,17 @@ import { tmpdir } from 'node:os'
 import { capture, inherit } from '../scripts/lib/proc.ts'
 
 describe('capture', () => {
+    test('timeoutMs kills a hung child; env is merged', async () => {
+        const t0 = Date.now()
+        const r = await capture(['sleep', '5'], undefined, { timeoutMs: 100 })
+        expect(r.code).toBe(128)
+        expect(Date.now() - t0).toBeLessThan(2000)
+        const e = await capture(['sh', '-c', 'echo $VF_X'], undefined, {
+            env: { VF_X: 'y' },
+        })
+        expect(e.out).toBe('y\n')
+    })
+
     test('returns stdout, stderr and the exit code', async () => {
         const r = await capture(['sh', '-c', 'echo out; echo err >&2; exit 3'])
         expect(r).toEqual({ code: 3, out: 'out\n', err: 'err\n' })
