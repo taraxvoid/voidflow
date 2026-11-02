@@ -11,6 +11,8 @@
   "dependencyDashboard": true,
   "minimumReleaseAge": "3 days",
   "internalChecksFilter": "strict",
+  "prConcurrentLimit": 3,
+  "rebaseWhen": "conflicted",
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 9am on the first day of the month"]
@@ -28,6 +30,12 @@
       "description": "One PR for all GitHub Actions bumps",
       "matchManagers": ["github-actions"],
       "groupName": "github actions"
+    },
+    {
+      "description": "One PR for minor and patch dev dependency bumps. Listed before the named groups below so astro, biome and playwright keep their own PRs (later rules win)",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev dependencies"
     },
     {
       "matchPackageNames": ["astro", "@astrojs/**"],
