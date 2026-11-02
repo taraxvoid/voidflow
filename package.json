@@ -67,7 +67,9 @@
         "build": "bun build ./scripts/cli.ts ./cloudflare/tokens.ts ./rulesets/index.ts --outdir=dist --root=. --target=node --format=esm --splitting --packages=external",
         "prepack": "rm -rf dist && bun run build",
         "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
-        "test": "bun test"
+        "test": "bun test",
+        "check": "biome check .",
+        "format": "biome check --write ."
     },
     "peerDependencies": {
         "@playwright/test": ">=1.40"

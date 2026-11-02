@@ -16,28 +16,37 @@ describe('loadConfig', () => {
         if (!ok) throw new Error('"x": n is not a number')
         return x as typeof cfg
     }
-    writeFileSync(join(dir, 'named.ts'), `export const REPOS = ${JSON.stringify(cfg)}`)
-    writeFileSync(join(dir, 'default.ts'), `export default ${JSON.stringify(cfg)}`)
+    writeFileSync(
+        join(dir, 'named.ts'),
+        `export const REPOS = ${JSON.stringify(cfg)}`,
+    )
+    writeFileSync(
+        join(dir, 'default.ts'),
+        `export default ${JSON.stringify(cfg)}`,
+    )
     writeFileSync(join(dir, 'empty.ts'), 'export const other = 1')
-    writeFileSync(join(dir, 'bad.ts'), "export const REPOS = { x: { n: 'one' } }")
+    writeFileSync(
+        join(dir, 'bad.ts'),
+        "export const REPOS = { x: { n: 'one' } }",
+    )
 
     test('without a path, asks for --config', async () => {
-        await expect(
-            loadConfig(undefined, dir, check),
-        ).rejects.toThrow('needs --config')
+        await expect(loadConfig(undefined, dir, check)).rejects.toThrow(
+            'needs --config',
+        )
     })
 
     test('a REPOS or default export, relative to the base dir', async () => {
         expect(await loadConfig('named.ts', dir, check)).toEqual(cfg)
-        expect(
-            await loadConfig(join(dir, 'default.ts'), '/', check),
-        ).toEqual(cfg)
+        expect(await loadConfig(join(dir, 'default.ts'), '/', check)).toEqual(
+            cfg,
+        )
     })
 
     test('names the file when it has no config or a bad one', async () => {
-        await expect(
-            loadConfig('empty.ts', dir, check),
-        ).rejects.toThrow(`${join(dir, 'empty.ts')}: no REPOS or default export`)
+        await expect(loadConfig('empty.ts', dir, check)).rejects.toThrow(
+            `${join(dir, 'empty.ts')}: no REPOS or default export`,
+        )
         await expect(loadConfig('bad.ts', dir, check)).rejects.toThrow(
             `${join(dir, 'bad.ts')}: "x": n is not a number`,
         )

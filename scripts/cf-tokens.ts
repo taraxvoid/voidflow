@@ -25,28 +25,29 @@
  * and its repo-wide secret names. New token values are piped straight into
  * `gh secret set` and never printed.
  */
-import { parseOrExit } from './lib/args.ts'
-import { loadOrExit } from './lib/config.ts'
-import { capture, inherit } from './lib/proc.ts'
+
 import {
-    WORKERS_ROUTES_WRITE,
+    type Action,
     checkRepos,
-    WORKERS_SCRIPTS_WRITE,
-    WORKER_EDITOR,
+    type EnvConfig,
     envAccount,
     expiresOn,
+    type Policy,
     plan,
     policies,
+    type RepoConfig,
     repoAccounts,
     resolveTarget,
     retireTargets,
-    tokenName,
-    type Action,
-    type EnvConfig,
-    type Policy,
-    type RepoConfig,
     type Token,
+    tokenName,
+    WORKER_EDITOR,
+    WORKERS_ROUTES_WRITE,
+    WORKERS_SCRIPTS_WRITE,
 } from '../cloudflare/tokens.ts'
+import { parseOrExit } from './lib/args.ts'
+import { loadOrExit } from './lib/config.ts'
+import { capture, inherit } from './lib/proc.ts'
 
 const OPTIONS = {
     apply: { type: 'boolean', default: false },
@@ -87,7 +88,9 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
 
     const ADMIN = process.env.CF_TOKEN_ADMIN
     if (!ADMIN) {
-        console.error('CF_TOKEN_ADMIN is not set (see CONTRIBUTING.md, Cloudflare deploy tokens as code)')
+        console.error(
+            'CF_TOKEN_ADMIN is not set (see CONTRIBUTING.md, Cloudflare deploy tokens as code)',
+        )
         process.exit(2)
     }
 
@@ -97,7 +100,10 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         method: string,
         path: string,
         body?: unknown,
-    ): Promise<{ result: T; result_info?: { total_pages?: number; total_count?: number } }> {
+    ): Promise<{
+        result: T
+        result_info?: { total_pages?: number; total_count?: number }
+    }> {
         const res = await fetch(`${API}${path}`, {
             method,
             headers: {
@@ -114,12 +120,18 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         }
         if (!json.success) {
             const why = (json.errors ?? []).map((e) => `${e.code} ${e.message}`)
-            throw new Error(`${method} ${path}: ${res.status} ${why.join('; ')}`)
+            throw new Error(
+                `${method} ${path}: ${res.status} ${why.join('; ')}`,
+            )
         }
         return json
     }
 
-    async function cf<T>(method: string, path: string, body?: unknown): Promise<T> {
+    async function cf<T>(
+        method: string,
+        path: string,
+        body?: unknown,
+    ): Promise<T> {
         return (await cfRaw<T>(method, path, body)).result
     }
 
@@ -157,7 +169,9 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
     // ---- --groups ---------------------------------------------------------------
 
     if (values.groups) {
-        const accounts = [...new Set(Object.values(REPOS).flatMap(repoAccounts))]
+        const accounts = [
+            ...new Set(Object.values(REPOS).flatMap(repoAccounts)),
+        ]
         const used = new Map<string, string[]>()
         const note = (id: string, where: string) =>
             used.set(id, [...(used.get(id) ?? []), where])
@@ -184,7 +198,8 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
     // ---- plan / apply -----------------------------------------------------------
 
     const repos = Object.keys(REPOS).filter(
-        (r) => !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
+        (r) =>
+            !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
     )
     if (repos.length === 0) {
         console.error(`no repo matches --repo ${values.repo}`)
@@ -218,7 +233,9 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             '-H',
             'Accept: application/vnd.github.raw',
         ])
-        return path.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)
+        return path.endsWith('.toml')
+            ? Bun.TOML.parse(text)
+            : Bun.JSONC.parse(text)
     })
 
     /** The env's Worker and zones, and the ids its policies reference them by. */
@@ -227,7 +244,9 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const wrangler =
             env.worker && env.zones
                 ? undefined
-                : await wranglerAt(`${repo}:${env.wrangler ?? 'wrangler.jsonc'}`)
+                : await wranglerAt(
+                      `${repo}:${env.wrangler ?? 'wrangler.jsonc'}`,
+                  )
         const t = resolveTarget(
             env,
             wrangler,
@@ -244,7 +263,8 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const zoneIds: Record<string, string> = {}
         for (const name of t.zones) {
             const zone = zones.find((z) => z.name === name)
-            if (!zone) throw new Error(`zone ${name} not found in account ${acct}`)
+            if (!zone)
+                throw new Error(`zone ${name} not found in account ${acct}`)
             zoneIds[name] = zone.id
         }
         return { target: t, ids: { scriptTag: script.tag, zoneIds } }
@@ -258,7 +278,10 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         env.secret === 'repo' ? `${repo} (repo-wide)` : `${repo} env ${env.env}`
 
     async function setSecret(repo: string, env: EnvConfig, value: string) {
-        await gh(['secret', 'set', 'CLOUDFLARE_API_TOKEN', ...scope(repo, env)], value)
+        await gh(
+            ['secret', 'set', 'CLOUDFLARE_API_TOKEN', ...scope(repo, env)],
+            value,
+        )
     }
 
     /** Mirror the config's fallback into the variable the deploy action reads. */
@@ -275,9 +298,12 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             ])
         } else {
             // Not set is the normal case: nothing to delete.
-            await gh(['variable', 'delete', 'CF_TOKEN_FALLBACK', ...scope(repo, env)]).catch(
-                () => {},
-            )
+            await gh([
+                'variable',
+                'delete',
+                'CF_TOKEN_FALLBACK',
+                ...scope(repo, env),
+            ]).catch(() => {})
         }
     }
 
@@ -323,7 +349,9 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const label = `${env.env} "${name}"`
         if (a.kind === 'ok') {
             const used = a.token.last_used_on ?? 'never'
-            console.log(`  ok ${label}, expires ${a.token.expires_on}, last used ${used}`)
+            console.log(
+                `  ok ${label}, expires ${a.token.expires_on}, last used ${used}`,
+            )
             return
         }
         pending++
@@ -334,7 +362,9 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         switch (a.kind) {
             case 'create': {
                 const t = await createAndSet(repo, acct, env, name, want)
-                console.log(`  created ${t.id}, secret set in ${scopeLabel(repo, env)}`)
+                console.log(
+                    `  created ${t.id}, secret set in ${scopeLabel(repo, env)}`,
+                )
                 return
             }
             case 'update':
@@ -351,7 +381,8 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
                 // deploy in between still has a working token. A stop before the
                 // deletes leaves duplicates, which the next plan rotates away.
                 const t = await createAndSet(repo, acct, env, name, want)
-                for (const old of a.tokens) await cf('DELETE', `${path}/${old.id}`)
+                for (const old of a.tokens)
+                    await cf('DELETE', `${path}/${old.id}`)
                 const ids = a.tokens.map((o) => o.id).join(', ')
                 console.log(`  rotated ${ids} to ${t.id}, secret set`)
                 return
@@ -370,12 +401,16 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const { target, ids } = await lookups(repo, acct, env)
         const want = policies(cfg, env, ids, target.zones)
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
-        console.log(`  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`)
+        console.log(
+            `  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`,
+        )
         // The list endpoint omits policies; fetch each match in full.
         const have = await Promise.all(
             (tokens.get(acct) ?? [])
                 .filter((t) => t.name === name)
-                .map((t) => cf<Token>('GET', `/accounts/${acct}/tokens/${t.id}`)),
+                .map((t) =>
+                    cf<Token>('GET', `/accounts/${acct}/tokens/${t.id}`),
+                ),
         )
         if (env.fallback) {
             console.log(
@@ -401,7 +436,9 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
      */
     async function tryEnv(envName: string, cmd: string[]) {
         if (repos.length !== 1 || cmd.length === 0) {
-            console.error('--try needs one --repo, an env, and a command after --')
+            console.error(
+                '--try needs one --repo, an env, and a command after --',
+            )
             process.exit(2)
         }
         const [repo] = repos
@@ -414,13 +451,19 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const acct = envAccount(cfg, env)
         const { target, ids } = await lookups(repo, acct, env)
         const expires = new Date(now.getTime() + 3_600_000)
-        const t = await cf<Token & { value: string }>('POST', `/accounts/${acct}/tokens`, {
-            name: `${tokenName(repo, env.env)}:try`,
-            policies: policies(cfg, env, ids, target.zones),
-            expires_on: `${expires.toISOString().slice(0, 19)}Z`,
-        })
+        const t = await cf<Token & { value: string }>(
+            'POST',
+            `/accounts/${acct}/tokens`,
+            {
+                name: `${tokenName(repo, env.env)}:try`,
+                policies: policies(cfg, env, ids, target.zones),
+                expires_on: `${expires.toISOString().slice(0, 19)}Z`,
+            },
+        )
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
-        console.log(`try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`)
+        console.log(
+            `try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`,
+        )
         let code = 1
         try {
             const childEnv: Record<string, string | undefined> = {
@@ -484,14 +527,29 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         // pre-voidflow leftover: environment jobs never read it, and any job
         // without an environment that still does is deploying with an old token.
         if (!cfg.envs.some((e) => e.secret === 'repo')) {
-            const repoSecrets = await gh(['secret', 'list', '-R', repo, '--json', 'name', '-q', '.[].name'])
+            const repoSecrets = await gh([
+                'secret',
+                'list',
+                '-R',
+                repo,
+                '--json',
+                'name',
+                '-q',
+                '.[].name',
+            ])
             if (repoSecrets.split('\n').includes('CLOUDFLARE_API_TOKEN')) {
                 pending++
                 console.log(
                     `- repo-wide secret CLOUDFLARE_API_TOKEN: every env's is in an environment; jobs without one still read this${note}`,
                 )
                 if (prune) {
-                    await gh(['secret', 'delete', 'CLOUDFLARE_API_TOKEN', '-R', repo])
+                    await gh([
+                        'secret',
+                        'delete',
+                        'CLOUDFLARE_API_TOKEN',
+                        '-R',
+                        repo,
+                    ])
                     console.log('  deleted')
                 }
             }

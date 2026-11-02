@@ -14,7 +14,10 @@
 
 type Main = (argv: string[], prog: string) => Promise<void>
 
-const COMMANDS: Record<string, { load: () => Promise<{ main: Main }>; about: string }> = {
+const COMMANDS: Record<
+    string,
+    { load: () => Promise<{ main: Main }>; about: string }
+> = {
     'cf-tokens': {
         load: () => import('./cf-tokens.ts'),
         about: 'plan, apply or rotate scoped Cloudflare deploy tokens',
@@ -42,7 +45,9 @@ if (name === undefined || name === '-h' || name === '--help') {
     process.exit(name === undefined ? 2 : 0)
 }
 if (name.startsWith('-')) {
-    console.error(`the command comes before its flags, got ${JSON.stringify(name)}\n\n${usage()}`)
+    console.error(
+        `the command comes before its flags, got ${JSON.stringify(name)}\n\n${usage()}`,
+    )
     process.exit(2)
 }
 const cmd = COMMANDS[name]

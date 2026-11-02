@@ -95,7 +95,9 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
     test('a flag before the command says the command comes first', async () => {
         const r = await voidflow(['--config', 'rulesets.ts', 'rulesets'])
         expect(r.code).toBe(2)
-        expect(r.err).toContain('the command comes before its flags, got "--config"')
+        expect(r.err).toContain(
+            'the command comes before its flags, got "--config"',
+        )
     })
 
     test('hands the remaining flags to the script', async () => {
@@ -114,7 +116,9 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
             for (const h of ['--help', '-h']) {
                 const r = await voidflow([c, h])
                 expect(r.code).toBe(0)
-                expect(r.out).toContain(`usage: voidflow ${c} --config <module>`)
+                expect(r.out).toContain(
+                    `usage: voidflow ${c} --config <module>`,
+                )
                 expect(r.out).toContain(flag)
             }
         }
@@ -208,9 +212,12 @@ describe('package files', () => {
     // devDependencies don't install with the package, so a bare import must
     // be a builtin, a dependency or a peer.
     const installed = (spec: string) => {
-        if (/^(node|bun):/.test(spec) || builtinModules.includes(spec)) return true
+        if (/^(node|bun):/.test(spec) || builtinModules.includes(spec))
+            return true
         const parts = spec.split('/')
-        const name = spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]
+        const name = spec.startsWith('@')
+            ? parts.slice(0, 2).join('/')
+            : parts[0]
         return name in { ...pkg.dependencies, ...pkg.peerDependencies }
     }
 
@@ -221,7 +228,8 @@ describe('package files', () => {
         if (seen.has(file)) return seen
         seen.add(file)
         // Only code imports anything; .json and .d.ts files are leaves.
-        if (!/\.[cm]?[jt]s$/.test(file) || /\.d\.[cm]?ts$/.test(file)) return seen
+        if (!/\.[cm]?[jt]s$/.test(file) || /\.d\.[cm]?ts$/.test(file))
+            return seen
         const src = readFileSync(file, 'utf8').replace(/^#!.*/, '')
         for (const { path } of transpiler.scanImports(src)) {
             if (path.startsWith('.')) {
@@ -240,9 +248,9 @@ describe('package files', () => {
 
     const entries = (): string[] => [
         ...Object.values(pkg.bin as Record<string, string>),
-        ...Object.values(pkg.exports as Record<string, string | Record<string, string>>).flatMap(
-            (e) => (typeof e === 'string' ? [e] : Object.values(e)),
-        ),
+        ...Object.values(
+            pkg.exports as Record<string, string | Record<string, string>>,
+        ).flatMap((e) => (typeof e === 'string' ? [e] : Object.values(e))),
     ]
 
     test('every bin and export ships with everything it imports', () => {

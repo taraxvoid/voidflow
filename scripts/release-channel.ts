@@ -35,10 +35,22 @@ const files = (name: string) => ({
 
 export function resolveChannel(branch: string): Channel {
     if (branch === 'main') {
-        return { kind: 'stable', branch, distTag: 'latest', prerelease: false, ...files('main') }
+        return {
+            kind: 'stable',
+            branch,
+            distTag: 'latest',
+            prerelease: false,
+            ...files('main'),
+        }
     }
     if (branch === 'next') {
-        return { kind: 'prerelease', branch, distTag: 'next', prerelease: true, ...files('next') }
+        return {
+            kind: 'prerelease',
+            branch,
+            distTag: 'next',
+            prerelease: true,
+            ...files('next'),
+        }
     }
     const m = MAINTENANCE.exec(branch)
     if (m) {
@@ -61,14 +73,18 @@ const STABLE_VERSION = /^\d+\.\d+\.\d+$/
 // the first one in a series carries no number.
 const PRERELEASE_VERSION = /^\d+\.\d+\.\d+-next(?:\.\d+)?$/
 
-export function assertVersionMatchesChannel(version: string, channel: Channel): void {
+export function assertVersionMatchesChannel(
+    version: string,
+    channel: Channel,
+): void {
     const shapeOk =
         channel.kind === 'prerelease'
             ? PRERELEASE_VERSION.test(version)
             : STABLE_VERSION.test(version)
     // A maintenance branch only publishes its own line, so republishing some
     // other stable tag from it cannot land under its dist-tag.
-    const lineOk = channel.line === undefined || version.startsWith(`${channel.line}.`)
+    const lineOk =
+        channel.line === undefined || version.startsWith(`${channel.line}.`)
     if (!shapeOk || !lineOk) {
         throw new Error(
             `version ${version} does not belong on the ${channel.kind} channel (branch ${channel.branch})`,
@@ -91,7 +107,8 @@ if (import.meta.main) {
     try {
         const channel = resolveChannel(branch ?? '')
         if (version) assertVersionMatchesChannel(version, channel)
-        for (const [k, v] of Object.entries(toOutputs(channel))) console.log(`${k}=${v}`)
+        for (const [k, v] of Object.entries(toOutputs(channel)))
+            console.log(`${k}=${v}`)
     } catch (e) {
         console.error((e as Error).message)
         process.exit(1)

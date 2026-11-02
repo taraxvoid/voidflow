@@ -28,7 +28,10 @@ import { parseArgs } from 'node:util'
 
 const NEXT_MANIFEST = '.release-please/next-manifest.json'
 const VERSION_FILES = new Set(['package.json', 'jsr.json'])
-const MAIN_SIDE_FILES = new Set(['CHANGELOG.md', '.release-please/main-manifest.json'])
+const MAIN_SIDE_FILES = new Set([
+    'CHANGELOG.md',
+    '.release-please/main-manifest.json',
+])
 const SRC = 'refs/remotes/backmerge-src'
 
 export function nextManifestVersion(current: string, stable: string): string {
@@ -51,13 +54,22 @@ function main() {
     })
     const { remote, tag, version, sha } = values
     if (!remote || !tag || !version || !sha) {
-        throw new Error('usage: back-merge.ts --remote <url|path> --tag <tag> --version <x.y.z> --sha <commit>')
+        throw new Error(
+            'usage: back-merge.ts --remote <url|path> --tag <tag> --version <x.y.z> --sha <commit>',
+        )
     }
 
     const redact = (s: string) => s.split(remote).join('<remote>')
     const git = (args: string[], allowFail = false) => {
         const r = Bun.spawnSync(
-            ['git', '-c', 'user.name=github-actions[bot]', '-c', 'user.email=41898282+github-actions[bot]@users.noreply.github.com', ...args],
+            [
+                'git',
+                '-c',
+                'user.name=github-actions[bot]',
+                '-c',
+                'user.email=41898282+github-actions[bot]@users.noreply.github.com',
+                ...args,
+            ],
             { stdout: 'pipe', stderr: 'pipe' },
         )
         const out = r.stdout.toString()
@@ -67,33 +79,55 @@ function main() {
         }
         return { code: r.exitCode, out, err }
     }
-    const mergeInProgress = () => git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], true).code === 0
+    const mergeInProgress = () =>
+        git(['rev-parse', '-q', '--verify', 'MERGE_HEAD'], true).code === 0
 
     // 2 means "no such ref"; anything else non-zero is a real failure.
-    const ls = git(['ls-remote', '--exit-code', '--heads', remote, 'next'], true)
+    const ls = git(
+        ['ls-remote', '--exit-code', '--heads', remote, 'next'],
+        true,
+    )
     if (ls.code === 2) {
         console.log('result=no-next')
         return
     }
-    if (ls.code !== 0) throw new Error(redact(`git ls-remote failed: ${ls.err || ls.out}`))
+    if (ls.code !== 0)
+        throw new Error(redact(`git ls-remote failed: ${ls.err || ls.out}`))
 
-    git(['fetch', '--quiet', remote, `+refs/heads/next:${SRC}/next`, `+refs/heads/main:${SRC}/main`])
-    if (git(['merge-base', '--is-ancestor', sha, `${SRC}/main`], true).code !== 0) {
+    git([
+        'fetch',
+        '--quiet',
+        remote,
+        `+refs/heads/next:${SRC}/next`,
+        `+refs/heads/main:${SRC}/main`,
+    ])
+    if (
+        git(['merge-base', '--is-ancestor', sha, `${SRC}/main`], true).code !==
+        0
+    ) {
         throw new Error(`${sha} is not on main`)
     }
 
     const branch = `backmerge/${tag}`
     git(['checkout', '--quiet', '-B', branch, `${SRC}/next`])
 
-    const current = JSON.parse(readFileSync(NEXT_MANIFEST, 'utf8'))['.'] as string
+    const current = JSON.parse(readFileSync(NEXT_MANIFEST, 'utf8'))[
+        '.'
+    ] as string
     const target = nextManifestVersion(current, version)
 
     const touched = new Set<string>()
     const merge = git(['merge', '--no-ff', '--no-commit', sha], true)
     if (merge.code !== 0) {
-        const unmerged = git(['diff', '--name-only', '--diff-filter=U']).out.split('\n').filter(Boolean)
+        const unmerged = git(['diff', '--name-only', '--diff-filter=U'])
+            .out.split('\n')
+            .filter(Boolean)
         if (unmerged.length === 0 && !mergeInProgress()) {
-            throw new Error(redact(`merge of ${sha} into next failed: ${merge.err || merge.out}`))
+            throw new Error(
+                redact(
+                    `merge of ${sha} into next failed: ${merge.err || merge.out}`,
+                ),
+            )
         }
         for (const f of unmerged) {
             if (MAIN_SIDE_FILES.has(f)) {
@@ -117,7 +151,10 @@ function main() {
     }
     for (const f of touched) git(['add', '--', f])
 
-    if (!mergeInProgress() && git(['status', '--porcelain']).out.trim() === '') {
+    if (
+        !mergeInProgress() &&
+        git(['status', '--porcelain']).out.trim() === ''
+    ) {
         console.log('result=none')
         return
     }
@@ -129,13 +166,19 @@ function main() {
 function resolveVersionFile(
     file: string,
     target: string,
-    git: (args: string[], allowFail?: boolean) => { code: number; out: string; err: string },
+    git: (
+        args: string[],
+        allowFail?: boolean,
+    ) => { code: number; out: string; err: string },
 ) {
     const dir = mkdtempSync(join(tmpdir(), 'back-merge-'))
     try {
         const stage = (n: number, name: string) => {
             const r = git(['show', `:${n}:${file}`], true)
-            if (r.code !== 0) throw new Error(`cannot merge ${file}: no stage ${n} (add/add or delete conflict)`)
+            if (r.code !== 0)
+                throw new Error(
+                    `cannot merge ${file}: no stage ${n} (add/add or delete conflict)`,
+                )
             const path = join(dir, name)
             writeFileSync(path, withVersion(r.out, target))
             return path
@@ -145,7 +188,9 @@ function resolveVersionFile(
         const theirs = stage(3, 'theirs')
         const merged = git(['merge-file', '-p', ours, base, theirs], true)
         if (merged.code !== 0) {
-            throw new Error(`unexpected merge conflict in ${file}: merge main into next by hand (see RELEASING.md)`)
+            throw new Error(
+                `unexpected merge conflict in ${file}: merge main into next by hand (see RELEASING.md)`,
+            )
         }
         writeFileSync(file, merged.out)
     } finally {
