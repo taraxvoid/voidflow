@@ -50,7 +50,9 @@
     },
     "scripts": {
         "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
-        "test": "bun test"
+        "test": "bun test",
+        "check": "biome check .",
+        "format": "biome check --write ."
     },
     "peerDependencies": {
         "@playwright/test": ">=1.40"

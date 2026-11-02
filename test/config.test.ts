@@ -17,10 +17,19 @@ describe('loadConfig', () => {
         if (!ok) throw new Error('"x": n is not a number')
         return x as typeof cfg
     }
-    writeFileSync(join(dir, 'named.ts'), `export const REPOS = ${JSON.stringify(cfg)}`)
-    writeFileSync(join(dir, 'default.ts'), `export default ${JSON.stringify(cfg)}`)
+    writeFileSync(
+        join(dir, 'named.ts'),
+        `export const REPOS = ${JSON.stringify(cfg)}`,
+    )
+    writeFileSync(
+        join(dir, 'default.ts'),
+        `export default ${JSON.stringify(cfg)}`,
+    )
     writeFileSync(join(dir, 'empty.ts'), 'export const other = 1')
-    writeFileSync(join(dir, 'bad.ts'), "export const REPOS = { x: { n: 'one' } }")
+    writeFileSync(
+        join(dir, 'bad.ts'),
+        "export const REPOS = { x: { n: 'one' } }",
+    )
 
     test('without a path, the built-in config, unchecked', async () => {
         expect(await loadConfig(undefined, dir, builtin, check)).toBe(builtin)
@@ -42,7 +51,9 @@ describe('loadConfig', () => {
     test('names the file when it has no config or a bad one', async () => {
         await expect(
             loadConfig('empty.ts', dir, builtin, check),
-        ).rejects.toThrow(`${join(dir, 'empty.ts')}: no REPOS or default export`)
+        ).rejects.toThrow(
+            `${join(dir, 'empty.ts')}: no REPOS or default export`,
+        )
         await expect(loadConfig('bad.ts', dir, builtin, check)).rejects.toThrow(
             `${join(dir, 'bad.ts')}: "x": n is not a number`,
         )

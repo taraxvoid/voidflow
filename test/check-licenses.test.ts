@@ -3,8 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const script = new URL('../scripts/check-licenses.ts', import.meta.url)
-    .pathname
+const script = new URL('../scripts/check-licenses.ts', import.meta.url).pathname
 
 // A throwaway project whose only dependency declares `license`.
 function project(license: string) {

@@ -20,7 +20,6 @@
  * and reported, never counted as drift, so --check stays green for them.
  */
 import { parseArgs } from 'node:util'
-import { loadOrExit } from './lib/config.ts'
 import {
     REPOS as BUILTIN,
     checkFleet,
@@ -30,6 +29,7 @@ import {
     normalise,
     type Ruleset,
 } from '../rulesets/index.ts'
+import { loadOrExit } from './lib/config.ts'
 
 const { values } = parseArgs({
     options: {
@@ -77,7 +77,9 @@ for (const repo of repos) {
     } catch (e) {
         if (!isPlanGated(String(e))) throw e
         gated.push(repo)
-        console.log('  skipped: private repo on a plan without rulesets (HTTP 403)')
+        console.log(
+            '  skipped: private repo on a plan without rulesets (HTTP 403)',
+        )
         continue
     }
     const matched = new Set<number>()
@@ -90,7 +92,10 @@ for (const repo of repos) {
             drift++
             console.log(`+ create "${ruleset.name}"`)
             if (values.apply) {
-                await gh(['-X', 'POST', `repos/${repo}/rulesets`, '--input', '-'], ruleset)
+                await gh(
+                    ['-X', 'POST', `repos/${repo}/rulesets`, '--input', '-'],
+                    ruleset,
+                )
                 console.log('  created')
             }
             continue
@@ -107,7 +112,13 @@ for (const repo of repos) {
         for (const l of lines) console.log(`    ${l}`)
         if (values.apply) {
             await gh(
-                ['-X', 'PUT', `repos/${repo}/rulesets/${hit.id}`, '--input', '-'],
+                [
+                    '-X',
+                    'PUT',
+                    `repos/${repo}/rulesets/${hit.id}`,
+                    '--input',
+                    '-',
+                ],
                 ruleset,
             )
             console.log('  updated')
@@ -117,11 +128,15 @@ for (const repo of repos) {
     const retire = new Set(REPOS[repo].retire)
     for (const r of listed.filter((r) => !matched.has(r.id))) {
         if (!retire.has(r.name)) {
-            console.log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
+            console.log(
+                `? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`,
+            )
             continue
         }
         drift++
-        console.log(`- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`)
+        console.log(
+            `- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`,
+        )
         if (values.apply && values.prune) {
             await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
             console.log('  deleted')
@@ -130,7 +145,9 @@ for (const repo of repos) {
 }
 
 if (gated.length > 0) {
-    console.log(`\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`)
+    console.log(
+        `\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`,
+    )
 }
 console.log(
     `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,

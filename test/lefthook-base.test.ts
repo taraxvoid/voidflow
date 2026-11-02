@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    realpathSync,
+    writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -43,7 +51,9 @@ describe('lefthook/base.yml', () => {
 
     test('picks the package manager from the lockfile instead of hardcoding bun', async () => {
         const text = await Bun.file(config).text()
-        expect(text).toContain('pnpm-lock.yaml ]; then echo pnpm; else echo bun')
+        expect(text).toContain(
+            'pnpm-lock.yaml ]; then echo pnpm; else echo bun',
+        )
         expect(text).not.toMatch(/\bbun run\b/)
     })
 
@@ -75,12 +85,32 @@ async function runHook(snippet: string, stdin = '') {
     // A real commit, so pre-push's "is this commit new to the remote" check
     // (`git rev-list ... --not --remotes`) can resolve the pushed sha.
     Bun.spawnSync(
-        ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'x'],
+        [
+            'git',
+            '-c',
+            'user.name=t',
+            '-c',
+            'user.email=t@t',
+            'commit',
+            '-q',
+            '--allow-empty',
+            '--no-verify',
+            '-m',
+            'x',
+        ],
         { cwd: repo, env: cleanEnv },
     )
-    const head = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repo, env: cleanEnv }).stdout.toString().trim()
+    const head = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], {
+        cwd: repo,
+        env: cleanEnv,
+    })
+        .stdout.toString()
+        .trim()
     mkdirSync(join(repo, 'node_modules'))
-    writeFileSync(join(repo, 'package.json'), '{"scripts":{"test:unit":"x","test:push":"x"}}')
+    writeFileSync(
+        join(repo, 'package.json'),
+        '{"scripts":{"test:unit":"x","test:push":"x"}}',
+    )
     const out = join(root, 'out')
     writeFileSync(
         join(bin, 'stubpm'),
@@ -106,7 +136,9 @@ async function runHook(snippet: string, stdin = '') {
         code,
         repo,
         env: existsSync(out + '.env') ? readFileSync(out + '.env', 'utf8') : '',
-        top: existsSync(out + '.top') ? readFileSync(out + '.top', 'utf8').trim() : '',
+        top: existsSync(out + '.top')
+            ? readFileSync(out + '.top', 'utf8').trim()
+            : '',
     }
 }
 
@@ -119,14 +151,17 @@ describe('git env cleanup before tests', () => {
     test.each([
         ['pre-commit unit', unitRun, ''],
         ['pre-push sync-and-test', pushRun, pushStdin],
-    ])('%s: test script sees no GIT_* vars and git still finds the repo', async (_name, run, stdin) => {
-        const r = await runHook(run, stdin)
-        expect(r.code).toBe(0)
-        expect(r.env).not.toMatch(/^GIT_DIR=/m)
-        expect(r.env).not.toMatch(/^GIT_INDEX_FILE=/m)
-        expect(r.env).not.toMatch(/^GIT_WORK_TREE=/m)
-        expect(r.top).toBe(r.repo)
-    })
+    ])(
+        '%s: test script sees no GIT_* vars and git still finds the repo',
+        async (_name, run, stdin) => {
+            const r = await runHook(run, stdin)
+            expect(r.code).toBe(0)
+            expect(r.env).not.toMatch(/^GIT_DIR=/m)
+            expect(r.env).not.toMatch(/^GIT_INDEX_FILE=/m)
+            expect(r.env).not.toMatch(/^GIT_WORK_TREE=/m)
+            expect(r.top).toBe(r.repo)
+        },
+    )
 
     test("uses git's own list of repo-local vars", () => {
         for (const run of [unitRun, pushRun]) {
@@ -135,8 +170,12 @@ describe('git env cleanup before tests', () => {
     })
 
     test('pre-push unsets only after the remote check, which needs the repo env', () => {
-        expect(pushRun.indexOf('unset $(git rev-parse')).toBeGreaterThan(pushRun.indexOf('git merge-base'))
-        expect(pushRun.indexOf('unset $(git rev-parse')).toBeLessThan(pushRun.indexOf('{pm} run --if-present test:push'))
+        expect(pushRun.indexOf('unset $(git rev-parse')).toBeGreaterThan(
+            pushRun.indexOf('git merge-base'),
+        )
+        expect(pushRun.indexOf('unset $(git rev-parse')).toBeLessThan(
+            pushRun.indexOf('{pm} run --if-present test:push'),
+        )
     })
 })
 
@@ -148,11 +187,17 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
 
     // The hook's script with lefthook's {1} (remote name) filled in and {pm}
     // made an echo, so the test sees whether test:push would run.
-    const script = pushRun.replaceAll('{1}', 'origin').replaceAll('{pm}', 'echo PM')
+    const script = pushRun
+        .replaceAll('{1}', 'origin')
+        .replaceAll('{pm}', 'echo PM')
 
     const git = (cwd: string, ...args: string[]) => {
-        const proc = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env: env() })
-        if (proc.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${proc.stderr}`)
+        const proc = Bun.spawnSync(
+            ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
+            { cwd, env: env() },
+        )
+        if (proc.exitCode !== 0)
+            throw new Error(`git ${args.join(' ')}: ${proc.stderr}`)
         return proc.stdout.toString().trim()
     }
 
@@ -164,7 +209,15 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
         const repo = join(root, 'repo')
         git(root, 'init', '-q', '--bare', '-b', 'main', remote)
         git(root, 'init', '-q', '-b', 'main', repo)
-        git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'pushed')
+        git(
+            repo,
+            'commit',
+            '-q',
+            '--allow-empty',
+            '--no-verify',
+            '-m',
+            'pushed',
+        )
         git(repo, 'remote', 'add', 'origin', remote)
         git(repo, 'push', '-q', '--no-verify', 'origin', 'main')
         mkdirSync(join(repo, 'node_modules'))
@@ -185,7 +238,10 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
 
     test('skips checks for a branch delete', async () => {
         const { repo, pushed } = setup()
-        const { code, out } = await run(repo, `(delete) ${ZERO} refs/heads/old ${pushed}\n`)
+        const { code, out } = await run(
+            repo,
+            `(delete) ${ZERO} refs/heads/old ${pushed}\n`,
+        )
         expect(code).toBe(0)
         expect(out).toContain('no new commits to push')
         expect(out).not.toContain('PM run')
@@ -193,14 +249,20 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
 
     test('skips checks for a new branch at an already-pushed commit', async () => {
         const { repo, pushed } = setup()
-        const { out } = await run(repo, `refs/heads/feature ${pushed} refs/heads/feature ${ZERO}\n`)
+        const { out } = await run(
+            repo,
+            `refs/heads/feature ${pushed} refs/heads/feature ${ZERO}\n`,
+        )
         expect(out).toContain('no new commits to push')
         expect(out).not.toContain('PM run')
     })
 
     test('skips checks for a tag on an already-pushed commit', async () => {
         const { repo, pushed } = setup()
-        const { out } = await run(repo, `refs/tags/v1 ${pushed} refs/tags/v1 ${ZERO}\n`)
+        const { out } = await run(
+            repo,
+            `refs/tags/v1 ${pushed} refs/tags/v1 ${ZERO}\n`,
+        )
         expect(out).toContain('no new commits to push')
         expect(out).not.toContain('PM run')
     })
@@ -209,7 +271,10 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
         const { repo, pushed } = setup()
         git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'new')
         const head = git(repo, 'rev-parse', 'HEAD')
-        const { code, out } = await run(repo, `refs/heads/main ${head} refs/heads/main ${pushed}\n`)
+        const { code, out } = await run(
+            repo,
+            `refs/heads/main ${head} refs/heads/main ${pushed}\n`,
+        )
         expect(code).toBe(0)
         expect(out).toContain('PM run --if-present test:push')
     })

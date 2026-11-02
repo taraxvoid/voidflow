@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'bun:test'
 import {
     checkRepos,
-    fromWrangler,
-    resolveTarget,
-    routeHost,
-    zoneOf,
-    RENEW_DAYS,
-    WORKERS_ROUTES_WRITE,
-    WORKERS_SCRIPTS_WRITE,
     expiresOn,
+    fromWrangler,
+    type Policy,
     plan,
     policies,
-    repoAccounts,
-    retireTargets,
-    tokenName,
+    RENEW_DAYS,
     type RepoConfig,
-    type Policy,
+    repoAccounts,
+    resolveTarget,
+    retireTargets,
+    routeHost,
     type Token,
+    tokenName,
+    WORKERS_ROUTES_WRITE,
+    WORKERS_SCRIPTS_WRITE,
+    zoneOf,
 } from '../cloudflare/tokens.ts'
 
 // A fleet like taraxvoid/infra's cf-tokens.ts (the real one lives there).
@@ -194,7 +194,9 @@ describe('plan', () => {
 
     test('a rotation replaces the token it found', () => {
         const [a] = plan(want, [token({ id: 'old' })], now, { rotate: true })
-        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual(['old'])
+        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
+            'old',
+        ])
     })
 
     // Either duplicate may be the one in the GitHub secret (a stop between
@@ -270,7 +272,7 @@ describe('checkRepos', () => {
             '"nope".envs: empty',
             '"a/b".account: not a 32-hex account id',
             '"a/b".envs[0].worker: not a name',
-            '"a/b".envs[0].secret: \'env\' or \'repo\'',
+            "\"a/b\".envs[0].secret: 'env' or 'repo'",
             '"a/b".envs[0].wranglr: unknown field',
             '"a/b".envs[3].secret: a second \'repo\' env',
             '"a/b".envs[0].zones: not a list of zone names',
@@ -288,7 +290,6 @@ describe('checkRepos', () => {
         expect(() => checkRepos([])).toThrow('not an object')
     })
 })
-
 
 describe('wrangler config', () => {
     // Shaped like transbot's real config.
@@ -380,7 +381,11 @@ describe('wrangler config', () => {
             resolveTarget({ env: 'preview', zones: [] }, single, zones),
         ).toEqual({ worker: 'transbot', zones: [] })
         expect(
-            resolveTarget({ env: 'x', worker: 'w', zones: ['a.org'] }, undefined, []),
+            resolveTarget(
+                { env: 'x', worker: 'w', zones: ['a.org'] },
+                undefined,
+                [],
+            ),
         ).toEqual({ worker: 'w', zones: ['a.org'] })
     })
 })

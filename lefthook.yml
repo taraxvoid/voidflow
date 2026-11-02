@@ -1,6 +1,10 @@
 pre-commit:
   parallel: true
   commands:
+    biome:
+      glob: "*.{ts,mjs,json}"
+      run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true {staged_files}
+      stage_fixed: true
     jactionlint:
       glob: ".github/workflows/*.{yml,yaml}"
       run: just lint-workflows

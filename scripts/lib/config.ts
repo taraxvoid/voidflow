@@ -26,7 +26,8 @@ export async function loadConfig<T>(
     const file = resolve(base, path)
     const mod = (await import(file)) as { REPOS?: unknown; default?: unknown }
     const cfg = mod.REPOS ?? mod.default
-    if (cfg === undefined) throw new Error(`${file}: no REPOS or default export`)
+    if (cfg === undefined)
+        throw new Error(`${file}: no REPOS or default export`)
     try {
         return check(cfg)
     } catch (e) {

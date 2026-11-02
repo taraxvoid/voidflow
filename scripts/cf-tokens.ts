@@ -27,26 +27,26 @@
  * `gh secret set` and never printed.
  */
 import { parseArgs } from 'node:util'
-import { loadOrExit } from './lib/config.ts'
 import {
-    WORKERS_ROUTES_WRITE,
+    type Action,
     checkRepos,
-    WORKERS_SCRIPTS_WRITE,
-    WORKER_EDITOR,
+    type EnvConfig,
     envAccount,
     expiresOn,
+    type Policy,
     plan,
     policies,
+    type RepoConfig,
     repoAccounts,
     resolveTarget,
     retireTargets,
-    tokenName,
-    type Action,
-    type EnvConfig,
-    type Policy,
-    type RepoConfig,
     type Token,
+    tokenName,
+    WORKER_EDITOR,
+    WORKERS_ROUTES_WRITE,
+    WORKERS_SCRIPTS_WRITE,
 } from '../cloudflare/tokens.ts'
+import { loadOrExit } from './lib/config.ts'
 
 const { values, positionals } = parseArgs({
     options: {
@@ -76,7 +76,10 @@ async function cfRaw<T>(
     method: string,
     path: string,
     body?: unknown,
-): Promise<{ result: T; result_info?: { total_pages?: number; total_count?: number } }> {
+): Promise<{
+    result: T
+    result_info?: { total_pages?: number; total_count?: number }
+}> {
     const res = await fetch(`${API}${path}`, {
         method,
         headers: {
@@ -246,7 +249,10 @@ const scopeLabel = (repo: string, env: EnvConfig) =>
     env.secret === 'repo' ? `${repo} (repo-wide)` : `${repo} env ${env.env}`
 
 async function setSecret(repo: string, env: EnvConfig, value: string) {
-    await gh(['secret', 'set', 'CLOUDFLARE_API_TOKEN', ...scope(repo, env)], value)
+    await gh(
+        ['secret', 'set', 'CLOUDFLARE_API_TOKEN', ...scope(repo, env)],
+        value,
+    )
 }
 
 /** Mirror the config's fallback into the variable the deploy action reads. */
@@ -263,9 +269,12 @@ async function syncFallbackVar(repo: string, env: EnvConfig) {
         ])
     } else {
         // Not set is the normal case: nothing to delete.
-        await gh(['variable', 'delete', 'CF_TOKEN_FALLBACK', ...scope(repo, env)]).catch(
-            () => {},
-        )
+        await gh([
+            'variable',
+            'delete',
+            'CF_TOKEN_FALLBACK',
+            ...scope(repo, env),
+        ]).catch(() => {})
     }
 }
 
@@ -311,7 +320,9 @@ async function act(
     const label = `${env.env} "${name}"`
     if (a.kind === 'ok') {
         const used = a.token.last_used_on ?? 'never'
-        console.log(`  ok ${label}, expires ${a.token.expires_on}, last used ${used}`)
+        console.log(
+            `  ok ${label}, expires ${a.token.expires_on}, last used ${used}`,
+        )
         return
     }
     pending++
@@ -322,7 +333,9 @@ async function act(
     switch (a.kind) {
         case 'create': {
             const t = await createAndSet(repo, acct, env, name, want)
-            console.log(`  created ${t.id}, secret set in ${scopeLabel(repo, env)}`)
+            console.log(
+                `  created ${t.id}, secret set in ${scopeLabel(repo, env)}`,
+            )
             return
         }
         case 'update':
@@ -358,7 +371,9 @@ async function run(
     const { target, ids } = await lookups(repo, acct, env)
     const want = policies(cfg, env, ids, target.zones)
     const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
-    console.log(`  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`)
+    console.log(
+        `  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`,
+    )
     // The list endpoint omits policies; fetch each match in full.
     const have = await Promise.all(
         (tokens.get(acct) ?? [])
@@ -402,13 +417,19 @@ async function tryEnv(envName: string, cmd: string[]) {
     const acct = envAccount(cfg, env)
     const { target, ids } = await lookups(repo, acct, env)
     const expires = new Date(now.getTime() + 3_600_000)
-    const t = await cf<Token & { value: string }>('POST', `/accounts/${acct}/tokens`, {
-        name: `${tokenName(repo, env.env)}:try`,
-        policies: policies(cfg, env, ids, target.zones),
-        expires_on: `${expires.toISOString().slice(0, 19)}Z`,
-    })
+    const t = await cf<Token & { value: string }>(
+        'POST',
+        `/accounts/${acct}/tokens`,
+        {
+            name: `${tokenName(repo, env.env)}:try`,
+            policies: policies(cfg, env, ids, target.zones),
+            expires_on: `${expires.toISOString().slice(0, 19)}Z`,
+        },
+    )
     const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
-    console.log(`try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`)
+    console.log(
+        `try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`,
+    )
     let code = 1
     try {
         const childEnv: Record<string, string | undefined> = {
@@ -474,14 +495,29 @@ for (const repo of repos) {
     // pre-voidflow leftover: environment jobs never read it, and any job
     // without an environment that still does is deploying with an old token.
     if (!cfg.envs.some((e) => e.secret === 'repo')) {
-        const repoSecrets = await gh(['secret', 'list', '-R', repo, '--json', 'name', '-q', '.[].name'])
+        const repoSecrets = await gh([
+            'secret',
+            'list',
+            '-R',
+            repo,
+            '--json',
+            'name',
+            '-q',
+            '.[].name',
+        ])
         if (repoSecrets.split('\n').includes('CLOUDFLARE_API_TOKEN')) {
             pending++
             console.log(
                 `- repo-wide secret CLOUDFLARE_API_TOKEN: every env's is in an environment; jobs without one still read this${note}`,
             )
             if (prune) {
-                await gh(['secret', 'delete', 'CLOUDFLARE_API_TOKEN', '-R', repo])
+                await gh([
+                    'secret',
+                    'delete',
+                    'CLOUDFLARE_API_TOKEN',
+                    '-R',
+                    repo,
+                ])
                 console.log('  deleted')
             }
         }
