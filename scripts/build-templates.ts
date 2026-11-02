@@ -36,7 +36,30 @@ function need<T>(v: T | undefined, what: string): T {
     return v
 }
 
-const json = (v: unknown) => `${JSON.stringify(v, null, 2)}\n`
+/**
+ * JSON as biome prints it with biome/base.json (4-space indent, width 80):
+ * objects expanded, arrays on one line when they fit. Generated repos run
+ * `biome check .`, so the written files must already be formatted.
+ */
+function fmt(v: unknown, indent: string, used: number): string {
+    if (Array.isArray(v)) {
+        const flat = `[${v.map((x) => JSON.stringify(x)).join(', ')}]`
+        const scalars = !v.some((x) => typeof x === 'object' && x !== null)
+        if (scalars && used + flat.length + 1 <= 80) return flat
+        const inner = `${indent}    `
+        return `[\n${v.map((x) => inner + fmt(x, inner, inner.length)).join(',\n')}\n${indent}]`
+    }
+    if (typeof v === 'object' && v !== null) {
+        const inner = `${indent}    `
+        const rows = Object.entries(v).map(([k, x]) => {
+            const key = `${JSON.stringify(k)}: `
+            return inner + key + fmt(x, inner, inner.length + key.length)
+        })
+        return `{\n${rows.join(',\n')}\n${indent}}`
+    }
+    return JSON.stringify(v)
+}
+const json = (v: unknown) => `${fmt(v, '', 0)}\n`
 
 const sarifJob = `# Uncomment to upload gitleaks/zizmor results to code scanning (public repos, or private with GitHub Code Security).
 #   sarif:
@@ -123,6 +146,9 @@ export function buildTemplates(root: string): Map<string, string> {
 
     // voidflow's [install] and [install.security] blocks, without its [test] block.
     const bunfig = `${read(root, 'bunfig.toml').split(/^\[test\]/m)[0].trim()}\n`
+    for (const want of ['[install]', 'minimumReleaseAge', '[install.security]', 'scanner = ']) {
+        if (!bunfig.includes(want)) throw new Error(`build-templates: bunfig.toml lacks ${want}`)
+    }
 
     const t = new Map<string, string>()
     t.set('common/lefthook.yml', lefthook)
