@@ -21,6 +21,8 @@ export type SettingResult = {
 export type RepoInfo = {
     id: string
     visibility: 'PUBLIC' | 'PRIVATE' | 'INTERNAL'
+    pullRequestCreationPolicy?: string
+    issueCreationPolicy?: string
 }
 
 type Setting = {
@@ -80,12 +82,8 @@ function policy(
 ): Setting {
     return {
         name,
-        async read(gh, repo) {
-            const data = await gh.graphql(
-                `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${field} } }`,
-                split(repo),
-            )
-            return data?.repository?.[field] === 'COLLABORATORS_ONLY'
+        async read(_gh, _repo, info) {
+            return info[field] === 'COLLABORATORS_ONLY'
         },
         async write(gh, _repo, info) {
             await gh.graphql(
@@ -188,7 +186,12 @@ function classifyError(
 ): SettingResult {
     const msg = e instanceof Error ? e.message : String(e)
     const status = e instanceof ApiError ? e.status : 0
-    if (name === 'codeql' && /language/i.test(msg)) {
+    if (
+        name === 'codeql' &&
+        status >= 400 &&
+        status < 500 &&
+        /language/i.test(msg)
+    ) {
         return {
             name,
             status: 'skipped-no-code',
@@ -231,6 +234,9 @@ export async function runSettings(
         info = {
             id: data.repository.id,
             visibility: data.repository.visibility,
+            pullRequestCreationPolicy:
+                data.repository.pullRequestCreationPolicy,
+            issueCreationPolicy: data.repository.issueCreationPolicy,
         }
     } catch (e) {
         const detail = `cannot read ${repo}: ${e instanceof Error ? e.message : String(e)}`

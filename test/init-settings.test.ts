@@ -5,8 +5,11 @@ import { join } from 'node:path'
 import {
     type Gh,
     type GhResult,
+    ghAvailable,
+    graphqlArgv,
     parseInclude,
     resolveRepo,
+    restArgv,
 } from '../scripts/init/gh.ts'
 import {
     manualReminders,
@@ -26,6 +29,7 @@ function fake(opts: {
     const calls: Call[] = []
     const gql: { query: string; vars: Record<string, string> }[] = []
     const gh: Gh = {
+        available: async () => null,
         async rest(method, path, body) {
             calls.push({ method, path, body })
             const key = `${method} ${path}`
@@ -265,8 +269,88 @@ describe('settings', () => {
         expect(status(rs, 'codeql')).toBe('applied')
     })
 
+    test('secret-scanning plan gate on private and internal repos', async () => {
+        for (const visibility of ['PRIVATE', 'INTERNAL']) {
+            const f = fake({
+                visibility,
+                override: {
+                    'PATCH repos/o/r': {
+                        status: 422,
+                        body: { message: 'Secret scanning needs a plan' },
+                    },
+                },
+            })
+            const rs = await runSettings(f.gh, 'o/r', sel())
+            expect(status(rs, 'secret-scanning')).toBe('skipped-plan')
+        }
+    })
+
+    test('plan gate does not apply to public repos', async () => {
+        const f = fake({
+            override: {
+                'PATCH repos/o/r': { status: 422, body: { message: 'x' } },
+            },
+        })
+        const rs = await runSettings(f.gh, 'o/r', sel())
+        expect(status(rs, 'secret-scanning')).toBe('failed')
+    })
+
+    test('plan gate on a read error', async () => {
+        const f = fake({
+            visibility: 'PRIVATE',
+            override: {
+                'GET repos/o/r/code-scanning/default-setup': {
+                    status: 403,
+                    body: { message: 'Advanced Security must be enabled' },
+                },
+            },
+        })
+        const rs = await runSettings(f.gh, 'o/r', sel())
+        expect(status(rs, 'codeql')).toBe('skipped-plan')
+        expect(
+            writes(f.calls).some((c) => c.path.includes('default-setup')),
+        ).toBe(false)
+    })
+
+    test('plan gate in dry-run (read error)', async () => {
+        const f = fake({
+            visibility: 'PRIVATE',
+            override: {
+                'GET repos/o/r/code-scanning/default-setup': {
+                    status: 403,
+                    body: { message: 'nope' },
+                },
+            },
+        })
+        const rs = await runSettings(f.gh, 'o/r', sel({ dryRun: true }))
+        expect(status(rs, 'codeql')).toBe('skipped-plan')
+        expect(status(rs, 'pr-policy')).toBe('would-apply')
+        expect(writes(f.calls)).toHaveLength(0)
+    })
+
+    test('language message on a 5xx is a failure, not no-code', async () => {
+        const f = fake({
+            override: {
+                'PATCH repos/o/r/code-scanning/default-setup': {
+                    status: 500,
+                    body: { message: 'language service down' },
+                },
+            },
+        })
+        expect(status(await runSettings(f.gh, 'o/r', sel()), 'codeql')).toBe(
+            'failed',
+        )
+    })
+
+    test('policies come from the single repo read', async () => {
+        const f = fake({ on: true })
+        await runSettings(f.gh, 'o/r', sel())
+        expect(f.gql).toHaveLength(1)
+    })
+
     test('graphql read failure fails every selected setting', async () => {
         const gh: Gh = {
+            available: async () => null,
             rest: async () => ({ status: 200, body: {} }),
             graphql: async () => {
                 throw new Error('Could not resolve to a Repository')
@@ -275,6 +359,49 @@ describe('settings', () => {
         const rs = await runSettings(gh, 'o/r', sel())
         expect(rs).toHaveLength(6)
         expect(rs.every((r) => r.status === 'failed')).toBe(true)
+    })
+})
+
+describe('ghAvailable', () => {
+    test('delegates to the Gh', async () => {
+        const f = fake({})
+        expect(await ghAvailable(f.gh)).toBeNull()
+        const down: Gh = { ...f.gh, available: async () => 'gh missing' }
+        expect(await ghAvailable(down)).toBe('gh missing')
+    })
+})
+
+describe('argv', () => {
+    test('rest without body', () => {
+        expect(restArgv('GET', 'repos/o/r', false)).toEqual([
+            'gh',
+            'api',
+            '--include',
+            '--method',
+            'GET',
+            'repos/o/r',
+        ])
+    })
+    test('rest with body pipes stdin', () => {
+        const a = restArgv('PATCH', 'repos/o/r', true)
+        expect(a.slice(-2)).toEqual(['--input', '-'])
+        expect(a).toContain('--include')
+        expect(a).toContain('PATCH')
+    })
+    test('graphql passes every variable as a string with -f', () => {
+        const a = graphqlArgv('query Q', { owner: 'o', name: '123' })
+        expect(a).toEqual([
+            'gh',
+            'api',
+            'graphql',
+            '-f',
+            'query=query Q',
+            '-f',
+            'owner=o',
+            '-f',
+            'name=123',
+        ])
+        expect(a).not.toContain('-F')
     })
 })
 
