@@ -162,6 +162,64 @@ describe('planFiles', () => {
     })
 })
 
+describe('merge edge cases', () => {
+    const pkgAction = () =>
+        planFiles(dir, sel('tool'), ctx).find((x) => x.name === 'package')
+
+    test('biome-formatted inline arrays survive the merge', () => {
+        const src = '{\n    "name": "x",\n    "files": ["dist", "src"]\n}\n'
+        writeFileSync(join(dir, 'package.json'), src)
+        const a = pkgAction()
+        expect(a?.status).toBe('merge')
+        expect(a?.content).toContain('    "files": ["dist", "src"],\n')
+        expect(
+            a?.content.startsWith(
+                '{\n    "name": "x",\n    "files": ["dist", "src"],\n',
+            ),
+        ).toBe(true)
+    })
+    test('non-object package.json is a conflict', () => {
+        for (const src of ['null', '[]', '"s"', '{"scripts": "x"}']) {
+            writeFileSync(join(dir, 'package.json'), src)
+            const a = pkgAction()
+            expect(a?.status).toBe('conflict')
+            expect(a?.detail).toBeTruthy()
+        }
+    })
+    test('missing required template throws', () => {
+        expect(() =>
+            planFiles(dir, sel('tool'), { ...ctx, kind: 'nope' as Kind }),
+        ).toThrow(/missing template/)
+    })
+    test('CRLF is preserved in package.json merge', () => {
+        writeFileSync(join(dir, 'package.json'), '{\r\n  "name": "x"\r\n}\r\n')
+        const a = pkgAction()
+        expect(a?.content.replaceAll('\r\n', '')).not.toContain('\n')
+        expect(a?.content.endsWith('}\r\n')).toBe(true)
+    })
+    test('CRLF is preserved in gitignore merge', () => {
+        writeFileSync(join(dir, '.gitignore'), 'foo\r\n')
+        const a = planFiles(dir, sel('tool'), ctx).find(
+            (x) => x.name === 'gitignore',
+        )
+        expect(a?.status).toBe('merge')
+        expect(a?.content.replaceAll('\r\n', '')).not.toContain('\n')
+        expect(a?.content).toContain('# Written by voidflow')
+    })
+    test('force replaces only the conflicting script', () => {
+        writeFileSync(
+            join(dir, 'package.json'),
+            '{"scripts":{"lint":"eslint .","custom":"vitest"}}',
+        )
+        const a = planFiles(dir, sel('tool', { force: true }), ctx).find(
+            (x) => x.name === 'package',
+        )
+        const pkg = JSON.parse(a?.content ?? '')
+        expect(pkg.scripts.lint).toBe('biome check .')
+        expect(pkg.scripts.custom).toBe('vitest')
+    })
+})
+
 describe('applyFiles', () => {
     test('refuses conflicts and writes nothing', () => {
         writeFileSync(join(dir, 'mise.toml'), 'mine\n')

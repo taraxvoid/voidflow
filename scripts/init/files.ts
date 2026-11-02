@@ -17,7 +17,7 @@ import {
 export type FileItem = {
     name: string
     target: string
-    /** Template paths under templates/; `{kind}` expands to the selected kind. Missing files are skipped. */
+    /** Template paths under templates/; `{kind}` expands to the selected kind. A leading `?` marks an optional template; any other missing one throws. */
     templates: string[]
     kinds: Kind[]
     merge?: 'package' | 'gitignore'
@@ -60,7 +60,7 @@ export const FILE_ITEMS: FileItem[] = [
     {
         name: 'gitignore',
         target: '.gitignore',
-        templates: ['common/gitignore', '{kind}/gitignore'],
+        templates: ['common/gitignore', '?{kind}/gitignore'],
         kinds: BOTH,
         merge: 'gitignore',
     },
@@ -133,10 +133,18 @@ export function fileNames(kind: Kind): string[] {
 
 function templateTexts(item: FileItem, ctx: RenderCtx): string[] {
     const root = join(packageRoot(), 'templates')
-    return item.templates
-        .map((t) => join(root, t.replaceAll('{kind}', ctx.kind)))
-        .filter((p) => existsSync(p))
-        .map((p) => render(readFileSync(p, 'utf8'), ctx))
+    return item.templates.flatMap((t) => {
+        const optional = t.startsWith('?')
+        const p = join(
+            root,
+            t.replace(/^\?/, '').replaceAll('{kind}', ctx.kind),
+        )
+        if (!existsSync(p)) {
+            if (optional) return []
+            throw new Error(`missing template: ${p}`)
+        }
+        return [render(readFileSync(p, 'utf8'), ctx)]
+    })
 }
 
 /** Significant gitignore lines: trimmed, no blanks, no comments. */
@@ -163,11 +171,13 @@ function planGitignore(
     const have = new Set(patterns(existing))
     const missing = wanted.filter((l) => !have.has(l))
     if (missing.length === 0) return { status: 'unchanged', content: existing }
-    const sep = existing === '' || existing.endsWith('\n') ? '' : '\n'
-    const gap = existing === '' ? '' : '\n'
+    const eol = existing.includes('\r\n') ? '\r\n' : '\n'
+    const sep = existing === '' || existing.endsWith('\n') ? '' : eol
+    const gap = existing === '' ? '' : eol
+    const block = withMarker('.gitignore', `${missing.join('\n')}\n`, ctx)
     return {
         status: 'merge',
-        content: `${existing}${sep}${gap}${withMarker('.gitignore', `${missing.join('\n')}\n`, ctx)}`,
+        content: `${existing}${sep}${gap}${block.replaceAll('\n', eol)}`,
     }
 }
 
@@ -176,9 +186,9 @@ type Pkg = Record<string, unknown> & {
     devDependencies?: Record<string, string>
 }
 
-function detectIndent(text: string): string | number {
+function detectIndent(text: string): string {
     const m = text.match(/^([ \t]+)\S/m)
-    return m?.[1] ?? 4
+    return m?.[1] ?? '    '
 }
 
 function planPackage(
@@ -210,6 +220,19 @@ function planPackage(
             detail: 'package.json is not valid JSON',
         }
     }
+    const isObj = (v: unknown) =>
+        typeof v === 'object' && v !== null && !Array.isArray(v)
+    if (
+        !isObj(pkg) ||
+        (pkg.scripts !== undefined && !isObj(pkg.scripts)) ||
+        (pkg.devDependencies !== undefined && !isObj(pkg.devDependencies))
+    ) {
+        return {
+            status: 'conflict',
+            content: raw,
+            detail: 'package.json is not an object with object scripts and devDependencies',
+        }
+    }
     const scripts = { ...(pkg.scripts ?? {}) }
     const devDeps = { ...(pkg.devDependencies ?? {}) }
     const conflicts: string[] = []
@@ -232,9 +255,10 @@ function planPackage(
     const next: Pkg = { ...pkg }
     if (Object.keys(scripts).length > 0) next.scripts = scripts
     if (Object.keys(devDeps).length > 0) next.devDependencies = devDeps
-    const content =
-        JSON.stringify(next, null, detectIndent(raw)) +
-        (raw.endsWith('\n') ? '\n' : '')
+    const eol = raw.includes('\r\n') ? '\r\n' : '\n'
+    let content = json(next, detectIndent(raw))
+    if (!raw.endsWith('\n')) content = content.slice(0, -1)
+    if (eol === '\r\n') content = content.replaceAll('\n', eol)
     const detail = conflicts.length
         ? `scripts differ: ${conflicts.join(', ')}`
         : undefined
