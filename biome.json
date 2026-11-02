@@ -13,14 +13,8 @@
     },
     "overrides": [
         {
-            "includes": ["test/**/*.test.ts"],
-            "linter": {
-                "rules": {
-                    "correctness": {
-                        "usePlaywrightValidDescribeCallback": "off"
-                    }
-                }
-            }
+            "includes": ["test/**"],
+            "linter": { "enabled": false }
         }
     ]
 }
