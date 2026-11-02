@@ -80,6 +80,8 @@ Inputs:
 | `code-paths` | all but Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs that count as code |
 | `e2e-scripts` | `[]` | JSON array of extra e2e scripts, run in order. Missing ones fail |
 | `e2e-ignore-paths` | linter, git hook, Renovate, editor and vitest config | JSON array of globs whose changes alone skip e2e |
+| `renovate-skip-e2e` | `true` | Skip e2e on Renovate PRs that only bump a devDependency outside `renovate-e2e-packages`. `false` opts out |
+| `renovate-e2e-packages` | astro, Playwright, axe-core | JSON array of devDependency names whose Renovate bumps still run e2e (`@scope/` matches a scope) |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI |
 | `red-audits` | `false` | A failed a11y or Lighthouse audit turns its CI job red |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
