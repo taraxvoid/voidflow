@@ -44,6 +44,14 @@ describe('deps-review agent', () => {
         expect(Object.keys(outputs.jobs)).toEqual(['deps-gate'])
     })
 
+    // Injected upstream text must not reach other issues or PRs.
+    test('writes only to the PR under review, with a minimal shell', () => {
+        for (const key of ['add-comment', 'add-labels', 'remove-labels']) {
+            expect(outputs[key].target).toBe('${{ github.event.pull_request.number || inputs.pr }}')
+        }
+        expect(fm.tools.bash).toEqual(['grep:*', 'jq:*', 'git diff:*'])
+    })
+
     // Renaming the labels breaks callers' filters.
     test('applies only its two labels', () => {
         const labels = ['deps:low-risk', 'deps:needs-you']
