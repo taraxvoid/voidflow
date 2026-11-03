@@ -298,6 +298,7 @@ jobs:
           : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           log=$(mktemp)
           if npm stage publish "$TARBALL" --tag "$DIST_TAG" "${flags[@]}" 2>&1 | tee "$log"; then
+            bash scripts/stage-summary.sh "$log"
             exit 0
           fi
           # Staged versions share the published-version index, so restaging is
@@ -326,6 +327,7 @@ jobs:
           : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           log=$(mktemp)
           if npm stage publish "$TARBALL" --tag "$DIST_TAG" --loglevel verbose "${flags[@]}" 2>&1 | tee "$log"; then
+            bash scripts/stage-summary.sh "$log"
             exit 0
           fi
           # See the scoped step: a 409 means this version is already staged.
