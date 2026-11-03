@@ -107,7 +107,7 @@ safe-outputs:
             PR: ${{ github.event.pull_request.number || inputs.pr }}
             # The commit the agent reviewed. Manual runs review the head at dispatch.
             EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
-            VOIDFLOW: "1.0.0-next.2" # x-release-please-version
+            VOIDFLOW: "1.0.0-next.3" # x-release-please-version
           run: |
             set -euo pipefail
             pr() { gh pr view "$PR" --repo "$REPO" --json "$1" --jq ".$1"; }
