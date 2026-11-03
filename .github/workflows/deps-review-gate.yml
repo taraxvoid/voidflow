@@ -1,0 +1,42 @@
+name: deps-review gate
+
+# Reusable. Posts a passing `deps-review` check run on PRs that are not from
+# Renovate or Dependabot, so `deps-review` can be a required check: on
+# dependency PRs only the deps-review agent posts it, and on everyone else's
+# PRs this does.
+#
+# The job is deliberately not named `deps-review`. GitHub counts a skipped job
+# as a passing check of the same name, so a `deps-review` job skipped on bot
+# PRs would satisfy the required check before the agent had reviewed anything.
+#
+# Callers must grant `checks: write`.
+
+on:
+  workflow_call:
+
+permissions:
+  checks: write
+
+jobs:
+  pass-through:
+    name: deps-review pass-through
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.user.login != 'renovate[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    steps:
+      - name: Post passing deps-review check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh api "repos/$REPO/check-runs" \
+            -f name=deps-review \
+            -f head_sha="$SHA" \
+            -f status=completed \
+            -f conclusion=success \
+            -f 'output[title]=Not a dependency PR' \
+            -f 'output[summary]=deps-review only reviews Renovate and Dependabot PRs.'
