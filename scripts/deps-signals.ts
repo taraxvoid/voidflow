@@ -18,8 +18,19 @@ import { spawnSync } from 'node:child_process'
 
 export type Flag = { subject: string; reason: string }
 
-const DEP_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
-const LOCKFILES = new Set(['bun.lock', 'bun.lockb', 'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'])
+const DEP_SECTIONS = [
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
+]
+const LOCKFILES = new Set([
+    'bun.lock',
+    'bun.lockb',
+    'pnpm-lock.yaml',
+    'package-lock.json',
+    'yarn.lock',
+])
 const INSTALL_SCRIPTS = ['preinstall', 'install', 'postinstall']
 const SHA = /^[0-9a-f]{40}$/
 
@@ -36,30 +47,57 @@ const exact = (spec: string) => spec.trim().replace(/^[\^~]/, '')
 /** Files a dependency PR may touch; anything else needs a human. */
 export function classifyFiles(files: string[]): Flag[] {
     return files
-        .filter((f) => f !== 'package.json' && !LOCKFILES.has(f) && !/^\.github\/workflows\/[^/]+\.ya?ml$/.test(f))
-        .map((f) => ({ subject: f, reason: 'file outside package.json, lockfiles and workflows changed' }))
+        .filter(
+            (f) =>
+                f !== 'package.json' &&
+                !LOCKFILES.has(f) &&
+                !/^\.github\/workflows\/[^/]+\.ya?ml$/.test(f),
+        )
+        .map((f) => ({
+            subject: f,
+            reason: 'file outside package.json, lockfiles and workflows changed',
+        }))
 }
 
 export type DepChange = { name: string; from: string; to: string }
 
+type Manifest = Record<string, unknown>
+type RegistryVersion = {
+    _npmUser?: { name?: string }
+    maintainers?: { name?: string }[]
+    scripts?: Record<string, string>
+    dist?: { attestations?: unknown }
+    dependencies?: Record<string, string>
+    optionalDependencies?: Record<string, string>
+}
+type RegistryDocument = { versions?: Record<string, RegistryVersion> }
+
 /** Direct dependency changes between two package.json documents. */
-export function diffManifest(base: any, head: any): { changes: DepChange[]; flags: Flag[] } {
+export function diffManifest(
+    base: Manifest,
+    head: Manifest,
+): { changes: DepChange[]; flags: Flag[] } {
     const flags: Flag[] = []
     const changes: DepChange[] = []
     const keys = new Set([...Object.keys(base), ...Object.keys(head)])
     for (const key of keys) {
         if (DEP_SECTIONS.includes(key)) continue
         if (JSON.stringify(base[key]) !== JSON.stringify(head[key])) {
-            flags.push({ subject: `package.json#${key}`, reason: 'non-dependency field changed' })
+            flags.push({
+                subject: `package.json#${key}`,
+                reason: 'non-dependency field changed',
+            })
         }
     }
     for (const section of DEP_SECTIONS) {
-        const a = base[section] ?? {}
-        const b = head[section] ?? {}
+        const a = (base[section] ?? {}) as Record<string, string>
+        const b = (head[section] ?? {}) as Record<string, string>
         for (const name of new Set([...Object.keys(a), ...Object.keys(b)])) {
             if (a[name] === b[name]) continue
-            if (!(name in a)) flags.push({ subject: name, reason: `added to ${section}` })
-            else if (!(name in b)) flags.push({ subject: name, reason: `removed from ${section}` })
+            if (!(name in a))
+                flags.push({ subject: name, reason: `added to ${section}` })
+            else if (!(name in b))
+                flags.push({ subject: name, reason: `removed from ${section}` })
             else changes.push({ name, from: a[name], to: b[name] })
         }
     }
@@ -70,32 +108,56 @@ export function diffManifest(base: any, head: any): { changes: DepChange[]; flag
 export function classifyChange(c: DepChange): Flag[] {
     const from = parseSpec(c.from)
     const to = parseSpec(c.to)
-    if (!from || !to) return [{ subject: c.name, reason: `unverifiable version spec ${c.from} -> ${c.to}` }]
-    if (to.major !== from.major) return [{ subject: c.name, reason: 'major update' }]
-    if (from.major === 0) return [{ subject: c.name, reason: '0.x update (minor can break)' }]
-    const down = to.minor < from.minor || (to.minor === from.minor && to.patch < from.patch)
+    if (!from || !to)
+        return [
+            {
+                subject: c.name,
+                reason: `unverifiable version spec ${c.from} -> ${c.to}`,
+            },
+        ]
+    if (to.major !== from.major)
+        return [{ subject: c.name, reason: 'major update' }]
+    if (from.major === 0)
+        return [{ subject: c.name, reason: '0.x update (minor can break)' }]
+    const down =
+        to.minor < from.minor ||
+        (to.minor === from.minor && to.patch < from.patch)
     return down ? [{ subject: c.name, reason: 'downgrade' }] : []
 }
 
 /** Supply-chain signals from the registry document for one package. */
-export function registrySignals(c: DepChange, doc: any): Flag[] {
+export function registrySignals(c: DepChange, doc: RegistryDocument): Flag[] {
     const flag = (reason: string) => ({ subject: c.name, reason })
     const old = doc?.versions?.[exact(c.from)]
     const cur = doc?.versions?.[exact(c.to)]
     if (!old || !cur) return [flag('version missing from the registry')]
     const flags: Flag[] = []
     const known = new Set<string>(
-        [old._npmUser?.name, ...(old.maintainers ?? []).map((m: any) => m?.name)].filter(Boolean),
+        [
+            old._npmUser?.name,
+            ...(old.maintainers ?? []).map((m) => m.name),
+        ].filter((name): name is string => typeof name === 'string'),
     )
     if (!cur._npmUser?.name || !known.has(cur._npmUser.name)) {
-        flags.push(flag(`published by ${cur._npmUser?.name ?? 'unknown'}, not a publisher or maintainer of ${exact(c.from)}`))
+        flags.push(
+            flag(
+                `published by ${cur._npmUser?.name ?? 'unknown'}, not a publisher or maintainer of ${exact(c.from)}`,
+            ),
+        )
     }
     for (const s of INSTALL_SCRIPTS) {
-        if (cur.scripts?.[s] && cur.scripts[s] !== old.scripts?.[s]) flags.push(flag(`${s} script added or changed`))
+        if (cur.scripts?.[s] && cur.scripts[s] !== old.scripts?.[s])
+            flags.push(flag(`${s} script added or changed`))
     }
-    if (old.dist?.attestations && !cur.dist?.attestations) flags.push(flag('provenance attestation dropped'))
-    const before = new Set(Object.keys({ ...old.dependencies, ...old.optionalDependencies }))
-    const added = Object.keys({ ...cur.dependencies, ...cur.optionalDependencies }).filter((d) => !before.has(d))
+    if (old.dist?.attestations && !cur.dist?.attestations)
+        flags.push(flag('provenance attestation dropped'))
+    const before = new Set(
+        Object.keys({ ...old.dependencies, ...old.optionalDependencies }),
+    )
+    const added = Object.keys({
+        ...cur.dependencies,
+        ...cur.optionalDependencies,
+    }).filter((d) => !before.has(d))
     if (added.length) flags.push(flag(`new dependencies: ${added.join(', ')}`))
     return flags
 }
@@ -106,14 +168,19 @@ export type ActionPin = { action: string; sha: string; tag: string | null }
 export function parseUses(yaml: string): { pins: ActionPin[]; flags: Flag[] } {
     const pins: ActionPin[] = []
     const flags: Flag[] = []
-    for (const m of yaml.matchAll(/^[ \t]*-?[ \t]*uses:[ \t]*([^\s#]+)[ \t]*(?:#[ \t]*(\S+))?/gm)) {
+    for (const m of yaml.matchAll(
+        /^[ \t]*-?[ \t]*uses:[ \t]*([^\s#]+)[ \t]*(?:#[ \t]*(\S+))?/gm,
+    )) {
         const [ref, tag] = [m[1].replace(/^['"]|['"]$/g, ''), m[2] ?? null]
         if (ref.startsWith('./')) continue
         const at = ref.lastIndexOf('@')
         const action = ref.slice(0, at)
         const sha = ref.slice(at + 1)
         if (at < 0 || ref.startsWith('docker://') || !SHA.test(sha)) {
-            flags.push({ subject: ref, reason: 'action not pinned to a commit SHA' })
+            flags.push({
+                subject: ref,
+                reason: 'action not pinned to a commit SHA',
+            })
         } else pins.push({ action, sha, tag })
     }
     return { pins, flags }
@@ -122,25 +189,45 @@ export function parseUses(yaml: string): { pins: ActionPin[]; flags: Flag[] } {
 const tagMajor = (tag: string | null) => tag?.match(/^v?(\d+)/)?.[1] ?? null
 
 /** New or changed action pins: each needs a tag comment and the same major as before. */
-export function diffPins(base: ActionPin[], head: ActionPin[]): { verify: ActionPin[]; flags: Flag[] } {
+export function diffPins(
+    base: ActionPin[],
+    head: ActionPin[],
+): { verify: ActionPin[]; flags: Flag[] } {
     const before = new Map(base.map((p) => [p.action, p]))
     const verify: ActionPin[] = []
     const flags: Flag[] = []
     for (const p of head) {
         const old = before.get(p.action)
         if (old && old.sha === p.sha) continue
-        if (!p.tag) flags.push({ subject: p.action, reason: 'pin has no version comment to verify' })
+        if (!p.tag)
+            flags.push({
+                subject: p.action,
+                reason: 'pin has no version comment to verify',
+            })
         else if (!old) flags.push({ subject: p.action, reason: 'new action' })
-        else if (tagMajor(old.tag) !== tagMajor(p.tag)) flags.push({ subject: p.action, reason: 'major update' })
+        else if (tagMajor(old.tag) !== tagMajor(p.tag))
+            flags.push({ subject: p.action, reason: 'major update' })
         else verify.push(p)
     }
     return { verify, flags }
 }
 
 /** Does `git ls-remote` output resolve `tag` to `sha` (peeled tags preferred)? */
-export function tagMatches(lsRemote: string, tag: string, sha: string): boolean {
-    const refs = new Map(lsRemote.trim().split('\n').map((l) => l.split('\t').reverse() as [string, string]))
-    return (refs.get(`refs/tags/${tag}^{}`) ?? refs.get(`refs/tags/${tag}`)) === sha
+export function tagMatches(
+    lsRemote: string,
+    tag: string,
+    sha: string,
+): boolean {
+    const refs = new Map(
+        lsRemote
+            .trim()
+            .split('\n')
+            .map((l) => l.split('\t').reverse() as [string, string]),
+    )
+    return (
+        (refs.get(`refs/tags/${tag}^{}`) ?? refs.get(`refs/tags/${tag}`)) ===
+        sha
+    )
 }
 
 // --- CLI -------------------------------------------------------------------
@@ -154,7 +241,12 @@ async function main(argv: string[]): Promise<number> {
     const arg = (name: string) => argv[argv.indexOf(name) + 1]
     const base = arg('--base')
     const head = arg('--head')
-    if (!argv.includes('--base') || !argv.includes('--head') || !SHA.test(base) || !SHA.test(head)) {
+    if (
+        !argv.includes('--base') ||
+        !argv.includes('--head') ||
+        !SHA.test(base) ||
+        !SHA.test(head)
+    ) {
         console.error('usage: deps-signals --base <sha> --head <sha>')
         return 2
     }
@@ -168,32 +260,58 @@ async function main(argv: string[]): Promise<number> {
     if (files.length === 0) flags.push({ subject: 'PR', reason: 'no changes' })
 
     if (files.includes('package.json')) {
-        const read = (ref: string) => JSON.parse(git(['show', `${ref}:package.json`]) ?? '{}')
-        const { changes, flags: manifestFlags } = diffManifest(read(base), read(head))
+        const read = (ref: string) =>
+            JSON.parse(git(['show', `${ref}:package.json`]) ?? '{}') as Manifest
+        const { changes, flags: manifestFlags } = diffManifest(
+            read(base),
+            read(head),
+        )
         flags.push(...manifestFlags)
         for (const c of changes) {
             const typeFlags = classifyChange(c)
             flags.push(...typeFlags)
             if (typeFlags.length) continue
-            const res = await fetch(`https://registry.npmjs.org/${c.name.replace('/', '%2F')}`)
-            flags.push(...(res.ok ? registrySignals(c, await res.json()) : [{ subject: c.name, reason: `registry ${res.status}` }]))
+            const res = await fetch(
+                `https://registry.npmjs.org/${c.name.replace('/', '%2F')}`,
+            )
+            flags.push(
+                ...(res.ok
+                    ? registrySignals(c, (await res.json()) as RegistryDocument)
+                    : [{ subject: c.name, reason: `registry ${res.status}` }]),
+            )
         }
     } else if (files.some((f) => LOCKFILES.has(f))) {
-        flags.push({ subject: 'lockfile', reason: 'lockfile-only change: transitive updates are not verified' })
+        flags.push({
+            subject: 'lockfile',
+            reason: 'lockfile-only change: transitive updates are not verified',
+        })
     }
 
     for (const f of files.filter((f) => f.startsWith('.github/workflows/'))) {
-        const parse = (ref: string) => parseUses(git(['show', `${ref}:${f}`]) ?? '')
+        const parse = (ref: string) =>
+            parseUses(git(['show', `${ref}:${f}`]) ?? '')
         const was = parse(base)
         const now = parse(head)
-        flags.push(...now.flags.filter((x) => !was.flags.some((y) => y.subject === x.subject)))
+        flags.push(
+            ...now.flags.filter(
+                (x) => !was.flags.some((y) => y.subject === x.subject),
+            ),
+        )
         const { verify, flags: pinFlags } = diffPins(was.pins, now.pins)
         flags.push(...pinFlags)
         for (const p of verify) {
             const repo = p.action.split('/').slice(0, 2).join('/')
-            const out = git(['ls-remote', `https://github.com/${repo}`, `refs/tags/${p.tag}`, `refs/tags/${p.tag}^{}`])
+            const out = git([
+                'ls-remote',
+                `https://github.com/${repo}`,
+                `refs/tags/${p.tag}`,
+                `refs/tags/${p.tag}^{}`,
+            ])
             if (out === null || !tagMatches(out, p.tag as string, p.sha)) {
-                flags.push({ subject: p.action, reason: `${p.sha.slice(0, 7)} is not what ${p.tag} points to` })
+                flags.push({
+                    subject: p.action,
+                    reason: `${p.sha.slice(0, 7)} is not what ${p.tag} points to`,
+                })
             }
         }
     }

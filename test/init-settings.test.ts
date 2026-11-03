@@ -423,7 +423,7 @@ describe('parseInclude', () => {
             'HTTP/2.0 422 Unprocessable\r\nA: b\r\n\r\n{"message":"x"}',
         )
         expect(r.status).toBe(422)
-        expect(r.body.message).toBe('x')
+        expect(r.body).toEqual({ message: 'x' })
     })
     test('garbage gives status 0', () => {
         expect(parseInclude('oops').status).toBe(0)

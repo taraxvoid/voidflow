@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 
-const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
+const read = (p: string) =>
+    readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 const yaml = (p: string): any => Bun.YAML.parse(read(p))
 const frontmatter = (p: string): any => {
     const m = read(p).match(/^---\n([\s\S]*?)\n---\n/)
@@ -14,7 +15,9 @@ const BOTS = ['renovate[bot]', 'dependabot[bot]']
 describe('agentic package (agentic/aw.yml)', () => {
     test('lists exactly the workflows in agentic/workflows', () => {
         const manifest = yaml('agentic/aw.yml')
-        const onDisk = readdirSync(new URL('../agentic/workflows', import.meta.url))
+        const onDisk = readdirSync(
+            new URL('../agentic/workflows', import.meta.url),
+        )
             .filter((f) => f.endsWith('.md'))
             .map((f) => `workflows/${f}`)
             .sort()
@@ -29,25 +32,36 @@ describe('deps-review agent', () => {
 
     test('only the dependency bots (or a manual run) start it', () => {
         expect(fm.on.bots).toEqual(BOTS)
-        for (const bot of BOTS) expect(fm.if).toContain(`github.event.pull_request.user.login == '${bot}'`)
+        for (const bot of BOTS)
+            expect(fm.if).toContain(
+                `github.event.pull_request.user.login == '${bot}'`,
+            )
         expect(fm.if).toContain("github.event_name == 'workflow_dispatch'")
     })
 
     test('the agent job only reads', () => {
-        for (const level of Object.values(fm.permissions)) expect(level).toBe('read')
+        for (const level of Object.values(fm.permissions))
+            expect(level).toBe('read')
         expect(fm.tools.github['read-only']).toBe(true)
     })
 
     // It judges; Renovate and GitHub auto-merge act. Adding any write power is a major.
     test('the model never approves, merges, pushes or posts the check itself', () => {
-        expect(Object.keys(outputs).sort()).toEqual(['add-comment', 'add-labels', 'jobs', 'remove-labels'])
+        expect(Object.keys(outputs).sort()).toEqual([
+            'add-comment',
+            'add-labels',
+            'jobs',
+            'remove-labels',
+        ])
         expect(Object.keys(outputs.jobs)).toEqual(['deps-gate'])
     })
 
     // Injected upstream text must not reach other issues or PRs.
     test('writes only to the PR under review, with a minimal shell', () => {
         for (const key of ['add-comment', 'add-labels', 'remove-labels']) {
-            expect(outputs[key].target).toBe('${{ github.event.pull_request.number || inputs.pr }}')
+            expect(outputs[key].target).toBe(
+                '${{ github.event.pull_request.number || inputs.pr }}',
+            )
         }
         expect(fm.tools.bash).toEqual(['grep:*', 'jq:*', 'git diff:*'])
     })
@@ -64,19 +78,29 @@ describe('deps-review agent', () => {
         const script = gate.steps.find((s: any) => s.name === 'Gate')
 
         test('can write checks and nothing else', () => {
-            expect(gate.permissions).toEqual({ contents: 'read', 'pull-requests': 'read', checks: 'write' })
+            expect(gate.permissions).toEqual({
+                contents: 'read',
+                'pull-requests': 'read',
+                checks: 'write',
+            })
         })
 
         // The model can only make the gate stricter.
         test('posts success only when the model says low-risk and deps-signals is clean', () => {
-            expect(script.run).toContain('[ "$verdicts" = "low-risk" ] && [ "$clean" = "true" ]')
+            expect(script.run).toContain(
+                '[ "$verdicts" = "low-risk" ] && [ "$clean" = "true" ]',
+            )
             expect(script.run).toContain('conclusion=failure')
             expect(script.run).toContain('name: "deps-review"')
-            expect(script.run).toContain('deps-signals --base "$base" --head "$head"')
+            expect(script.run).toContain(
+                'deps-signals --base "$base" --head "$head"',
+            )
         })
 
         test('evaluates the commit the agent reviewed and posts only while it is still the head', () => {
-            expect(script.env.EVENT_HEAD).toBe('${{ github.event.pull_request.head.sha }}')
+            expect(script.env.EVENT_HEAD).toBe(
+                '${{ github.event.pull_request.head.sha }}',
+            )
             expect(script.run).toContain('if [ "$(pr headRefOid)" != "$head" ]')
         })
 
@@ -84,7 +108,9 @@ describe('deps-review agent', () => {
         test('runs the deps-signals of the voidflow release it ships in', () => {
             const pkg = JSON.parse(read('package.json'))
             expect(script.env.VOIDFLOW).toBe(pkg.version)
-            expect(read('agentic/workflows/deps-review.md')).toContain(`VOIDFLOW: "${pkg.version}" # x-release-please-version`)
+            expect(read('agentic/workflows/deps-review.md')).toContain(
+                `VOIDFLOW: "${pkg.version}" # x-release-please-version`,
+            )
             for (const f of ['next', 'main', 'maintenance']) {
                 const cfg = JSON.parse(read(`.release-please/${f}.json`))
                 expect(cfg.packages['.']['extra-files']).toContainEqual({
@@ -113,7 +139,10 @@ describe('deps-review-gate.yml', () => {
     test('posts the pass-through only on PRs the bots did not open', () => {
         const [, job] = jobs[0]
         expect(jobs).toHaveLength(1)
-        for (const bot of BOTS) expect(job.if).toContain(`github.event.pull_request.user.login != '${bot}'`)
+        for (const bot of BOTS)
+            expect(job.if).toContain(
+                `github.event.pull_request.user.login != '${bot}'`,
+            )
         expect(job.steps[0].run).toContain('-f name=deps-review')
         expect(wf.permissions).toEqual({ checks: 'write' })
     })
@@ -123,8 +152,12 @@ describe('agentic-locks.yml', () => {
     test('defaults to the gh-aw version voidflow compiles its own package with', () => {
         const wf = yaml('.github/workflows/agentic-locks.yml')
         const ci = yaml('.github/workflows/ci.yml')
-        const step = ci.jobs.validation.steps.find((s: any) => s.name === 'Compile agentic package')
-        expect(wf.on.workflow_call.inputs['gh-aw-version'].default).toBe(step.env.GH_AW_VERSION)
+        const step = ci.jobs.validation.steps.find(
+            (s: any) => s.name === 'Compile agentic package',
+        )
+        expect(wf.on.workflow_call.inputs['gh-aw-version'].default).toBe(
+            step.env.GH_AW_VERSION,
+        )
         expect(wf.permissions).toEqual({ contents: 'read' })
     })
 })
@@ -136,7 +169,12 @@ describe('renovate preset (deps-review-automerge.json)', () => {
     // Lockfile maintenance is out: deps-signals can't verify transitive updates.
     test('automerges only low-risk update types on 1.0+ versions', () => {
         expect(preset.packageRules).toHaveLength(1)
-        expect(rule.matchUpdateTypes).toEqual(['patch', 'minor', 'digest', 'pin'])
+        expect(rule.matchUpdateTypes).toEqual([
+            'patch',
+            'minor',
+            'digest',
+            'pin',
+        ])
         expect(rule.matchCurrentVersion).toBe('!/^0/')
         expect(rule.automerge).toBe(true)
     })
@@ -150,6 +188,7 @@ describe('renovate preset (deps-review-automerge.json)', () => {
     test('the base preset does not automerge on its own', () => {
         const base = JSON.parse(read('default.json'))
         expect(base.automerge ?? false).toBe(false)
-        for (const r of base.packageRules) expect(r.automerge ?? false).toBe(false)
+        for (const r of base.packageRules)
+            expect(r.automerge ?? false).toBe(false)
     })
 })

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+    existsSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Gh } from '../scripts/init/gh.ts'
@@ -42,7 +48,10 @@ function fakeGh(opts: { unavailable?: string } = {}) {
                     }
                 }
                 case '/code-scanning/default-setup':
-                    return { status: 200, body: { state: on ? 'configured' : 'not-configured' } }
+                    return {
+                        status: 200,
+                        body: { state: on ? 'configured' : 'not-configured' },
+                    }
                 case '/private-vulnerability-reporting':
                     return { status: 200, body: { enabled: on } }
             }
@@ -77,21 +86,29 @@ function repo(origin: string | null = 'https://github.com/o/r.git'): string {
     const dir = mkdtempSync(join(tmpdir(), 'voidflow-init-'))
     roots.push(dir)
     Bun.spawnSync(['git', 'init', '-q', dir])
-    if (origin) Bun.spawnSync(['git', '-C', dir, 'remote', 'add', 'origin', origin])
+    if (origin)
+        Bun.spawnSync(['git', '-C', dir, 'remote', 'add', 'origin', origin])
     return dir
 }
 
 async function run(argv: string[], gh: Gh = fakeGh().gh) {
     const out: string[] = []
     const err: string[] = []
-    const log = spyOn(console, 'log').mockImplementation((...a) => void out.push(a.join(' ')))
-    const error = spyOn(console, 'error').mockImplementation((...a) => void err.push(a.join(' ')))
+    const log = spyOn(console, 'log').mockImplementation(
+        (...a) => void out.push(a.join(' ')),
+    )
+    const error = spyOn(console, 'error').mockImplementation(
+        (...a) => void err.push(a.join(' ')),
+    )
     const exit = spyOn(process, 'exit').mockImplementation(((c?: number) => {
         throw new Exit(c ?? 0)
     }) as never)
     let code = -1
     try {
-        await main(argv, 'voidflow init', { gh, resolveSha: async () => 'deadbeef' })
+        await main(argv, 'voidflow init', {
+            gh,
+            resolveSha: async () => 'deadbeef',
+        })
     } catch (e) {
         if (!(e instanceof Exit)) throw e
         code = e.code
@@ -121,10 +138,14 @@ describe('voidflow init', () => {
         const r = await run(['--kind', 'tool', dir])
         expect(r.code).toBe(0)
         for (const f of TOOL_FILES) expect(existsSync(join(dir, f))).toBe(true)
-        expect(readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8')).toContain('@deadbeef # v')
+        expect(
+            readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8'),
+        ).toContain('@deadbeef # v')
         expect(r.out).toContain('create')
         expect(r.out).toContain('applied')
-        expect(r.out).toContain('https://github.com/o/r/settings/security_analysis')
+        expect(r.out).toContain(
+            'https://github.com/o/r/settings/security_analysis',
+        )
         expect(r.out).toContain("'o/r': tool()")
     })
 
@@ -147,7 +168,9 @@ describe('voidflow init', () => {
         const r = await run(['--kind', 'tool', '--force', dir])
         expect(r.code).toBe(0)
         expect(r.out).toMatch(/overwrite\s+mise/)
-        expect(readFileSync(join(dir, 'mise.toml'), 'utf8')).toContain('lefthook')
+        expect(readFileSync(join(dir, 'mise.toml'), 'utf8')).toContain(
+            'lefthook',
+        )
     })
 
     test('--preset settings needs no --kind and writes no files', async () => {
@@ -166,7 +189,9 @@ describe('voidflow init', () => {
     })
 
     test('an unknown --preset or --kind exits 2', async () => {
-        expect((await run(['--kind', 'tool', '--preset', 'nope', repo()])).code).toBe(2)
+        expect(
+            (await run(['--kind', 'tool', '--preset', 'nope', repo()])).code,
+        ).toBe(2)
         expect((await run(['--kind', 'nope', repo()])).code).toBe(2)
     })
 
@@ -185,7 +210,13 @@ describe('voidflow init', () => {
     })
 
     test('--skip-setting nope exits 2 listing the valid names', async () => {
-        const r = await run(['--preset', 'settings', '--skip-setting', 'nope', repo()])
+        const r = await run([
+            '--preset',
+            'settings',
+            '--skip-setting',
+            'nope',
+            repo(),
+        ])
         expect(r.code).toBe(2)
         expect(r.err).toContain('pr-policy, issue-policy')
     })
@@ -193,7 +224,18 @@ describe('voidflow init', () => {
     test('--skip-file and --skip-setting leave items out', async () => {
         const dir = repo()
         const f = fakeGh()
-        const r = await run(['--kind', 'tool', '--skip-file', 'ci', '--skip-setting', 'codeql', dir], f.gh)
+        const r = await run(
+            [
+                '--kind',
+                'tool',
+                '--skip-file',
+                'ci',
+                '--skip-setting',
+                'codeql',
+                dir,
+            ],
+            f.gh,
+        )
         expect(r.code).toBe(0)
         expect(existsSync(join(dir, '.github/workflows/ci.yml'))).toBe(false)
         expect(f.writes.some((w) => w.includes('default-setup'))).toBe(false)
@@ -212,10 +254,21 @@ describe('voidflow init', () => {
         expect(s.code).toBe(0)
         expect(s.out).toContain('SECURITY.md was not written')
         const dir = repo()
-        const f = await run(['--kind', 'tool', '--preset', 'files', '--enable-pvr', dir])
+        const f = await run([
+            '--kind',
+            'tool',
+            '--preset',
+            'files',
+            '--enable-pvr',
+            dir,
+        ])
         expect(f.code).toBe(0)
-        expect(f.out).toContain('private vulnerability reporting was not enabled')
-        expect(readFileSync(join(dir, 'SECURITY.md'), 'utf8')).toContain('o/r/security/advisories/new')
+        expect(f.out).toContain(
+            'private vulnerability reporting was not enabled',
+        )
+        expect(readFileSync(join(dir, 'SECURITY.md'), 'utf8')).toContain(
+            'o/r/security/advisories/new',
+        )
     })
 
     test('without an origin remote, files are written and the settings half fails', async () => {
@@ -227,14 +280,22 @@ describe('voidflow init', () => {
     })
 
     test('--repo overrides the origin remote', async () => {
-        const r = await run(['--preset', 'settings', '--repo', 'o/r', repo(null)])
+        const r = await run([
+            '--preset',
+            'settings',
+            '--repo',
+            'o/r',
+            repo(null),
+        ])
         expect(r.code).toBe(0)
         expect(r.out).toContain('applied')
     })
 
     test('gh unauthenticated with --dry-run exits 0 and reports settings unavailable', async () => {
         const dir = repo()
-        const f = fakeGh({ unavailable: 'gh is not authenticated (run gh auth login)' })
+        const f = fakeGh({
+            unavailable: 'gh is not authenticated (run gh auth login)',
+        })
         const r = await run(['--kind', 'tool', '--dry-run', dir], f.gh)
         expect(r.code).toBe(0)
         expect(r.out).toContain('unavailable')
@@ -262,6 +323,8 @@ describe('voidflow init', () => {
         expect(r.code).toBe(0)
         expect(r.out).not.toMatch(/^\s+(create|applied|merge|overwrite)\s/m)
         expect(r.out).toMatch(/unchanged\s+ci/)
-        expect(readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8')).toBe(ci)
+        expect(
+            readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8'),
+        ).toBe(ci)
     })
 })

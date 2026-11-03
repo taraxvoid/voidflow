@@ -3,7 +3,7 @@
  */
 import { capture } from '../lib/proc.ts'
 
-export type GhResult = { status: number; body: any }
+export type GhResult = { status: number; body: unknown }
 
 export interface Gh {
     rest(
@@ -11,9 +11,15 @@ export interface Gh {
         path: string,
         body?: unknown,
     ): Promise<GhResult>
-    graphql(query: string, vars: Record<string, string>): Promise<any>
+    graphql(query: string, vars: Record<string, string>): Promise<unknown>
     /** null when gh is installed and authenticated, else the reason it is not. */
     available(): Promise<string | null>
+}
+
+function object(value: unknown): Record<string, unknown> | null {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null
 }
 
 /** argv for `gh api` REST calls; a body is piped on stdin. */
@@ -48,7 +54,7 @@ export function parseInclude(text: string): GhResult {
     const status = m ? Number(m[1]) : 0
     const split = normalized.indexOf('\n\n')
     const raw = split === -1 ? '' : normalized.slice(split + 2).trim()
-    let body: any = null
+    let body: unknown = null
     if (raw) {
         try {
             body = JSON.parse(raw)
@@ -79,20 +85,31 @@ export function ghCli(): Gh {
         async graphql(query, vars) {
             const cmd = graphqlArgv(query, vars)
             const r = await capture(cmd, undefined, { timeoutMs: 60_000 })
-            let json: any = null
+            let json: unknown = null
             try {
                 json = JSON.parse(r.out)
             } catch {
                 // fall through to the error below
             }
-            if (r.code !== 0 || json?.errors) {
+            const response = object(json)
+            const errors = response?.errors
+            if (r.code !== 0 || errors) {
+                const errorMessages = Array.isArray(errors)
+                    ? errors
+                          .map((error) => object(error)?.message)
+                          .filter(
+                              (message): message is string =>
+                                  typeof message === 'string',
+                          )
+                          .join('; ')
+                    : ''
                 const msg =
-                    json?.errors?.map((e: any) => e.message).join('; ') ||
+                    errorMessages ||
                     r.err.trim() ||
                     `gh api graphql exited ${r.code}`
                 throw new Error(msg)
             }
-            return json?.data
+            return response?.data
         },
         async available() {
             try {

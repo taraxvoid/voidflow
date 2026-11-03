@@ -15,13 +15,15 @@ export function packageRoot(): string {
         const pkg = join(dir, 'package.json')
         if (existsSync(pkg)) {
             try {
-                if (JSON.parse(readFileSync(pkg, 'utf8')).name === NAME) return dir
+                if (JSON.parse(readFileSync(pkg, 'utf8')).name === NAME)
+                    return dir
             } catch {
                 // unreadable package.json: keep walking
             }
         }
         const parent = dirname(dir)
-        if (parent === dir) throw new Error(`could not find the ${NAME} package root`)
+        if (parent === dir)
+            throw new Error(`could not find the ${NAME} package root`)
         dir = parent
     }
 }

@@ -5,7 +5,13 @@
  * bunfig.toml, the unlighthouse example config. Run via `just templates`.
  * Init-time placeholders are filled in by `voidflow init`, not here.
  */
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { packageRoot } from './lib/package-root.ts'
@@ -107,17 +113,31 @@ const PREPARE =
 export function buildTemplates(root: string): Map<string, string> {
     const pkg = JSON.parse(read(root, 'package.json'))
     const dev: Record<string, string> = pkg.devDependencies ?? {}
-    const biome = need(dev['@biomejs/biome'], 'devDependencies["@biomejs/biome"]')
-    const playwright = need(dev['@playwright/test'], 'devDependencies["@playwright/test"]')
+    const biome = need(
+        dev['@biomejs/biome'],
+        'devDependencies["@biomejs/biome"]',
+    )
+    const playwright = need(
+        dev['@playwright/test'],
+        'devDependencies["@playwright/test"]',
+    )
     const tools = miseVersions(root)
     const mise = ['lefthook', 'gitleaks', 'jactionlint', 'bun']
         .map((n) => `${n} = "${need(tools[n], `mise.toml tool ${n}`)}"`)
         .join('\n')
 
     // voidflow's [install] and [install.security] blocks, without its [test] block.
-    const bunfig = `${read(root, 'bunfig.toml').split(/^\[test\]/m)[0].trim()}\n`
-    for (const want of ['[install]', 'minimumReleaseAge', '[install.security]', 'scanner = ']) {
-        if (!bunfig.includes(want)) throw new Error(`build-templates: bunfig.toml lacks ${want}`)
+    const bunfig = `${read(root, 'bunfig.toml')
+        .split(/^\[test\]/m)[0]
+        .trim()}\n`
+    for (const want of [
+        '[install]',
+        'minimumReleaseAge',
+        '[install.security]',
+        'scanner = ',
+    ]) {
+        if (!bunfig.includes(want))
+            throw new Error(`build-templates: bunfig.toml lacks ${want}`)
     }
 
     const t = new Map<string, string>()
@@ -184,7 +204,10 @@ export function buildTemplates(root: string): Map<string, string> {
 export default definePreviewConfig({ ciPort: 4141 })
 `,
     )
-    t.set('site/unlighthouse.config.ts', read(root, 'scripts/unlighthouse/unlighthouse.config.example.ts'))
+    t.set(
+        'site/unlighthouse.config.ts',
+        read(root, 'scripts/unlighthouse/unlighthouse.config.example.ts'),
+    )
     t.set(
         'site/package.json',
         json({
@@ -194,7 +217,8 @@ export default definePreviewConfig({ ciPort: 4141 })
                 'check:licenses': 'check-licenses',
                 'test:e2e:all': 'playwright test',
                 'test:e2e:a11y': 'playwright test --grep @a11y',
-                'test:e2e:lighthouse': 'bun run build && unlighthouse-runner --dir dist',
+                'test:e2e:lighthouse':
+                    'bun run build && unlighthouse-runner --dir dist',
             },
             devDependencies: {
                 '@taraxvoid/voidflow': '{{version}}',
@@ -203,7 +227,10 @@ export default definePreviewConfig({ ciPort: 4141 })
             },
         }),
     )
-    t.set('site/gitignore', '.unlighthouse/\ntest-results/\nplaywright-report/\n')
+    t.set(
+        'site/gitignore',
+        '.unlighthouse/\ntest-results/\nplaywright-report/\n',
+    )
 
     return new Map([...t].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
 }

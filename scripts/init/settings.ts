@@ -42,13 +42,37 @@ class ApiError extends Error {
     }
 }
 
+function object(value: unknown): Record<string, unknown> | null {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null
+}
+
+function isVisibility(value: unknown): value is RepoInfo['visibility'] {
+    return value === 'PUBLIC' || value === 'PRIVATE' || value === 'INTERNAL'
+}
+
 function apiMessage(r: GhResult): string {
     const b = r.body
-    const m = typeof b === 'string' ? b : b?.message
-    const errs = Array.isArray(b?.errors)
-        ? ` ${b.errors.map((e: any) => (typeof e === 'string' ? e : (e?.message ?? JSON.stringify(e)))).join('; ')}`
+    const body = object(b)
+    const message =
+        typeof b === 'string'
+            ? b
+            : typeof body?.message === 'string'
+              ? body.message
+              : ''
+    const errs = Array.isArray(body?.errors)
+        ? ` ${body.errors
+              .map((e) => {
+                  if (typeof e === 'string') return e
+                  const errorMessage = object(e)?.message
+                  return typeof errorMessage === 'string'
+                      ? errorMessage
+                      : (JSON.stringify(e) ?? String(e))
+              })
+              .join('; ')}`
         : ''
-    return `HTTP ${r.status}${m ? `: ${m}` : ''}${errs}`
+    return `HTTP ${r.status}${message ? `: ${message}` : ''}${errs}`
 }
 
 function ok(r: GhResult): GhResult {
@@ -112,7 +136,7 @@ export const SETTINGS: Setting[] = [
         name: 'dependabot-security-updates',
         async read(gh, repo) {
             const r = await get(gh, `repos/${repo}/automated-security-fixes`)
-            return r.body?.enabled === true
+            return object(r.body)?.enabled === true
         },
         write: (gh, repo) =>
             send(gh, 'PUT', `repos/${repo}/automated-security-fixes`),
@@ -120,11 +144,15 @@ export const SETTINGS: Setting[] = [
     {
         name: 'secret-scanning',
         async read(gh, repo) {
-            const sa = (await get(gh, `repos/${repo}`)).body
-                ?.security_and_analysis
+            const sa = object(
+                object((await get(gh, `repos/${repo}`)).body)
+                    ?.security_and_analysis,
+            )
+            const secretScanning = object(sa?.secret_scanning)
+            const pushProtection = object(sa?.secret_scanning_push_protection)
             return (
-                sa?.secret_scanning?.status === 'enabled' &&
-                sa?.secret_scanning_push_protection?.status === 'enabled'
+                secretScanning?.status === 'enabled' &&
+                pushProtection?.status === 'enabled'
             )
         },
         write: (gh, repo) =>
@@ -139,7 +167,7 @@ export const SETTINGS: Setting[] = [
         name: 'codeql',
         async read(gh, repo) {
             const r = await get(gh, `repos/${repo}/code-scanning/default-setup`)
-            return r.body?.state === 'configured'
+            return object(r.body)?.state === 'configured'
         },
         write: (gh, repo) =>
             send(gh, 'PATCH', `repos/${repo}/code-scanning/default-setup`, {
@@ -154,7 +182,7 @@ export const SETTINGS: Setting[] = [
                 gh,
                 `repos/${repo}/private-vulnerability-reporting`,
             )
-            return r.body?.enabled === true
+            return object(r.body)?.enabled === true
         },
         write: (gh, repo) =>
             send(gh, 'PUT', `repos/${repo}/private-vulnerability-reporting`),
@@ -164,7 +192,7 @@ export const SETTINGS: Setting[] = [
         optIn: 'ai-scan',
         async read(gh, repo) {
             const r = await get(gh, `repos/${repo}/code-scanning/ai-scan`)
-            return r.body?.pr_scan === 'enabled'
+            return object(r.body)?.pr_scan === 'enabled'
         },
         write: (gh, repo) =>
             send(gh, 'PATCH', `repos/${repo}/code-scanning/ai-scan`, {
@@ -231,12 +259,24 @@ export async function runSettings(
             'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id visibility pullRequestCreationPolicy issueCreationPolicy } }',
             { owner, name },
         )
+        const repository = object(object(data)?.repository)
+        if (
+            typeof repository?.id !== 'string' ||
+            !isVisibility(repository.visibility)
+        ) {
+            throw new Error('gh api graphql returned an invalid repository')
+        }
         info = {
-            id: data.repository.id,
-            visibility: data.repository.visibility,
+            id: repository.id,
+            visibility: repository.visibility,
             pullRequestCreationPolicy:
-                data.repository.pullRequestCreationPolicy,
-            issueCreationPolicy: data.repository.issueCreationPolicy,
+                typeof repository.pullRequestCreationPolicy === 'string'
+                    ? repository.pullRequestCreationPolicy
+                    : undefined,
+            issueCreationPolicy:
+                typeof repository.issueCreationPolicy === 'string'
+                    ? repository.issueCreationPolicy
+                    : undefined,
         }
     } catch (e) {
         const detail = `cannot read ${repo}: ${e instanceof Error ? e.message : String(e)}`

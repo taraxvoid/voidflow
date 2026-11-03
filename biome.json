@@ -6,6 +6,7 @@
             "**/*.ts",
             "**/*.mjs",
             "**/*.json",
+            "!!templates/**/biome.json",
             "!**/dist",
             "!**/node_modules",
             "!.release-please"
