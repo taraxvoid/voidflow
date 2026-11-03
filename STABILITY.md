@@ -22,6 +22,9 @@ Covered by this policy:
 | Renovate preset (`default.json`) | That it validates and extends `config:best-practices` |
 | lefthook config (`lefthook/base.yml`) | Its path, the hooks it installs, the script names each runs |
 | Supported runtimes | Package managers (`bun`, `pnpm`, `aube`), minimum Bun and Node versions, runner OS (`ubuntu-latest`) |
+| Agentic package (`agentic/`) | Workflow paths in `aw.yml`, their triggers, the check run and label names they post (`deps-review`, `deps:low-risk`, `deps:needs-you`), the safe outputs they may use, and what each verdict means |
+| Reusable workflows for agentic repos (`agentic-locks.yml`, `deps-review-gate.yml`) | Paths, inputs and defaults, job names, required permissions |
+| Opt-in Renovate preset (`deps-review-automerge.json`) | The update types it automerges and that it merges through GitHub auto-merge |
 | Tags | `vX.Y.Z` release tags, the floating `vN` major tag |
 
 Not covered: anything the README doesn't document, `scripts/` other than the
@@ -77,6 +80,22 @@ to catch is a patch (e.g. gitleaks wasn't scanning a path it should have).
 
 Every major ships a migration section in its release notes: each change, why,
 and the exact edit a caller makes.
+
+### Agentic workflow prompts
+
+An agentic workflow's prompt is behavior, even when its frontmatter doesn't
+change, so prompt edits are versioned like code:
+
+- **Patch:** wording, typos, clearer instructions that don't change a verdict.
+- **Minor:** new evidence or checks, a stricter verdict (something that was low
+  risk can become needs-you), a new optional label or comment section.
+- **Major:** a looser verdict (something that needed you can merge on its own),
+  renamed or removed check runs or labels (they break required checks and
+  filters), new write powers (approve, merge, push), or a new default engine.
+
+Because a model can judge the same evidence differently between runs, a
+verdict is not a guarantee: the gate is the required check plus your
+rulesets, and the agent only ever gets stricter within a major.
 
 ## Deprecation
 

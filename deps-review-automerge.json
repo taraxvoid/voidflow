@@ -1,0 +1,13 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Opt-in: automerge low-risk updates once every required check passes, including the deps-review check from voidflow's agentic package. Use only on repos where deps-review is a required check (see README). Extend after the base preset: { \"extends\": [\"github>taraxvoid/voidflow\", \"github>taraxvoid/voidflow:deps-review-automerge\"] }",
+  "packageRules": [
+    {
+      "description": "Low-risk update types on 1.0+ versions. GitHub auto-merge (platformAutomerge) waits for every required check on the current head, so a Renovate rebase is re-reviewed before it can merge.",
+      "matchUpdateTypes": ["patch", "minor", "digest", "pin", "lockFileMaintenance"],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true,
+      "platformAutomerge": true
+    }
+  ]
+}
