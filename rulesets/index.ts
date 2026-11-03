@@ -59,9 +59,11 @@ export type RepoConfig = {
      */
     linearHistory: boolean
     /**
-     * Require a merge queue on main (default false). GitHub only offers
-     * merge queues on org-owned repos, so personal repos leave it off. The
-     * required checks must also run on `merge_group` (see site-ci.yml).
+     * Require a merge queue on main (default false). GitHub offers merge
+     * queues on public repos owned by an organization, and on private org
+     * repos only with Enterprise Cloud. Personal repos and private repos on
+     * other plans leave it off. The required checks must also run on
+     * `merge_group` (see site-ci.yml).
      */
     mergeQueue?: boolean
     /** Extra bypass actors per tier, on top of the tier defaults. */

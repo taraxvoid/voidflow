@@ -54,6 +54,16 @@ just rulesets-apply                 # create/update to match
 just rulesets-apply --prune         # also delete rulesets listed under `retire`
 ```
 
+Fleet keys are `owner/name`, so one infra repo can cover repos under several
+owners. A repo not listed in the fleet is never touched, so repos whose rulesets
+are managed by hand can stay out of it.
+
+To require a merge queue on `main`, set `mergeQueue: true` on the repo's entry
+(`tool({ mergeQueue: true })`). GitHub only offers merge queues on public repos
+owned by an organization, and on private org repos with Enterprise Cloud, so
+leave it off elsewhere. The repo's CI must also run on `merge_group`, or the
+required checks never report and the queue stalls.
+
 Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.
 
