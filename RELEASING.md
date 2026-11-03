@@ -72,7 +72,8 @@ unscoped `voidflow` mirror), so approve both, via the Staged Packages tab on
 npmjs.com or `npm stage approve <id>`. The GitHub release, `vX.Y.Z` tag and
 floating `v0` tag are created before approval; actions consumers pin git tags,
 so this is fine, but `npm install` of the new version works only after
-approval. JSR publishes directly.
+approval. JSR publishes directly. CI cannot approve: approval and
+`npm stage list` need a 2FA-capable npm session, not the workflow's OIDC token.
 
 Rerunning the publish job is safe: a version that is already published is
 skipped, and one that is already staged makes the registry return a 409,
