@@ -250,10 +250,11 @@ const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
  * an unknown one (likely a typo) is an error. Returns the filled-in fleet.
  */
 export function checkFleet(x: unknown): Fleet {
-    const isObj = (v: unknown): v is Record<string, any> =>
+    const isObj = (v: unknown): v is Record<string, unknown> =>
         typeof v === 'object' && v !== null && !Array.isArray(v)
     const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
     const strList = (v: unknown) => Array.isArray(v) && v.every(isStr)
+    const field = (v: unknown, k: string) => (isObj(v) ? v[k] : undefined)
     if (!isObj(x)) throw new Error('config is not an object of repos')
     const errs: string[] = []
     const bad = (path: string, why: string) => errs.push(`${path}: ${why}`)
@@ -282,13 +283,13 @@ export function checkFleet(x: unknown): Fleet {
                     continue
                 }
                 if (!isStr(r.name)) bad(`${rs}.name`, 'missing')
-                if (!strList(r.conditions?.ref_name?.include))
+                if (!strList(field(field(r.conditions, 'ref_name'), 'include')))
                     bad(`${rs}.conditions.ref_name.include`, 'not a list')
                 if (!Array.isArray(r.bypass_actors))
                     bad(`${rs}.bypass_actors`, 'not a list')
                 if (
                     !Array.isArray(r.rules) ||
-                    !r.rules.every((u: any) => isStr(u?.type))
+                    !r.rules.every((u) => isStr(field(u, 'type')))
                 )
                     bad(`${rs}.rules`, 'not a list')
             }
@@ -343,15 +344,17 @@ export function normalise(
                   ),
               }),
         rules: sortBy(r.rules, (x) => x.type).map((rule) => {
-            const p = rule.parameters as any
+            const p = rule.parameters
             if (rule.type === 'required_status_checks' && p) {
                 return {
                     type: rule.type,
                     parameters: {
                         ...p,
                         required_status_checks: sortBy(
-                            p.required_status_checks,
-                            (c: any) => c.context,
+                            p.required_status_checks as Array<{
+                                context: string
+                            }>,
+                            (c: { context: string }) => c.context,
                         ),
                     },
                 }

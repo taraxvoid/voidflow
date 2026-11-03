@@ -3,10 +3,12 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+const yaml = (s: string): any => Bun.YAML.parse(s)
+
 const read = (p: string) =>
     readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 
-const actionScript: string = Bun.YAML.parse(
+const actionScript: string = yaml(
     read('actions/branch-env-map/action.yml'),
 ).runs.steps.find((s: any) => s.id === 'map').run
 
@@ -51,12 +53,12 @@ describe('action script', () => {
 describe('single-environment is the only mode', () => {
     test('branch-env-map declares no inputs', () => {
         expect(
-            Bun.YAML.parse(read('actions/branch-env-map/action.yml')).inputs,
+            yaml(read('actions/branch-env-map/action.yml')).inputs,
         ).toBeUndefined()
     })
 
     test('site-ci.yml has no single-environment input or tier step', () => {
-        const wf = Bun.YAML.parse(read('.github/workflows/site-ci.yml'))
+        const wf = yaml(read('.github/workflows/site-ci.yml'))
         expect(Object.keys(wf.on.workflow_call.inputs)).not.toContain(
             'single-environment',
         )

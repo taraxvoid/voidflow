@@ -10,14 +10,16 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+const yaml = (s: string): any => Bun.YAML.parse(s)
+
 const read = (p: string) =>
     readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
 
-const actionScript: string = Bun.YAML.parse(
+const actionScript: string = yaml(
     read('actions/bun-install/action.yml'),
 ).runs.steps.find((s: any) => s.id === 'install').run
-const siteCiSteps: any[] = Bun.YAML.parse(read('.github/workflows/site-ci.yml'))
-    .jobs.validate.steps
+const siteCiSteps: any[] = yaml(read('.github/workflows/site-ci.yml')).jobs
+    .validate.steps
 const workflowScript: string = siteCiSteps.find(
     (s: any) => s.id === 'install',
 ).run
@@ -104,18 +106,17 @@ describe('site-ci.yml carries the same install script as actions/bun-install', (
 
     test('socket-scanner defaults to off in both', () => {
         expect(
-            Bun.YAML.parse(read('actions/bun-install/action.yml')).inputs[
+            yaml(read('actions/bun-install/action.yml')).inputs[
                 'socket-scanner'
             ].default,
         ).toBe('false')
-        const wf = Bun.YAML.parse(read('.github/workflows/site-ci.yml'))
+        const wf = yaml(read('.github/workflows/site-ci.yml'))
         expect(wf.on.workflow_call.inputs['socket-scanner'].default).toBe(false)
     })
 
     test("voidflow's own ci.yml installs through the action", () => {
-        const steps = Bun.YAML.parse(read('.github/workflows/ci.yml')).jobs[
-            'unit-tests'
-        ].steps
+        const steps = yaml(read('.github/workflows/ci.yml')).jobs['unit-tests']
+            .steps
         expect(steps.some((s: any) => s.uses === './actions/bun-install')).toBe(
             true,
         )
@@ -184,7 +185,7 @@ describe.each([
         const r = await install(script, { bunfig, scanner: false })
         expect(r.code).toBe(0)
         expect(
-            Bun.TOML.parse(r.config!).install?.security?.scanner,
+            (Bun.TOML.parse(r.config!) as any).install?.security?.scanner,
         ).toBeUndefined()
     })
 

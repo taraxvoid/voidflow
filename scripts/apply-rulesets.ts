@@ -47,13 +47,13 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
   --apply            create and update rulesets to match
   --prune            with --apply, also delete the rulesets listed under retire`
 
-async function gh(args: string[], body?: unknown): Promise<any> {
+async function gh<T = unknown>(args: string[], body?: unknown): Promise<T> {
     const { code, out, err } = await capture(
         ['gh', 'api', ...args],
         body === undefined ? undefined : JSON.stringify(body),
     )
     if (code !== 0) throw new Error(`gh api ${args.join(' ')}: ${err || out}`)
-    return out ? JSON.parse(out) : null
+    return (out ? JSON.parse(out) : null) as T
 }
 
 /** `prog` names the command in the --help usage. */
@@ -78,7 +78,7 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
         console.log(`\n== ${repo}`)
         let listed: Array<{ id: number; name: string }>
         try {
-            listed = await gh([`repos/${repo}/rulesets`])
+            listed = await gh<typeof listed>([`repos/${repo}/rulesets`])
         } catch (e) {
             if (!isPlanGated(String(e))) throw e
             gated.push(repo)
@@ -112,7 +112,7 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
                 continue
             }
             matched.add(hit.id)
-            const have: Ruleset = await gh([`repos/${repo}/rulesets/${hit.id}`])
+            const have = await gh<Ruleset>([`repos/${repo}/rulesets/${hit.id}`])
             // A read-only token gets no bypass_actors back; compare the rest.
             const bypass = Array.isArray(have.bypass_actors)
             if (!bypass)

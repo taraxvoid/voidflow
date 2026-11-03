@@ -112,11 +112,12 @@ function runIn(version: string | null, shell: string, script: string) {
 const read = (path: string) => Bun.file(join(repo, path)).text()
 
 describe('Biome 1.x warning', async () => {
-    const hook = Bun.YAML.parse(await read('lefthook/base.yml'))['pre-commit']
-        .commands['biome-version']
+    const hook = (Bun.YAML.parse(await read('lefthook/base.yml')) as any)[
+        'pre-commit'
+    ].commands['biome-version']
     const hookScript = hook.run.replaceAll('{pm}', 'bun')
-    const ciStep = Bun.YAML.parse(
-        await read('.github/workflows/site-ci.yml'),
+    const ciStep = (
+        Bun.YAML.parse(await read('.github/workflows/site-ci.yml')) as any
     ).jobs.validate.steps.find(
         (s: { name?: string }) => s.name === 'Check Biome version',
     )

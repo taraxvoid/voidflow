@@ -39,6 +39,8 @@ const usage = () =>
         'Run `voidflow <command> --help` for its flags.',
     ].join('\n')
 
+export {}
+
 const [name, ...rest] = process.argv.slice(2)
 if (name === undefined || name === '-h' || name === '--help') {
     console.log(usage())

@@ -1,16 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 
+const yaml = (s: string): any => Bun.YAML.parse(s)
+
 const read = (p: string) =>
     readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
-const wf: any = Bun.YAML.parse(read('.github/workflows/tool-ci.yml'))
+const wf: any = yaml(read('.github/workflows/tool-ci.yml'))
 const job = wf.jobs.validate
 const steps: any[] = job.steps
 const step = (name: string) => steps.find((s) => s.name === name)
-const siteJobs = Bun.YAML.parse(read('.github/workflows/site-ci.yml')).jobs
+const siteJobs = yaml(read('.github/workflows/site-ci.yml')).jobs
 const siteSteps: any[] = siteJobs.validate.steps
 const siteStep = (name: string) => siteSteps.find((s) => s.name === name)
-const actionInstall: string = Bun.YAML.parse(
+const actionInstall: string = yaml(
     read('actions/bun-install/action.yml'),
 ).runs.steps.find((s: any) => s.id === 'install').run
 
@@ -165,7 +167,7 @@ describe('SARIF for code scanning', () => {
 })
 
 describe('upload-sarif.yml', () => {
-    const up: any = Bun.YAML.parse(read('.github/workflows/upload-sarif.yml'))
+    const up: any = yaml(read('.github/workflows/upload-sarif.yml'))
     const upSteps: any[] = up.jobs.upload.steps
 
     test('is reusable only and is the one workflow asking for security-events', () => {
@@ -176,7 +178,7 @@ describe('upload-sarif.yml', () => {
             'security-events': 'write',
         })
         for (const f of ['site-ci.yml', 'tool-ci.yml']) {
-            const w: any = Bun.YAML.parse(read(`.github/workflows/${f}`))
+            const w: any = yaml(read(`.github/workflows/${f}`))
             expect(JSON.stringify(w)).not.toContain('security-events')
         }
     })

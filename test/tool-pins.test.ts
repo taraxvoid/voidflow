@@ -35,8 +35,12 @@ describe('tool pins match the justfile', () => {
 
     test('jactionlint: mise.toml matches', () => {
         expect(
-            (Bun.TOML.parse(read('mise.toml')).tools as Record<string, string>)
-                .jactionlint,
+            (
+                (Bun.TOML.parse(read('mise.toml')) as any).tools as Record<
+                    string,
+                    string
+                >
+            ).jactionlint,
         ).toBe(pin('jactionlint'))
     })
 

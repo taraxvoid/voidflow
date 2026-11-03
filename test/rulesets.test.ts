@@ -7,7 +7,6 @@ import {
     diff,
     type Fleet,
     isPlanGated,
-    NETLIFY,
     normalise,
     type RepoConfig,
     type Ruleset,
@@ -348,7 +347,7 @@ describe('tool()', () => {
     test('is a main-only repo requiring tool-ci and CODEOWNERS', () => {
         expect(cfg).toEqual({
             tiers: ['main'],
-                checks: ['validate / Validate'],
+            checks: ['validate / Validate'],
             codeowners: true,
             linearHistory: true,
             mergeQueue: false,

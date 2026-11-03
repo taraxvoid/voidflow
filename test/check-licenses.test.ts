@@ -55,16 +55,20 @@ describe('check-licenses', () => {
         const { code, stdout } = await run(project('MIT'))
         expect(code).toBe(0)
         expect(stdout).toContain('check:licenses passed')
-    })
+    }, 60_000)
 
     test('allows LGPL', async () => {
         const { code } = await run(project('LGPL-3.0'))
         expect(code).toBe(0)
-    })
+    }, 60_000)
 
-    test.each(['GPL-3.0', 'AGPL-3.0-or-later'])('fails on %s', async (lic) => {
-        const { code, stderr } = await run(project(lic))
-        expect(code).toBe(1)
-        expect(stderr).toContain('disallowed license')
-    })
-}, 60_000)
+    test.each(['GPL-3.0', 'AGPL-3.0-or-later'])(
+        'fails on %s',
+        async (lic) => {
+            const { code, stderr } = await run(project(lic))
+            expect(code).toBe(1)
+            expect(stderr).toContain('disallowed license')
+        },
+        60_000,
+    )
+})
