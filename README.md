@@ -31,6 +31,59 @@ Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md).
 [`STABILITY.md`](STABILITY.md) says what minors, patches and majors may change
 and how deprecations reach you before a removal.
 
+### Starting a repo
+
+`voidflow init` writes the starter files for a tool or an Astro site and
+applies the GitHub repo settings voidflow expects. Run it in a git work tree
+(for a site, after `bun create astro`):
+
+```sh
+npx @taraxvoid/voidflow@<version> init --kind tool    # Node 24+
+bunx @taraxvoid/voidflow@<version> init --kind site
+```
+
+It's safe to re-run: files that match what `init` would write, and settings
+already as wanted, are reported `unchanged`.
+
+| Flag | Effect |
+|---|---|
+| `--kind tool\|site` | which starter files to write (not needed with `--preset settings`) |
+| `--preset full\|files\|settings` | both halves (default), only files, or only settings |
+| `--skip-file <name>` | leave a file out (repeatable): `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security` |
+| `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
+| `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
+| `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
+| `--repo owner/name` | the GitHub repo, if not the `origin` remote |
+| `-f`, `--force` | overwrite files that differ |
+| `--dry-run` | plan both halves, change nothing |
+
+**Files.** `lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`,
+`biome.json`, `.github/workflows/ci.yml` (the CI caller for the kind, pinned to
+the release SHA), and `tsconfig.json` (tool) or `playwright.config.js` and
+`unlighthouse.config.ts` (site). `.gitignore` and `package.json` are merged:
+missing lines, scripts and devDependencies are added and the rest kept. If any
+other file exists with different content, or `package.json` has a script with
+a different value, `init` lists them, writes no files and exits 1; `--force`
+overwrites. Each written file starts with a comment naming the voidflow
+version that wrote it (`renovate.json` carries it in `description`). No
+`dependabot.yml`: Renovate does version updates.
+
+**Settings** need `gh`, authenticated with admin on the repo. Always applied:
+pull requests and issues limited to collaborators (bots with write access
+count), Dependabot alerts and security updates, secret scanning with push
+protection, and CodeQL default setup. On a private repo without GitHub Code
+Security, CodeQL and secret scanning are reported `skipped-plan`; before the
+first push CodeQL has nothing to scan and is `skipped-no-code` (re-run
+`init --preset settings` after it). Neither sets exit 1. Opt-ins are never
+turned off. Settings with no API (Dependabot malware alerts, and the AI
+previews with `--enable-ai-scan`) are printed with a link to the repo's
+settings page.
+
+A file conflict doesn't stop the settings, and a missing `gh` or `origin`
+doesn't stop the files. Exit codes: 0 done, 1 a file conflict or a failed
+setting, 2 a usage error. `init` is experimental
+([`STABILITY.md`](STABILITY.md#experimental)).
+
 ### Site CI
 
 ```yaml
@@ -265,7 +318,8 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 ```
 
 **Fleet tools** - the `voidflow` CLI, for branch rulesets and scoped
-Cloudflare deploy tokens as code. Run it with `bunx` or `npx` (Node 24+) from
+Cloudflare deploy tokens as code (and `init`, see
+[Starting a repo](#starting-a-repo)). Run it with `bunx` or `npx` (Node 24+) from
 an org's infra repo that holds the fleet map (`--config`) and pins the version;
 no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
 also needs `CF_TOKEN_ADMIN`. Config shapes and flags are in
