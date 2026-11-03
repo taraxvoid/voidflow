@@ -1,18 +1,14 @@
 {
-  "name": "@taraxvoid/voidflow",
-  "version": "1.0.0-next.1",
-  "license": "MIT",
-  "exports": {
-    "./playwright": "./playwright/index.mjs"
-  },
-  "publish": {
-    "include": [
-      "playwright",
-      "README.md",
-      "LICENSE"
-    ]
-  },
-  "imports": {
-    "@playwright/test": "npm:@playwright/test@^1.40.0"
-  }
+    "name": "@taraxvoid/voidflow",
+    "version": "1.0.0-next.1",
+    "license": "MIT",
+    "exports": {
+        "./playwright": "./playwright/index.mjs"
+    },
+    "publish": {
+        "include": ["playwright", "README.md", "LICENSE"]
+    },
+    "imports": {
+        "@playwright/test": "npm:@playwright/test@^1.40.0"
+    }
 }

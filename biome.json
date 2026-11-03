@@ -1,0 +1,20 @@
+{
+    "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+    "extends": ["./biome/base.json"],
+    "files": {
+        "includes": [
+            "**/*.ts",
+            "**/*.mjs",
+            "**/*.json",
+            "!**/dist",
+            "!**/node_modules",
+            "!.release-please"
+        ]
+    },
+    "overrides": [
+        {
+            "includes": ["test/**"],
+            "linter": { "enabled": false }
+        }
+    ]
+}

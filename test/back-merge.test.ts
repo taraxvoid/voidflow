@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { nextManifestVersion } from '../scripts/back-merge.ts'
@@ -9,7 +15,9 @@ const SCRIPT = join(import.meta.dir, '../scripts/back-merge.ts')
 // worktree) GIT_DIR points at the real repo, and these git calls would
 // commit there instead of in the temp repos.
 const ENV = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))),
+    ...Object.fromEntries(
+        Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
+    ),
     GIT_AUTHOR_NAME: 'test',
     GIT_AUTHOR_EMAIL: 'test@example.com',
     GIT_COMMITTER_NAME: 'test',
@@ -19,8 +27,14 @@ const ENV = {
 }
 
 function git(cwd: string, ...args: string[]): string {
-    const r = Bun.spawnSync(['git', ...args], { cwd, env: ENV, stdout: 'pipe', stderr: 'pipe' })
-    if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr.toString()}`)
+    const r = Bun.spawnSync(['git', ...args], {
+        cwd,
+        env: ENV,
+        stdout: 'pipe',
+        stderr: 'pipe',
+    })
+    if (r.exitCode !== 0)
+        throw new Error(`git ${args.join(' ')}: ${r.stderr.toString()}`)
     return r.stdout.toString().trim()
 }
 
@@ -107,7 +121,18 @@ function scenario(o: Opts = {}) {
 
     const run = () => {
         const r = Bun.spawnSync(
-            ['bun', SCRIPT, '--remote', remote, '--tag', `v${stable}`, '--version', stable, '--sha', sha],
+            [
+                'bun',
+                SCRIPT,
+                '--remote',
+                remote,
+                '--tag',
+                `v${stable}`,
+                '--version',
+                stable,
+                '--sha',
+                sha,
+            ],
             { cwd: job, env: ENV, stdout: 'pipe', stderr: 'pipe' },
         )
         const out = Object.fromEntries(
@@ -122,7 +147,8 @@ function scenario(o: Opts = {}) {
     return { job, run, stable }
 }
 
-const readJson = (dir: string, rel: string) => JSON.parse(readFileSync(join(dir, rel), 'utf8'))
+const readJson = (dir: string, rel: string) =>
+    JSON.parse(readFileSync(join(dir, rel), 'utf8'))
 
 describe('nextManifestVersion', () => {
     test('a stable release resets next to the stable version', () => {
@@ -130,7 +156,9 @@ describe('nextManifestVersion', () => {
     })
 
     test('a hotfix below next keeps next where it is', () => {
-        expect(nextManifestVersion('0.10.0-next.1', '0.9.1')).toBe('0.10.0-next.1')
+        expect(nextManifestVersion('0.10.0-next.1', '0.9.1')).toBe(
+            '0.10.0-next.1',
+        )
     })
 
     test('equal versions stay put', () => {
@@ -152,14 +180,22 @@ describe('back-merge', () => {
         expect(r.code).toBe(0)
         expect(r.out.result).toBe('created')
         expect(r.out.branch).toBe('backmerge/v0.10.0')
-        expect(git(s.job, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('backmerge/v0.10.0')
+        expect(git(s.job, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(
+            'backmerge/v0.10.0',
+        )
         // A real merge commit: two parents.
-        expect(git(s.job, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' ')).toHaveLength(3)
+        expect(
+            git(s.job, 'rev-list', '--parents', '-n', '1', 'HEAD').split(' '),
+        ).toHaveLength(3)
         const p = readJson(s.job, 'package.json')
         expect(p.version).toBe('0.10.0')
         expect(p.dependencies['left-pad']).toBe('1.0.0')
-        expect(readJson(s.job, '.release-please/next-manifest.json')['.']).toBe('0.10.0')
-        expect(readFileSync(join(s.job, 'CHANGELOG.md'), 'utf8')).toContain('## release')
+        expect(readJson(s.job, '.release-please/next-manifest.json')['.']).toBe(
+            '0.10.0',
+        )
+        expect(readFileSync(join(s.job, 'CHANGELOG.md'), 'utf8')).toContain(
+            '## release',
+        )
     })
 
     test('a hotfix release does not regress next numbering', () => {
@@ -167,7 +203,9 @@ describe('back-merge', () => {
         const r = s.run()
         expect(r.code).toBe(0)
         expect(r.out.result).toBe('created')
-        expect(readJson(s.job, '.release-please/next-manifest.json')['.']).toBe('0.10.0-next.1')
+        expect(readJson(s.job, '.release-please/next-manifest.json')['.']).toBe(
+            '0.10.0-next.1',
+        )
         expect(readJson(s.job, 'package.json').version).toBe('0.10.0-next.1')
     })
 

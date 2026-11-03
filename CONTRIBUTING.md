@@ -11,13 +11,22 @@ bun install    # prepare script runs `lefthook install`
 
 `just validate` runs everything CI (`.github/workflows/ci.yml`) runs:
 
-- `just lint-workflows`: jactionlint, including shellcheck on workflow `run:` steps
-- `just lint-actions`: check-jsonschema on workflows and `actions/**/action.yml`
-- `just lint-shell`: shellcheck on `run:` steps in composite actions
-  (`scripts/shellcheck-actions.ts`)
+- `just lint`: every linter below, plus gitleaks
+  - `just lint-ts`: Biome lint and format check (`bun run lint`)
+  - `just lint-workflows`: jactionlint, including shellcheck on workflow `run:` steps
+  - `just lint-actions`: check-jsonschema on workflows and `actions/**/action.yml`
+  - `just lint-shell`: shellcheck on `run:` steps in composite actions
+    (`scripts/shellcheck-actions.ts`)
+- `just check`: typecheck with tsc (`bun run check`)
+- `just test`: unit tests (`bun run test`)
 - `just security`: zizmor
 
-lefthook runs the first three on `pre-commit` and zizmor on `pre-push`.
+`just format` applies Biome's fixes. The TypeScript steps are package.json
+scripts named like a voidflow caller's (`lint` is Biome, `check` is the
+typecheck), and the recipes wrap them.
+
+lefthook runs Biome (fixing staged files), the typecheck and the workflow and
+action linters on `pre-commit`, and zizmor and the tests on `pre-push`.
 
 Pin every third-party action to a full commit SHA with a version comment.
 
@@ -63,6 +72,16 @@ just rulesets-plan --check          # exit 1 on drift
 just rulesets-apply                 # create/update to match
 just rulesets-apply --prune         # also delete rulesets listed under `retire`
 ```
+
+Fleet keys are `owner/name`, so one infra repo can cover repos under several
+owners. A repo not listed in the fleet is never touched, so repos whose rulesets
+are managed by hand can stay out of it.
+
+To require a merge queue on `main`, set `mergeQueue: true` on the repo's entry
+(`tool({ mergeQueue: true })`). GitHub only offers merge queues on public repos
+owned by an organization, and on private org repos with Enterprise Cloud, so
+leave it off elsewhere. The repo's CI must also run on `merge_group`, or the
+required checks never report and the queue stalls.
 
 Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.

@@ -25,8 +25,8 @@ export function capture(
             : undefined
         const out: Buffer[] = []
         const err: Buffer[] = []
-        child.stdout.on('data', (b: Buffer) => out.push(b))
-        child.stderr.on('data', (b: Buffer) => err.push(b))
+        child.stdout?.on('data', (b: Buffer) => out.push(b))
+        child.stderr?.on('data', (b: Buffer) => err.push(b))
         child.on('error', (e) => {
             clearTimeout(timer)
             reject(e)

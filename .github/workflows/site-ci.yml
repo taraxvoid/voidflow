@@ -78,6 +78,23 @@ on:
           only costs an extra e2e run, so list only files you're sure of.
         type: string
         default: '["biome.json", "biome.jsonc", "lefthook.yml", "renovate.json", "vitest.config.*", "unlighthouse.config.*", ".editorconfig", ".gitignore", ".gitleaksignore", ".vscode/**", ".cursor/**", ".claude/**", ".agents/**"]'
+      renovate-skip-e2e:
+        description: >
+          Skip e2e on Renovate pull requests whose only effect is a
+          devDependency bump outside renovate-e2e-packages (an unrelated
+          linter or formatter, say). Opt out with false. Any other change keeps
+          e2e: a runtime dependency, a package.json field other than
+          devDependencies, a lockfile-only change, or a file outside
+          package.json and the lockfile that e2e cares about.
+        type: boolean
+        default: true
+      renovate-e2e-packages:
+        description: >
+          JSON array of devDependency names whose Renovate bumps still run e2e
+          (see renovate-skip-e2e). An entry ending in `/` matches a whole
+          scope, e.g. '@playwright/'.
+        type: string
+        default: '["astro", "@astrojs/", "playwright", "playwright-core", "@playwright/", "@axe-core/"]'
       build-env:
         description: >
           JSON object of environment variables for the build step, e.g.
@@ -167,6 +184,14 @@ jobs:
           CODE: ${{ inputs.code-paths }}
           IGNORE: ${{ inputs.e2e-ignore-paths }}
 
+      # Same filter minus package.json and the lockfile: a Renovate PR that
+      # changes anything else e2e cares about never skips e2e.
+      - name: Build e2e filter (without manifests)
+        id: e2e-other-filter
+        run: echo "globs=$(jq -cn --argjson e2e "$E2E" --arg lock "$LOCKFILE" '$e2e + ["!package.json", "!" + $lock]')" >> "$GITHUB_OUTPUT"
+        env:
+          E2E: ${{ steps.e2e-filter.outputs.globs }}
+
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
         # merge_group and schedule have no meaningful diff base; they always run e2e.
@@ -178,6 +203,7 @@ jobs:
           filters: |
             code: ${{ inputs.code-paths }}
             e2e: ${{ steps.e2e-filter.outputs.globs }}
+            e2e-other: ${{ steps.e2e-other-filter.outputs.globs }}
             lockfile:
               - '${{ env.LOCKFILE }}'
             scripts:
@@ -185,12 +211,42 @@ jobs:
             workflows:
               - '.github/workflows/**'
 
+      # Renovate PRs that only bump a devDependency outside renovate-e2e-packages
+      # skip e2e. Conservative: anything unclear (not a merge commit, lockfile
+      # only, other e2e-relevant files, any package.json change beyond those
+      # devDependencies) leaves e2e on. Compares package.json at the merge
+      # commit's first parent (the base) with the merge commit itself.
+      - name: Renovate e2e opt-out
+        id: renovate-skip
+        if: inputs.renovate-skip-e2e && github.event_name == 'pull_request' && steps.changes.outputs.e2e == 'true'
+        shell: bash
+        run: |
+          case "$AUTHOR" in *renovate*"[bot]") ;; *) exit 0 ;; esac
+          [[ "$OTHER" == true ]] && exit 0
+          git rev-parse -q --verify HEAD^2 >/dev/null || exit 0
+          git diff --quiet HEAD^1 HEAD -- package.json && exit 0
+          # keep only the devDependencies that still need e2e; the rest must be
+          # identical before and after for the bump to count as tooling-only
+          # shellcheck disable=SC2016 # jq program, not shell
+          norm='if has("devDependencies") then .devDependencies |= with_entries(select(.key as $k | any($pkgs[]; . as $p | $k == $p or ($p | endswith("/") and ($k | startswith($p)))))) else . end'
+          before=$(git show HEAD^1:package.json | jq -S --argjson pkgs "$PACKAGES" "$norm") || exit 0
+          after=$(git show HEAD:package.json | jq -S --argjson pkgs "$PACKAGES" "$norm") || exit 0
+          if [[ "$before" == "$after" ]]; then
+            echo "::notice::Renovate devDependency bump outside renovate-e2e-packages; skipping e2e."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          OTHER: ${{ steps.changes.outputs.e2e-other }}
+          PACKAGES: ${{ inputs.renovate-e2e-packages }}
+
       - name: Resolve e2e relevance
         id: e2e
-        run: echo "relevant=$([[ "$ALWAYS" == true || "$CHANGED" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: echo "relevant=$([[ "$SKIP" != true && ("$ALWAYS" == true || "$CHANGED" == true) ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
         env:
           ALWAYS: ${{ contains(fromJSON('["merge_group", "schedule", "workflow_dispatch"]'), github.event_name) }}
           CHANGED: ${{ steps.changes.outputs.e2e }}
+          SKIP: ${{ steps.renovate-skip.outputs.skip }}
 
       - name: Decide whether to validate
         id: decide

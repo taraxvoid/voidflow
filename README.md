@@ -6,12 +6,15 @@ Shared CI/CD, security checks and repo config for TypeScript projects.
 
 - **Reusable workflows** for sites (`site-ci.yml`) and bun tools (`tool-ci.yml`),
   plus SARIF upload
-- **Deploy actions** for Netlify and Cloudflare Workers, per-PR Worker
+- **Deploy actions** for Cloudflare Workers, per-PR Worker
   Previews, and branch-to-environment mapping
 - **npm package** with Lighthouse budgets, a copyleft license check,
   Playwright and Biome configs, and fleet tools (branch rulesets and scoped
   Cloudflare deploy tokens as code)
 - **Renovate preset** and **lefthook hooks**
+- **Agentic workflows** ([GitHub Agentic Workflows](https://github.github.com/gh-aw/)):
+  `deps-review`, which judges dependency PRs so low-risk ones can merge
+  themselves
 
 Works with `bun` (default), `pnpm` and `aube`. CI runs whichever
 `package.json` scripts your repo defines (`lint`, `test:unit`, `test:e2e:all`,
@@ -133,6 +136,8 @@ Inputs:
 | `code-paths` | all but Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs that count as code |
 | `e2e-scripts` | `[]` | JSON array of extra e2e scripts, run in order. Missing ones fail |
 | `e2e-ignore-paths` | linter, git hook, Renovate, editor and vitest config | JSON array of globs whose changes alone skip e2e |
+| `renovate-skip-e2e` | `true` | Skip e2e on Renovate PRs that only bump a devDependency outside `renovate-e2e-packages`. `false` opts out |
+| `renovate-e2e-packages` | astro, Playwright, axe-core | JSON array of devDependency names whose Renovate bumps still run e2e (`@scope/` matches a scope) |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI |
 | `red-audits` | `false` | A failed a11y or Lighthouse audit turns its CI job red |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
@@ -156,9 +161,13 @@ on PRs; add a `schedule` (below) to keep them.
 e2e now runs for any code change outside `e2e-ignore-paths`, so paths you
 listed there are already covered.
 
-**Merge queue:** org-owned repos can use one (personal accounts can't). Set
-`mergeQueue: true` on the repo's ruleset config and add `merge_group:` to
-`on:` so the required check reports on the queue's branch.
+**Merge queue:** GitHub offers one on public repos owned by an organization,
+and on private org repos only with Enterprise Cloud; personal repos and
+private repos on other plans can't use one. Set `mergeQueue: true` on the
+repo's entry in your fleet's rulesets config (in your infra repo, see
+[`CONTRIBUTING.md`](CONTRIBUTING.md#branch-rulesets)), apply it, and add
+`merge_group:` to your `on:` so the required check reports on the queue's
+branch.
 
 **Scheduled a11y and Lighthouse:** jobs run on a schedule or manual
 dispatch - by default a failed audit adds a warning annotation and
@@ -252,16 +261,12 @@ each gated with an `if:`.
 
 `cloudflare-deploy` runs `wrangler deploy --env <env>`, so `preview` needs a
 matching env block in the wrangler config, or pass `command` to deploy previews
-another way. `netlify-deploy` makes `prod` a production deploy and anything else
-an alias deploy.
+another way.
 
 | Action | Inputs |
 |---|---|
 | `actions/cloudflare-deploy` | `env`, `cloudflare-api-token`, `cloudflare-account-id`, `migrate-d1`, `package-manager` (runs the migration: `bun`, `pnpm` or `aube`), `working-directory`, `command`, `token-fallback` ([details](CONTRIBUTING.md)) |
 | `actions/cloudflare-preview` | `cloudflare-api-token`, `cloudflare-account-id`, `working-directory`, `name` (default `pr-<number>`), `secrets` (dotenv lines), `github-token`, `delete` |
-| `actions/netlify-deploy` | `env`, `publish-dir`, `netlify-auth-token`, `netlify-site-id`, `working-directory`, `github-token` |
-
-For Netlify, turn off the site's own GitHub auto-deploy or it will deploy twice.
 
 **Worker Previews:** `cloudflare-preview` runs `wrangler preview` per pull
 request and outputs `preview-url` and `deployment-url`. With `github-token`
@@ -371,6 +376,80 @@ lefthook `ref` and annotated `justfile` versions.
   "extends": ["github>taraxvoid/voidflow"]
 }
 ```
+
+### Agentic workflows
+
+A [gh-aw](https://github.github.com/gh-aw/) package in [`agentic/`](agentic/).
+Each workflow is Markdown you install into your repo and compile there, so it
+runs with your repo's permissions, secrets and (for private repos) private logs.
+Copilot is the default engine; pass `--engine` to `gh aw add` for another.
+
+```sh
+gh extension install github/gh-aw --pin v1.0.1
+gh aw add taraxvoid/voidflow/agentic@vX.Y.Z   # pin a release, like the workflows
+gh aw compile && git add .github/workflows && git commit -m "ci: add voidflow agentic workflows"
+```
+
+`gh aw update` brings later releases in and refuses a major without `--major`.
+Keep the locks honest with the reusable check, which recompiles with a pinned
+gh-aw and fails when a committed `.lock.yml` is stale or missing:
+
+```yaml
+  agentic-locks:
+    uses: taraxvoid/voidflow/.github/workflows/agentic-locks.yml@<sha> # vX.Y.Z
+```
+
+#### deps-review
+
+Reviews Renovate and Dependabot PRs beyond "CI passed". Two parts, so a
+compromised package can't talk its way to a merge:
+
+- **The agent** reads the release notes between the two versions, checks them
+  against what your code actually uses, and leaves a comment with the evidence
+  and a `deps:low-risk` or `deps:needs-you` label. It treats every upstream
+  string as untrusted and proposes a verdict; it never approves, merges,
+  pushes or posts the check.
+- **The gate job** (deterministic, runs after the agent) recomputes the hard
+  signals with the `deps-signals` bin, which reads no free text: update type
+  (patch or minor on 1.0+ only), a publisher who didn't publish or maintain the
+  previous version, added install scripts, dropped provenance, new
+  dependencies, action pins that don't match their tag, lockfile-only changes,
+  and any file outside `package.json`, lockfiles and workflows. It posts the
+  `deps-review` check on the exact commit the agent reviewed: green only when
+  the agent said low risk **and** `deps-signals` is clean. Anything it can't
+  verify is red.
+
+Human PRs never start it.
+
+Secrets: `COPILOT_GITHUB_TOKEN` (fine-grained PAT, Copilot Requests: Read) as
+an Actions secret, and the same value as a **Dependabot** secret, since runs
+Dependabot triggers only see Dependabot secrets.
+
+Roll it out in stages:
+
+1. **Shadow.** Install it and read its verdicts for a few weeks. Nothing merges.
+2. **Gate.** Make `deps-review` a required check, give human PRs a passing one
+   with the gate workflow, and let Renovate automerge low-risk updates:
+
+   ```yaml
+     deps-review-gate:
+       uses: taraxvoid/voidflow/.github/workflows/deps-review-gate.yml@<sha> # vX.Y.Z
+       permissions:
+         checks: write
+   ```
+
+   ```json
+   { "extends": ["github>taraxvoid/voidflow", "github>taraxvoid/voidflow:deps-review-automerge"] }
+   ```
+
+   The opt-in preset automerges patch, minor, digest and pin updates on 1.0+
+   versions through GitHub auto-merge, which
+   waits for every required check on the current head; a Renovate rebase is
+   re-reviewed before it can merge. Enable "Allow auto-merge" in the repo.
+   Dependabot can't automerge itself: run `gh pr merge --auto --squash` on its
+   PRs from a workflow, and the required check still gates the merge.
+3. **Wider.** Add update classes (0.x minors, grouped monorepos) only with
+   evidence from stage 2. Majors stay human.
 
 ### Git hooks
 

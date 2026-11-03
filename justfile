@@ -11,10 +11,30 @@ check_jsonschema_version := "0.38.2"
 default:
     just --list
 
-# Lint all
+# The TypeScript steps live in package.json (lint, format, check, test), named
+# like a voidflow caller's, so tool-ci and lefthook/base.yml conventions hold
+# here too. The recipes below wrap them with the repo-only checks.
 
-lint: gitleaks lint-actions lint-shell lint-workflows
-    
+# Every linter: Biome, workflows, action schemas, action shell, secrets
+lint: lint-ts lint-workflows lint-actions lint-shell gitleaks
+
+# Biome lint and format check (`bun run lint`)
+lint-ts:
+    bun run lint
+
+# Apply Biome fixes and formatting
+format:
+    bun run format
+
+# Typecheck with tsc
+check:
+    bun run check
+
+# Unit tests
+test:
+    bun run test
+
+# Scan the git history for secrets
 gitleaks:
     gitleaks detect --source . --redact -v --no-banner
 
@@ -71,7 +91,7 @@ security-fix:
     uvx zizmor@{{ zizmor_version }} --min-severity medium --fix=all .
 
 # Run everything ci.yml runs, locally
-validate: lint security
+validate: lint check test security
 
 # Full local dry-run of ci.yml via act (needs Docker running)
 dry-run *ARGS:

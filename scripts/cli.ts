@@ -15,7 +15,10 @@
 
 type Main = (argv: string[], prog: string) => Promise<void>
 
-const COMMANDS: Record<string, { load: () => Promise<{ main: Main }>; about: string }> = {
+const COMMANDS: Record<
+    string,
+    { load: () => Promise<{ main: Main }>; about: string }
+> = {
     'cf-tokens': {
         load: () => import('./cf-tokens.ts'),
         about: 'plan, apply or rotate scoped Cloudflare deploy tokens',
@@ -41,13 +44,17 @@ const usage = () =>
         'Run `voidflow <command> --help` for its flags.',
     ].join('\n')
 
+export {}
+
 const [name, ...rest] = process.argv.slice(2)
 if (name === undefined || name === '-h' || name === '--help') {
     console.log(usage())
     process.exit(name === undefined ? 2 : 0)
 }
 if (name.startsWith('-')) {
-    console.error(`the command comes before its flags, got ${JSON.stringify(name)}\n\n${usage()}`)
+    console.error(
+        `the command comes before its flags, got ${JSON.stringify(name)}\n\n${usage()}`,
+    )
     process.exit(2)
 }
 const cmd = COMMANDS[name]

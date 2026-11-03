@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { definePreviewConfig, defaultProjects } from '../playwright/index.mjs'
+import { defaultProjects, definePreviewConfig } from '../playwright/index.mjs'
 
 const ENV_KEYS = ['CI', 'PLAYWRIGHT_BASE_URL', 'PLAYWRIGHT_TEST_PORT']
 let saved

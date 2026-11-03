@@ -16,7 +16,12 @@ import { parseArgs } from 'node:util'
 
 export type GitRun = (args: string[]) => { code: number; out: string }
 
-export function carriesNext(git: GitRun, head: string, main: string, next: string): boolean {
+export function carriesNext(
+    git: GitRun,
+    head: string,
+    main: string,
+    next: string,
+): boolean {
     const base = git(['merge-base', head, next])
     // No shared history with next at all: nothing of next's can be in it.
     if (base.code !== 0) return false
@@ -34,12 +39,17 @@ function main() {
     })
     const { 'head-ref': headRef, head } = values
     if (!headRef || !head) {
-        throw new Error('usage: promotion-guard.ts --head-ref <branch> --head <sha> [--main <ref>] [--next <ref>]')
+        throw new Error(
+            'usage: promotion-guard.ts --head-ref <branch> --head <sha> [--main <ref>] [--next <ref>]',
+        )
     }
     if (headRef === 'next') return
 
     const git: GitRun = (args) => {
-        const r = Bun.spawnSync(['git', ...args], { stdout: 'pipe', stderr: 'pipe' })
+        const r = Bun.spawnSync(['git', ...args], {
+            stdout: 'pipe',
+            stderr: 'pipe',
+        })
         return { code: r.exitCode, out: r.stdout.toString().trim() }
     }
     if (carriesNext(git, head, values.main, values.next)) {
