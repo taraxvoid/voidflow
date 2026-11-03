@@ -19,7 +19,15 @@ describe('parseSpec', () => {
         expect(parseSpec('1.2.3')).toEqual({ major: 1, minor: 2, patch: 3 })
         expect(parseSpec('^1.2.3')).toEqual({ major: 1, minor: 2, patch: 3 })
         expect(parseSpec('~0.4.0')).toEqual({ major: 0, minor: 4, patch: 0 })
-        for (const s of ['>=1.0.0', '1.x', '1.2.3-beta.1', 'npm:foo@1.0.0', 'github:a/b', '*', 'workspace:*']) {
+        for (const s of [
+            '>=1.0.0',
+            '1.x',
+            '1.2.3-beta.1',
+            'npm:foo@1.0.0',
+            'github:a/b',
+            '*',
+            'workspace:*',
+        ]) {
             expect(parseSpec(s)).toBeNull()
         }
     })
@@ -27,18 +35,39 @@ describe('parseSpec', () => {
 
 describe('classifyFiles', () => {
     test('allows package.json, lockfiles and workflow files', () => {
-        expect(classifyFiles(['package.json', 'bun.lock', 'pnpm-lock.yaml', '.github/workflows/ci.yml'])).toEqual([])
+        expect(
+            classifyFiles([
+                'package.json',
+                'bun.lock',
+                'pnpm-lock.yaml',
+                '.github/workflows/ci.yml',
+            ]),
+        ).toEqual([])
     })
 
     test('flags anything else, including nested manifests and actions', () => {
-        const flags = classifyFiles(['src/index.ts', 'packages/a/package.json', 'actions/x/action.yml', 'mise.toml'])
-        expect(flags.map((f) => f.subject)).toEqual(['src/index.ts', 'packages/a/package.json', 'actions/x/action.yml', 'mise.toml'])
+        const flags = classifyFiles([
+            'src/index.ts',
+            'packages/a/package.json',
+            'actions/x/action.yml',
+            'mise.toml',
+        ])
+        expect(flags.map((f) => f.subject)).toEqual([
+            'src/index.ts',
+            'packages/a/package.json',
+            'actions/x/action.yml',
+            'mise.toml',
+        ])
     })
 })
 
 describe('diffManifest', () => {
     test('lists version changes and flags additions, removals and other fields', () => {
-        const base = { name: 'x', dependencies: { a: '^1.0.0', gone: '1.0.0' }, devDependencies: { b: '2.0.0' } }
+        const base = {
+            name: 'x',
+            dependencies: { a: '^1.0.0', gone: '1.0.0' },
+            devDependencies: { b: '2.0.0' },
+        }
         const head = {
             name: 'x',
             packageManager: 'bun@1.4.4',
@@ -48,7 +77,10 @@ describe('diffManifest', () => {
         const { changes, flags } = diffManifest(base, head)
         expect(changes).toEqual([{ name: 'a', from: '^1.0.0', to: '^1.1.0' }])
         expect(flags).toEqual([
-            { subject: 'package.json#packageManager', reason: 'non-dependency field changed' },
+            {
+                subject: 'package.json#packageManager',
+                reason: 'non-dependency field changed',
+            },
             { subject: 'gone', reason: 'removed from dependencies' },
             { subject: 'fresh', reason: 'added to dependencies' },
         ])
@@ -64,10 +96,18 @@ describe('classifyChange', () => {
     })
 
     test('majors, 0.x, downgrades and odd specs are flagged', () => {
-        expect(reasons(classifyChange(change('^1.9.0', '^2.0.0')))).toEqual(['major update'])
-        expect(reasons(classifyChange(change('0.4.0', '0.4.1')))).toEqual(['0.x update (minor can break)'])
-        expect(reasons(classifyChange(change('1.3.0', '1.2.9')))).toEqual(['downgrade'])
-        expect(reasons(classifyChange(change('1.0.0', '1.1.0-rc.1')))[0]).toStartWith('unverifiable')
+        expect(reasons(classifyChange(change('^1.9.0', '^2.0.0')))).toEqual([
+            'major update',
+        ])
+        expect(reasons(classifyChange(change('0.4.0', '0.4.1')))).toEqual([
+            '0.x update (minor can break)',
+        ])
+        expect(reasons(classifyChange(change('1.3.0', '1.2.9')))).toEqual([
+            'downgrade',
+        ])
+        expect(
+            reasons(classifyChange(change('1.0.0', '1.1.0-rc.1')))[0],
+        ).toStartWith('unverifiable')
     })
 })
 
@@ -80,17 +120,26 @@ describe('registrySignals', () => {
         dependencies: { dep: '^1.0.0' },
         ...over,
     })
-    const doc = (old: any, cur: any) => ({ versions: { '1.0.0': old, '1.0.1': cur } })
+    const doc = (old: any, cur: any) => ({
+        versions: { '1.0.0': old, '1.0.1': cur },
+    })
 
     test('same publisher, no scripts, provenance kept, no new deps: clean', () => {
         expect(registrySignals(c, doc(v(), v()))).toEqual([])
-        expect(registrySignals(c, doc(v(), v({ _npmUser: { name: 'bob' } })))).toEqual([])
+        expect(
+            registrySignals(c, doc(v(), v({ _npmUser: { name: 'bob' } }))),
+        ).toEqual([])
     })
 
     test('flags a publisher who neither published nor maintained the old version', () => {
-        expect(reasons(registrySignals(c, doc(v(), v({ _npmUser: { name: 'mallory' } }))))[0]).toStartWith(
-            'published by mallory',
-        )
+        expect(
+            reasons(
+                registrySignals(
+                    c,
+                    doc(v(), v({ _npmUser: { name: 'mallory' } })),
+                ),
+            )[0],
+        ).toStartWith('published by mallory')
     })
 
     test('flags added or changed install scripts, dropped provenance and new dependencies', () => {
@@ -107,7 +156,9 @@ describe('registrySignals', () => {
     })
 
     test('a version missing from the registry is a flag, not a pass', () => {
-        expect(reasons(registrySignals(c, { versions: { '1.0.0': v() } }))).toEqual(['version missing from the registry'])
+        expect(
+            reasons(registrySignals(c, { versions: { '1.0.0': v() } })),
+        ).toEqual(['version missing from the registry'])
     })
 })
 
@@ -120,8 +171,13 @@ describe('action pins', () => {
             '      - uses: docker://alpine:3',
         ].join('\n')
         const { pins, flags } = parseUses(yaml)
-        expect(pins).toEqual([{ action: 'actions/checkout', sha: SHA_A, tag: 'v7.0.1' }])
-        expect(flags.map((f) => f.subject)).toEqual(['owner/x@v4', 'docker://alpine:3'])
+        expect(pins).toEqual([
+            { action: 'actions/checkout', sha: SHA_A, tag: 'v7.0.1' },
+        ])
+        expect(flags.map((f) => f.subject)).toEqual([
+            'owner/x@v4',
+            'docker://alpine:3',
+        ])
     })
 
     test('diffPins verifies same-major bumps and flags new actions, majors and missing comments', () => {

@@ -12,23 +12,33 @@ import { spawn } from 'node:child_process'
 export function capture(
     cmd: string[],
     stdin?: string,
+    opts: { timeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<{ code: number; out: string; err: string }> {
     return new Promise((resolve, reject) => {
         const child = spawn(cmd[0], cmd.slice(1), {
             stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+            env: opts.env ? { ...process.env, ...opts.env } : process.env,
         })
+        // Optional: SIGKILL the child after timeoutMs (it then closes with a signal).
+        const timer = opts.timeoutMs
+            ? setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs)
+            : undefined
         const out: Buffer[] = []
         const err: Buffer[] = []
         child.stdout?.on('data', (b: Buffer) => out.push(b))
         child.stderr?.on('data', (b: Buffer) => err.push(b))
-        child.on('error', reject)
-        child.on('close', (code, signal) =>
+        child.on('error', (e) => {
+            clearTimeout(timer)
+            reject(e)
+        })
+        child.on('close', (code, signal) => {
+            clearTimeout(timer)
             resolve({
                 code: code ?? (signal ? 128 : 1),
                 out: Buffer.concat(out).toString('utf8'),
                 err: Buffer.concat(err).toString('utf8'),
-            }),
-        )
+            })
+        })
         if (stdin !== undefined) child.stdin?.end(stdin)
     })
 }

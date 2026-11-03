@@ -59,7 +59,8 @@
         "scripts/deps-signals.ts",
         "dist",
         "cloudflare",
-        "rulesets"
+        "rulesets",
+        "templates"
     ],
     "engines": {
         "bun": ">=1.4.0",

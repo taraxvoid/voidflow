@@ -40,6 +40,16 @@ Pin every third-party action to a full commit SHA with a version comment.
   and pass vacuously.
 - Colima works: `.actrc` already disables the docker socket mount.
 
+## Starter templates
+
+`voidflow init` copies the files under `templates/` (`common/`, `tool/`,
+`site/`). They're generated: edit `scripts/build-templates.ts` (or a source it
+reads, such as `mise.toml`, the README snippets or `bunfig.toml`), then run
+`just templates`. `test/templates.test.ts` fails when the committed templates
+differ from a fresh build. `.gitignore` templates are stored as `gitignore`
+because `npm pack` drops files named `.gitignore`. `{{version}}`, `{{sha}}`,
+`{{kind}}`, `{{cron_minute}}` and `{{repo}}` are filled in when `init` runs.
+
 ## Branches and commits
 
 Feature PRs target `next`. Use [Conventional Commits](https://www.conventionalcommits.org);

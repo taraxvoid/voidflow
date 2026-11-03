@@ -5,6 +5,7 @@
  *
  *   bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts [--apply ...]
  *   bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts [--check ...]
+ *   bunx @taraxvoid/voidflow@<version> init --kind tool|site [...]
  *
  * Each command takes the same flags as its script (scripts/cf-tokens.ts,
  * scripts/apply-rulesets.ts) and lists them with --help. A relative --config
@@ -26,11 +27,15 @@ const COMMANDS: Record<
         load: () => import('./apply-rulesets.ts'),
         about: 'plan or apply branch rulesets',
     },
+    init: {
+        load: () => import('./init.ts'),
+        about: 'write starter files and apply repo settings',
+    },
 }
 
 const usage = () =>
     [
-        'usage: voidflow <command> --config <module> [flags]',
+        'usage: voidflow <command> [flags]',
         '',
         ...Object.entries(COMMANDS).map(
             ([name, c]) => `  ${name.padEnd(10)} ${c.about}`,

@@ -132,6 +132,27 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         expect(r.err).not.toContain('    at ')
     })
 
+    test('init --help exits 0 and lists --preset', async () => {
+        const r = await voidflow(['init', '--help'])
+        expect(r.code).toBe(0)
+        expect(r.out).toContain('usage: voidflow init')
+        expect(r.out).toContain('--preset')
+    })
+
+    test('init --dry-run plans the files from the shipped templates', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
+        roots.push(dir)
+        expect(Bun.spawnSync(['git', 'init', '-q', dir]).exitCode).toBe(0)
+        const r = await voidflow(
+            ['init', '--kind', 'tool', '--preset', 'files', '--dry-run', dir],
+            dir,
+        )
+        expect(r.err).toBe('')
+        expect(r.code).toBe(0)
+        expect(r.out).toMatch(/create\s+lefthook/)
+        // resolveSha may wait on the network for up to 10s.
+    }, 20_000)
+
     test('a relative --config resolves from the current directory', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
         roots.push(dir)

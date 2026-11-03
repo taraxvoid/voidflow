@@ -1,0 +1,8 @@
+[install]
+minimumReleaseAge = 259200 # 3 days
+
+# Packages that bypass the gate
+minimumReleaseAgeExcludes = ["@playwright/test", "playwright", "playwright-core"]
+
+[install.security]
+scanner = "@socketsecurity/bun-security-scanner"
