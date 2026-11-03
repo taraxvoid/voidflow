@@ -105,9 +105,13 @@ on PRs; add a `schedule` (below) to keep them.
 e2e now runs for any code change outside `e2e-ignore-paths`, so paths you
 listed there are already covered.
 
-**Merge queue:** org-owned repos can use one (personal accounts can't). Set
-`mergeQueue: true` on the repo's ruleset config and add `merge_group:` to
-`on:` so the required check reports on the queue's branch.
+**Merge queue:** GitHub offers one on public repos owned by an organization,
+and on private org repos only with Enterprise Cloud; personal repos and
+private repos on other plans can't use one. Set `mergeQueue: true` on the
+repo's entry in your fleet's rulesets config (in your infra repo, see
+[`CONTRIBUTING.md`](CONTRIBUTING.md#branch-rulesets)), apply it, and add
+`merge_group:` to your `on:` so the required check reports on the queue's
+branch.
 
 **Scheduled a11y and Lighthouse:** jobs run on a schedule or manual
 dispatch - by default a failed audit adds a warning annotation and
