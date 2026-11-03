@@ -1,12 +1,16 @@
 {
     "name": "@taraxvoid/voidflow",
-    "version": "1.0.0-next.1",
+    "version": "1.0.0-next.2",
     "license": "MIT",
     "exports": {
         "./playwright": "./playwright/index.mjs"
     },
     "publish": {
-        "include": ["playwright", "README.md", "LICENSE"]
+        "include": [
+            "playwright",
+            "README.md",
+            "LICENSE"
+        ]
     },
     "imports": {
         "@playwright/test": "npm:@playwright/test@^1.40.0"
