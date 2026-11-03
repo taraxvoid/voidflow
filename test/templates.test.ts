@@ -1,9 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    readFileSync,
+    symlinkSync,
+    writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildTemplates, TEMPLATE_PLACEHOLDERS } from '../scripts/build-templates.ts'
+import {
+    buildTemplates,
+    TEMPLATE_PLACEHOLDERS,
+} from '../scripts/build-templates.ts'
 import { packageRoot } from '../scripts/lib/package-root.ts'
 import { capture } from '../scripts/lib/proc.ts'
 
@@ -19,7 +29,10 @@ describe('templates', () => {
     test('committed templates match a fresh build', () => {
         const built = buildTemplates(ROOT)
         for (const [path, content] of built) {
-            expect(readFileSync(join(ROOT, 'templates', path), 'utf8'), path).toBe(content)
+            expect(
+                readFileSync(join(ROOT, 'templates', path), 'utf8'),
+                `templates/${path} is stale, run 'just templates'`,
+            ).toBe(content)
         }
         const onDisk = walk(join(ROOT, 'templates'))
             .map((f) => relative(join(ROOT, 'templates'), f))
@@ -53,7 +66,11 @@ describe('templates', () => {
             `schemas/${pkg.devDependencies['@biomejs/biome']}/schema.json`,
         )
         expect(t.get('common/mise.toml')).toMatch(/^lefthook = "\d/m)
-        expect(JSON.parse(t.get('tool/package.json')!).devDependencies['@types/bun']).not.toBe('latest')
+        expect(
+            JSON.parse(t.get('tool/package.json')!).devDependencies[
+                '@types/bun'
+            ],
+        ).not.toBe('latest')
     })
 
     test('bunfig template keeps the install gate and the scanner', () => {
@@ -102,13 +119,21 @@ describe('templates', () => {
         process.env.npm_config_cache = mkdtempSync(join(tmpdir(), 'npm-cache-'))
         let r: Awaited<ReturnType<typeof capture>>
         try {
-            r = await capture(['npm', 'pack', '--dry-run', '--json', '--ignore-scripts'])
+            r = await capture([
+                'npm',
+                'pack',
+                '--dry-run',
+                '--json',
+                '--ignore-scripts',
+            ])
         } finally {
             if (prev === undefined) delete process.env.npm_config_cache
             else process.env.npm_config_cache = prev
         }
         expect(r.code, r.err).toBe(0)
-        const files = (JSON.parse(r.out)[0].files as { path: string }[]).map((f) => f.path)
+        const files = (JSON.parse(r.out)[0].files as { path: string }[]).map(
+            (f) => f.path,
+        )
         expect(files).toContain('templates/common/gitignore')
         expect(files).toContain('templates/tool/ci.yml')
     })
