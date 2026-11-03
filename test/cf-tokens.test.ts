@@ -195,6 +195,25 @@ describe('plan', () => {
         )
     })
 
+    // A token's value can't be read back, so a token whose GitHub secret is
+    // gone (repo recreated, secret deleted) is useless: replace it.
+    test('rotates when the GitHub secret is missing', () => {
+        const [a] = plan(want, [token({ id: 'old' })], now, {
+            secretMissing: true,
+        })
+        expect(a.kind).toBe('rotate')
+        expect(a.kind === 'rotate' && a.reason).toBe('secret not set')
+        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
+            'old',
+        ])
+    })
+
+    test('still creates when both the token and the secret are missing', () => {
+        expect(
+            plan(want, [], now, { secretMissing: true }).map((a) => a.kind),
+        ).toEqual(['create'])
+    })
+
     test('a rotation replaces the token it found', () => {
         const [a] = plan(want, [token({ id: 'old' })], now, { rotate: true })
         expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
