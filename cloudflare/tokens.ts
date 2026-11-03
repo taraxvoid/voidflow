@@ -411,7 +411,7 @@ export function plan(
     want: Policy[],
     have: Token[],
     now: Date,
-    opts: { rotate?: boolean } = {},
+    opts: { rotate?: boolean; secretMissing?: boolean } = {},
 ): Action[] {
     if (have.length === 0) return [{ kind: 'create', reason: 'missing' }]
     if (have.length > 1) {
@@ -424,6 +424,11 @@ export function plan(
         ]
     }
     const [token] = have
+    // The value can't be read back from Cloudflare, so a token nothing holds
+    // is replaced, whatever its expiry.
+    if (opts.secretMissing) {
+        return [{ kind: 'rotate', tokens: [token], reason: 'secret not set' }]
+    }
     const left = token.expires_on ? daysLeft(token.expires_on, now) : null
     if (opts.rotate || left === null || left < RENEW_DAYS) {
         // The replacement is created with the wanted policies, so a rotation

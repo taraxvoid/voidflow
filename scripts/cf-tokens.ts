@@ -308,6 +308,28 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
     }
 
     /**
+     * Whether the env's secret exists in GitHub. A missing environment counts
+     * as missing (the apply creates it); any other gh failure throws.
+     */
+    async function secretExists(repo: string, env: EnvConfig) {
+        try {
+            const out = await gh([
+                'secret',
+                'list',
+                ...scope(repo, env),
+                '--json',
+                'name',
+                '-q',
+                '.[].name',
+            ])
+            return out.split('\n').includes('CLOUDFLARE_API_TOKEN')
+        } catch (e) {
+            if (/HTTP 404|Not Found/i.test((e as Error).message)) return false
+            throw e
+        }
+    }
+
+    /**
      * Mint a token and put its value in the env's secret. If the secret can't be
      * set, delete the new token again, so a token with this name only outlives
      * the call once GitHub holds it.
@@ -417,7 +439,16 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
                 `  ! ${env.env}: FALLBACK account-wide Workers Scripts Write: ${env.fallback.reason} (since ${env.fallback.since})`,
             )
         }
-        for (const a of plan(want, have, now, { rotate: values.rotate })) {
+        const secretMissing = !(await secretExists(repo, env))
+        if (secretMissing) {
+            console.log(
+                `  ! ${env.env}: no CLOUDFLARE_API_TOKEN secret in ${scopeLabel(repo, env)}`,
+            )
+        }
+        for (const a of plan(want, have, now, {
+            rotate: values.rotate,
+            secretMissing,
+        })) {
             await act(repo, acct, env, name, want, a)
         }
         if (values.apply) await syncFallbackVar(repo, env)
