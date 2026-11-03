@@ -9,7 +9,8 @@
             "!!templates/**/biome.json",
             "!**/dist",
             "!**/node_modules",
-            "!.release-please"
+            "!.release-please",
+            "!!jsr.json"
         ]
     },
     "overrides": [
