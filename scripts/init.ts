@@ -11,24 +11,37 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { parseOrExit } from './lib/args.ts'
-import { packageRoot } from './lib/package-root.ts'
-import { capture } from './lib/proc.ts'
-import { type FileAction, FILE_ITEMS, fileNames, planFiles, applyFiles } from './init/files.ts'
+import {
+    applyFiles,
+    FILE_ITEMS,
+    type FileAction,
+    fileNames,
+    planFiles,
+} from './init/files.ts'
 import { type Gh, ghAvailable, ghCli, resolveRepo } from './init/gh.ts'
-import { type Kind, type RenderCtx, resolveSha as defaultResolveSha } from './init/render.ts'
+import {
+    resolveSha as defaultResolveSha,
+    type Kind,
+    type RenderCtx,
+} from './init/render.ts'
 import {
     manualReminders,
     runSettings,
     type SettingResult,
     settingNames,
 } from './init/settings.ts'
+import { parseOrExit } from './lib/args.ts'
+import { packageRoot } from './lib/package-root.ts'
+import { capture } from './lib/proc.ts'
 
 /**
  * Presets are data: each names the file items it selects and whether the
  * settings half runs. A new preset is one more entry here.
  */
-export const PRESETS: Record<string, { files: 'all' | string[] | null; settings: boolean }> = {
+export const PRESETS: Record<
+    string,
+    { files: 'all' | string[] | null; settings: boolean }
+> = {
     full: { files: 'all', settings: true },
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
@@ -39,8 +52,8 @@ const KINDS: Kind[] = ['tool', 'site']
 const OPTIONS = {
     kind: { type: 'string' },
     preset: { type: 'string', default: 'full' },
-    'skip-file': { type: 'string', multiple: true, default: [] },
-    'skip-setting': { type: 'string', multiple: true, default: [] },
+    'skip-file': { type: 'string', multiple: true, default: [] as string[] },
+    'skip-setting': { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
     repo: { type: 'string' },
@@ -66,7 +79,10 @@ need the gh CLI, authenticated as someone with admin on the repo.
 Files:    ${FILE_ITEMS.map((i) => i.name).join(', ')}
 Settings: ${settingNames().join(', ')}`
 
-type Deps = { gh?: Gh; resolveSha?: (version: string) => Promise<string | null> }
+type Deps = {
+    gh?: Gh
+    resolveSha?: (version: string) => Promise<string | null>
+}
 
 function fail(msg: string, prog: string): never {
     console.error(`${msg}\n\n${usage(prog)}`)
@@ -89,9 +105,13 @@ function existingCronMinute(dir: string): number | null {
 
 async function isWorkTree(dir: string): Promise<boolean> {
     try {
-        const r = await capture(['git', '-C', dir, 'rev-parse', '--is-inside-work-tree'], undefined, {
-            timeoutMs: 15_000,
-        })
+        const r = await capture(
+            ['git', '-C', dir, 'rev-parse', '--is-inside-work-tree'],
+            undefined,
+            {
+                timeoutMs: 15_000,
+            },
+        )
         return r.code === 0 && r.out.trim() === 'true'
     } catch {
         return false
@@ -99,7 +119,11 @@ async function isWorkTree(dir: string): Promise<boolean> {
 }
 
 /** `prog` names the command in the --help usage; `deps` are for tests. */
-export async function main(argv: string[], prog = 'voidflow init', deps: Deps = {}) {
+export async function main(
+    argv: string[],
+    prog = 'voidflow init',
+    deps: Deps = {},
+) {
     const { values, positionals } = parseOrExit(
         argv,
         { options: OPTIONS, allowPositionals: true },
@@ -107,33 +131,48 @@ export async function main(argv: string[], prog = 'voidflow init', deps: Deps = 
     )
     const preset = PRESETS[values.preset]
     if (!Object.hasOwn(PRESETS, values.preset) || !preset) {
-        fail(`unknown --preset "${values.preset}", expected one of: ${Object.keys(PRESETS).join(', ')}`, prog)
+        fail(
+            `unknown --preset "${values.preset}", expected one of: ${Object.keys(PRESETS).join(', ')}`,
+            prog,
+        )
     }
-    if (positionals.length > 1) fail(`expected at most one dir, got ${positionals.length}`, prog)
+    if (positionals.length > 1)
+        fail(`expected at most one dir, got ${positionals.length}`, prog)
     const kind = values.kind as Kind | undefined
     if (kind !== undefined && !KINDS.includes(kind)) {
         fail(`unknown --kind "${kind}", expected tool or site`, prog)
     }
     const wantFiles = preset.files !== null
-    if (wantFiles && kind === undefined) fail(`--preset ${values.preset} needs --kind tool|site`, prog)
+    if (wantFiles && kind === undefined)
+        fail(`--preset ${values.preset} needs --kind tool|site`, prog)
 
     const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
     for (const n of values['skip-file']) {
-        if (!validFiles.includes(n)) fail(`unknown --skip-file "${n}", expected one of: ${validFiles.join(', ')}`, prog)
+        if (!validFiles.includes(n))
+            fail(
+                `unknown --skip-file "${n}", expected one of: ${validFiles.join(', ')}`,
+                prog,
+            )
     }
     for (const n of values['skip-setting']) {
         if (!settingNames().includes(n)) {
-            fail(`unknown --skip-setting "${n}", expected one of: ${settingNames().join(', ')}`, prog)
+            fail(
+                `unknown --skip-setting "${n}", expected one of: ${settingNames().join(', ')}`,
+                prog,
+            )
         }
     }
 
     const dir = resolve(positionals[0] ?? '.')
-    if (!(await isWorkTree(dir))) fail(`${dir} is not a git work tree (run git init first)`, prog)
+    if (!(await isWorkTree(dir)))
+        fail(`${dir} is not a git work tree (run git init first)`, prog)
 
     const dryRun = values['dry-run']
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
-    const version = JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8')).version as string
+    const version = JSON.parse(
+        readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
+    ).version as string
 
     // The repo feeds SECURITY.md and the settings half; a failure here only
     // stops the settings half.
@@ -164,17 +203,29 @@ export async function main(argv: string[], prog = 'voidflow init', deps: Deps = 
             sha,
             kind,
             repo,
-            cronMinute: existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
+            cronMinute:
+                existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
         }
         const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
             ...values['skip-file'],
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
-        fileActions = planFiles(dir, { kind, skip, force: values.force, enablePvr }, ctx)
+        fileActions = planFiles(
+            dir,
+            { kind, skip, force: values.force, enablePvr },
+            ctx,
+        )
         const conflicts = fileActions.filter((a) => a.status === 'conflict')
         out.push(dryRun ? 'files (dry run):' : 'files:')
-        for (const a of fileActions) out.push(row(a.status, a.name, [a.target, a.detail].filter(Boolean).join('  ')))
+        for (const a of fileActions)
+            out.push(
+                row(
+                    a.status,
+                    a.name,
+                    [a.target, a.detail].filter(Boolean).join('  '),
+                ),
+            )
         if (conflicts.length > 0) {
             exitCode = 1
             out.push(
@@ -201,16 +252,22 @@ export async function main(argv: string[], prog = 'voidflow init', deps: Deps = 
                 enableAiScan,
                 dryRun,
             })
-            for (const r of settingResults) out.push(row(r.status, r.name, r.detail))
+            for (const r of settingResults)
+                out.push(row(r.status, r.name, r.detail))
             if (settingResults.some((r) => r.status === 'failed')) exitCode = 1
         }
     }
 
     // Opt-ins act only on the halves that ran; say what was left out.
     if (enablePvr) {
-        if (!securityPlanned()) notes.push('SECURITY.md was not written (the files half did not include it)')
+        if (!securityPlanned())
+            notes.push(
+                'SECURITY.md was not written (the files half did not include it)',
+            )
         if (!settingResults.some((r) => r.name === 'pvr')) {
-            notes.push('private vulnerability reporting was not enabled (the settings half did not include it)')
+            notes.push(
+                'private vulnerability reporting was not enabled (the settings half did not include it)',
+            )
         }
     }
 
