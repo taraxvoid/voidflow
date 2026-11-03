@@ -74,7 +74,7 @@ function fail(msg: string, prog: string): never {
 }
 
 const row = (status: string, name: string, extra = '') =>
-    `  ${status.padEnd(12)} ${name}${extra ? `  ${extra}` : ''}`
+    `  ${status.padEnd(16)}${extra ? `${name.padEnd(28)} ${extra}` : name}`
 
 /** The cron minute from a voidflow-written ci.yml, so a re-run stays unchanged. */
 function existingCronMinute(dir: string): number | null {
