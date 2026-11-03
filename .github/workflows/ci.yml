@@ -96,4 +96,10 @@ jobs:
           node-version: 24
           package-manager-cache: false
 
-      - run: bun test
+      - name: Lint (Biome)
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run check
+
+      - run: bun run test
