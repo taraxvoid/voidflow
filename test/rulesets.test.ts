@@ -7,10 +7,12 @@ import {
     diff,
     type Fleet,
     isPlanGated,
+    mergeQueueIneligible,
     normalise,
     type RepoConfig,
     type Ruleset,
     tool,
+    wantsMergeQueue,
 } from '../rulesets/index.ts'
 
 // A fleet as an infra repo would pass it with --config: sites on a
@@ -392,5 +394,56 @@ describe('isPlanGated', () => {
             ),
         ).toBe(false)
         expect(isPlanGated('gh: Not Found (HTTP 404)')).toBe(false)
+    })
+})
+
+describe('wantsMergeQueue', () => {
+    test('is true only for a tiered repo with mergeQueue on main', () => {
+        expect(wantsMergeQueue(tool({ mergeQueue: true }))).toBe(true)
+        expect(wantsMergeQueue(tool())).toBe(false)
+        expect(
+            wantsMergeQueue(tool({ mergeQueue: true, tiers: ['next'] })),
+        ).toBe(false)
+    })
+
+    test('sees a merge_queue rule in a spelled-out ruleset', () => {
+        const rs = (type: string) =>
+            ({
+                name: 'main',
+                target: 'branch',
+                enforcement: 'active',
+                conditions: { ref_name: { include: [], exclude: [] } },
+                bypass_actors: [],
+                rules: [{ type }],
+            }) as Ruleset
+        expect(
+            wantsMergeQueue({ rulesets: [rs('merge_queue')], retire: [] }),
+        ).toBe(true)
+        expect(
+            wantsMergeQueue({ rulesets: [rs('deletion')], retire: [] }),
+        ).toBe(false)
+    })
+})
+
+describe('mergeQueueIneligible', () => {
+    test('refuses a user-owned repo', () => {
+        expect(
+            mergeQueueIneligible({ owner: { type: 'User' }, private: false }),
+        ).toMatch(/User.*organization/)
+    })
+
+    test('allows org repos, public or private (the plan is left to the API)', () => {
+        expect(
+            mergeQueueIneligible({
+                owner: { type: 'Organization' },
+                private: false,
+            }),
+        ).toBeNull()
+        expect(
+            mergeQueueIneligible({
+                owner: { type: 'Organization' },
+                private: true,
+            }),
+        ).toBeNull()
     })
 })
