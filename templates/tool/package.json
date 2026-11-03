@@ -9,7 +9,7 @@
     "devDependencies": {
         "@taraxvoid/voidflow": "{{version}}",
         "@biomejs/biome": "2.6.3",
-        "typescript": "5.9.3",
+        "typescript": "7.0.2",
         "@types/bun": "1.4.4"
     }
 }
