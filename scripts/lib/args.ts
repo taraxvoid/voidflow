@@ -2,7 +2,7 @@
  * Flag parsing for the repo tools: node:util's strict parseArgs, plus
  * -h/--help, and a usage message instead of a stack trace on a bad flag.
  */
-import { parseArgs, type ParseArgsConfig } from 'node:util'
+import { type ParseArgsConfig, parseArgs } from 'node:util'
 
 /**
  * Parse `argv` against `config`. -h/--help prints `usage` and exits 0; an
@@ -24,7 +24,10 @@ export function parseOrExit<T extends ParseArgsConfig>(
     try {
         return parseArgs({ ...config, args: argv, strict: true })
     } catch (e) {
-        if (!String((e as { code?: string }).code).startsWith('ERR_PARSE_ARGS_')) throw e
+        if (
+            !String((e as { code?: string }).code).startsWith('ERR_PARSE_ARGS_')
+        )
+            throw e
         console.error(`${(e as Error).message}\n\n${usage}`)
         process.exit(2)
     }

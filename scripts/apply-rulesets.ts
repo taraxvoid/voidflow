@@ -18,9 +18,7 @@
  * Private repos on a plan without rulesets (GitHub answers 403) are skipped
  * and reported, never counted as drift, so --check stays green for them.
  */
-import { parseOrExit } from './lib/args.ts'
-import { loadOrExit } from './lib/config.ts'
-import { capture } from './lib/proc.ts'
+
 import {
     checkFleet,
     desired,
@@ -29,6 +27,9 @@ import {
     normalise,
     type Ruleset,
 } from '../rulesets/index.ts'
+import { parseOrExit } from './lib/args.ts'
+import { loadOrExit } from './lib/config.ts'
+import { capture } from './lib/proc.ts'
 
 const OPTIONS = {
     apply: { type: 'boolean', default: false },
@@ -46,13 +47,13 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
   --apply            create and update rulesets to match
   --prune            with --apply, also delete the rulesets listed under retire`
 
-async function gh(args: string[], body?: unknown): Promise<any> {
+async function gh<T = unknown>(args: string[], body?: unknown): Promise<T> {
     const { code, out, err } = await capture(
         ['gh', 'api', ...args],
         body === undefined ? undefined : JSON.stringify(body),
     )
     if (code !== 0) throw new Error(`gh api ${args.join(' ')}: ${err || out}`)
-    return out ? JSON.parse(out) : null
+    return (out ? JSON.parse(out) : null) as T
 }
 
 /** `prog` names the command in the --help usage. */
@@ -62,7 +63,8 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
     const REPOS = await loadOrExit(values.config, checkFleet)
 
     const repos = Object.keys(REPOS).filter(
-        (r) => !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
+        (r) =>
+            !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
     )
     if (repos.length === 0) {
         console.error(`no repo matches --repo ${values.repo}`)
@@ -76,11 +78,13 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
         console.log(`\n== ${repo}`)
         let listed: Array<{ id: number; name: string }>
         try {
-            listed = await gh([`repos/${repo}/rulesets`])
+            listed = await gh<typeof listed>([`repos/${repo}/rulesets`])
         } catch (e) {
             if (!isPlanGated(String(e))) throw e
             gated.push(repo)
-            console.log('  skipped: private repo on a plan without rulesets (HTTP 403)')
+            console.log(
+                '  skipped: private repo on a plan without rulesets (HTTP 403)',
+            )
             continue
         }
         const matched = new Set<number>()
@@ -93,17 +97,32 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
                 drift++
                 console.log(`+ create "${ruleset.name}"`)
                 if (values.apply) {
-                    await gh(['-X', 'POST', `repos/${repo}/rulesets`, '--input', '-'], ruleset)
+                    await gh(
+                        [
+                            '-X',
+                            'POST',
+                            `repos/${repo}/rulesets`,
+                            '--input',
+                            '-',
+                        ],
+                        ruleset,
+                    )
                     console.log('  created')
                 }
                 continue
             }
             matched.add(hit.id)
-            const have: Ruleset = await gh([`repos/${repo}/rulesets/${hit.id}`])
+            const have = await gh<Ruleset>([`repos/${repo}/rulesets/${hit.id}`])
             // A read-only token gets no bypass_actors back; compare the rest.
             const bypass = Array.isArray(have.bypass_actors)
-            if (!bypass) console.log(`  note "${ruleset.name}": bypass_actors not visible to this token, not compared`)
-            const lines = diff(normalise(have, { bypass }), normalise(ruleset, { bypass }))
+            if (!bypass)
+                console.log(
+                    `  note "${ruleset.name}": bypass_actors not visible to this token, not compared`,
+                )
+            const lines = diff(
+                normalise(have, { bypass }),
+                normalise(ruleset, { bypass }),
+            )
             if (lines.length === 0) {
                 console.log(`  ok "${ruleset.name}"`)
                 continue
@@ -113,7 +132,13 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
             for (const l of lines) console.log(`    ${l}`)
             if (values.apply) {
                 await gh(
-                    ['-X', 'PUT', `repos/${repo}/rulesets/${hit.id}`, '--input', '-'],
+                    [
+                        '-X',
+                        'PUT',
+                        `repos/${repo}/rulesets/${hit.id}`,
+                        '--input',
+                        '-',
+                    ],
                     ruleset,
                 )
                 console.log('  updated')
@@ -123,11 +148,15 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
         const retire = new Set(REPOS[repo].retire)
         for (const r of listed.filter((r) => !matched.has(r.id))) {
             if (!retire.has(r.name)) {
-                console.log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
+                console.log(
+                    `? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`,
+                )
                 continue
             }
             drift++
-            console.log(`- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`)
+            console.log(
+                `- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`,
+            )
             if (values.apply && values.prune) {
                 await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
                 console.log('  deleted')
@@ -136,7 +165,9 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
     }
 
     if (gated.length > 0) {
-        console.log(`\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`)
+        console.log(
+            `\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`,
+        )
     }
     console.log(
         `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,

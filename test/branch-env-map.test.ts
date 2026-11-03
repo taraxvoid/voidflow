@@ -3,11 +3,14 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
+const yaml = (s: string): any => Bun.YAML.parse(s)
 
-const actionScript: string = Bun.YAML.parse(read('actions/branch-env-map/action.yml')).runs.steps.find(
-    (s: any) => s.id === 'map',
-).run
+const read = (p: string) =>
+    readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
+
+const actionScript: string = yaml(
+    read('actions/branch-env-map/action.yml'),
+).runs.steps.find((s: any) => s.id === 'map').run
 
 async function map(script: string, ref: string, event: string) {
     const out = join(mkdtempSync(join(tmpdir(), 'voidflow-env-')), 'out')
@@ -32,7 +35,10 @@ describe('action script', () => {
         ['123/merge', 'pull_request', 'env=preview'],
         ['feature/x', 'pull_request', 'env=preview'],
     ])('%s on %s', async (ref, event, expected) => {
-        expect(await map(actionScript, ref, event)).toEqual({ code: 0, env: expected })
+        expect(await map(actionScript, ref, event)).toEqual({
+            code: 0,
+            env: expected,
+        })
     })
 
     test.each([
@@ -46,12 +52,18 @@ describe('action script', () => {
 
 describe('single-environment is the only mode', () => {
     test('branch-env-map declares no inputs', () => {
-        expect(Bun.YAML.parse(read('actions/branch-env-map/action.yml')).inputs).toBeUndefined()
+        expect(
+            yaml(read('actions/branch-env-map/action.yml')).inputs,
+        ).toBeUndefined()
     })
 
     test('site-ci.yml has no single-environment input or tier step', () => {
-        const wf = Bun.YAML.parse(read('.github/workflows/site-ci.yml'))
-        expect(Object.keys(wf.on.workflow_call.inputs)).not.toContain('single-environment')
-        expect(wf.jobs.validate.steps.find((s: any) => s.id === 'tier')).toBeUndefined()
+        const wf = yaml(read('.github/workflows/site-ci.yml'))
+        expect(Object.keys(wf.on.workflow_call.inputs)).not.toContain(
+            'single-environment',
+        )
+        expect(
+            wf.jobs.validate.steps.find((s: any) => s.id === 'tier'),
+        ).toBeUndefined()
     })
 })

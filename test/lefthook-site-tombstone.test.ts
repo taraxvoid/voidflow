@@ -21,12 +21,22 @@ describe('lefthook/site.yml tombstone', () => {
         expect(await proc.exited).toBe(0)
     })
 
-    test.each(['pre-commit', 'pre-push'])('%s fails and points at base.yml', async (hook) => {
-        const cfg: any = Bun.YAML.parse(readFileSync(path, 'utf8'))
-        const commands = Object.values(cfg[hook].commands) as Array<{ run: string }>
-        expect(commands).toHaveLength(1)
-        const proc = Bun.spawn(['sh', '-c', commands[0].run], { stdout: 'pipe', stderr: 'pipe' })
-        expect(await proc.exited).toBe(1)
-        expect(await new Response(proc.stderr).text()).toContain('lefthook/base.yml')
-    })
+    test.each(['pre-commit', 'pre-push'])(
+        '%s fails and points at base.yml',
+        async (hook) => {
+            const cfg: any = Bun.YAML.parse(readFileSync(path, 'utf8'))
+            const commands = Object.values(cfg[hook].commands) as Array<{
+                run: string
+            }>
+            expect(commands).toHaveLength(1)
+            const proc = Bun.spawn(['sh', '-c', commands[0].run], {
+                stdout: 'pipe',
+                stderr: 'pipe',
+            })
+            expect(await proc.exited).toBe(1)
+            expect(await new Response(proc.stderr).text()).toContain(
+                'lefthook/base.yml',
+            )
+        },
+    )
 })

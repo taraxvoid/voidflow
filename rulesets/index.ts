@@ -10,7 +10,11 @@
 
 export type BypassActor = {
     actor_id: number | null
-    actor_type: 'RepositoryRole' | 'Integration' | 'DeployKey' | 'OrganizationAdmin'
+    actor_type:
+        | 'RepositoryRole'
+        | 'Integration'
+        | 'DeployKey'
+        | 'OrganizationAdmin'
     bypass_mode: 'always' | 'pull_request'
 }
 
@@ -184,7 +188,9 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
                               grouping_strategy: 'ALLGREEN',
                               max_entries_to_build: 5,
                               max_entries_to_merge: 5,
-                              merge_method: cfg.linearHistory ? 'SQUASH' : 'MERGE',
+                              merge_method: cfg.linearHistory
+                                  ? 'SQUASH'
+                                  : 'MERGE',
                               min_entries_to_merge: 1,
                               min_entries_to_merge_wait_minutes: 0,
                           },
@@ -244,10 +250,11 @@ const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
  * an unknown one (likely a typo) is an error. Returns the filled-in fleet.
  */
 export function checkFleet(x: unknown): Fleet {
-    const isObj = (v: unknown): v is Record<string, any> =>
+    const isObj = (v: unknown): v is Record<string, unknown> =>
         typeof v === 'object' && v !== null && !Array.isArray(v)
     const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
     const strList = (v: unknown) => Array.isArray(v) && v.every(isStr)
+    const field = (v: unknown, k: string) => (isObj(v) ? v[k] : undefined)
     if (!isObj(x)) throw new Error('config is not an object of repos')
     const errs: string[] = []
     const bad = (path: string, why: string) => errs.push(`${path}: ${why}`)
@@ -276,11 +283,14 @@ export function checkFleet(x: unknown): Fleet {
                     continue
                 }
                 if (!isStr(r.name)) bad(`${rs}.name`, 'missing')
-                if (!strList(r.conditions?.ref_name?.include))
+                if (!strList(field(field(r.conditions, 'ref_name'), 'include')))
                     bad(`${rs}.conditions.ref_name.include`, 'not a list')
                 if (!Array.isArray(r.bypass_actors))
                     bad(`${rs}.bypass_actors`, 'not a list')
-                if (!Array.isArray(r.rules) || !r.rules.every((u: any) => isStr(u?.type)))
+                if (
+                    !Array.isArray(r.rules) ||
+                    !r.rules.every((u) => isStr(field(u, 'type')))
+                )
                     bad(`${rs}.rules`, 'not a list')
             }
             continue
@@ -295,8 +305,12 @@ export function checkFleet(x: unknown): Fleet {
         for (const k of ['checks', 'retire'])
             if (Array.isArray(full[k]) && !strList(full[k]))
                 bad(`${at}.${k}`, 'not a list of names')
-        for (const [i, t] of (Array.isArray(full.tiers) ? full.tiers : []).entries()) {
-            if (!TIERS.includes(t)) bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
+        for (const [i, t] of (Array.isArray(full.tiers)
+            ? full.tiers
+            : []
+        ).entries()) {
+            if (!TIERS.includes(t))
+                bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
         }
         out[repo] = full as RepoConfig
     }
@@ -307,7 +321,10 @@ export function checkFleet(x: unknown): Fleet {
 // ---- normalisation + diff -------------------------------------------------
 
 /** Order-insensitive canonical form so GitHub's ordering never shows as drift. */
-export function normalise(r: Ruleset, opts: { bypass?: boolean } = {}): unknown {
+export function normalise(
+    r: Ruleset,
+    opts: { bypass?: boolean } = {},
+): unknown {
     const sortBy = <T>(xs: T[], key: (x: T) => string) =>
         [...xs].sort((a, b) => key(a).localeCompare(key(b)))
     return {
@@ -327,15 +344,17 @@ export function normalise(r: Ruleset, opts: { bypass?: boolean } = {}): unknown 
                   ),
               }),
         rules: sortBy(r.rules, (x) => x.type).map((rule) => {
-            const p = rule.parameters as any
+            const p = rule.parameters
             if (rule.type === 'required_status_checks' && p) {
                 return {
                     type: rule.type,
                     parameters: {
                         ...p,
                         required_status_checks: sortBy(
-                            p.required_status_checks,
-                            (c: any) => c.context,
+                            p.required_status_checks as Array<{
+                                context: string
+                            }>,
+                            (c: { context: string }) => c.context,
                         ),
                     },
                 }
@@ -353,11 +372,13 @@ export function normalise(r: Ruleset, opts: { bypass?: boolean } = {}): unknown 
 }
 
 function flatten(v: unknown, path = ''): string[] {
-    if (v === null || typeof v !== 'object') return [`${path} = ${JSON.stringify(v)}`]
+    if (v === null || typeof v !== 'object')
+        return [`${path} = ${JSON.stringify(v)}`]
     const entries = Array.isArray(v)
         ? v.map((x, i) => [String(i), x] as const)
         : Object.entries(v as Record<string, unknown>)
-    if (entries.length === 0) return [`${path} = ${Array.isArray(v) ? '[]' : '{}'}`]
+    if (entries.length === 0)
+        return [`${path} = ${Array.isArray(v) ? '[]' : '{}'}`]
     return entries.flatMap(([k, x]) => flatten(x, path ? `${path}.${k}` : k))
 }
 
@@ -380,5 +401,8 @@ export function diff(have: unknown, want: unknown): string[] {
  * Other errors, including other 403s, still abort the run.
  */
 export function isPlanGated(message: string): boolean {
-    return /\(HTTP 403\)/.test(message) && /Upgrade to GitHub Pro|make this repository public/.test(message)
+    return (
+        /\(HTTP 403\)/.test(message) &&
+        /Upgrade to GitHub Pro|make this repository public/.test(message)
+    )
 }

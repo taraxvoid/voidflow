@@ -63,10 +63,16 @@ describe('assertVersionMatchesChannel', () => {
         assertVersionMatchesChannel('0.10.0', resolveChannel('main'))
         assertVersionMatchesChannel('0.9.4', resolveChannel('release/0.9.x'))
         expect(() =>
-            assertVersionMatchesChannel('0.10.0-next.1', resolveChannel('main')),
+            assertVersionMatchesChannel(
+                '0.10.0-next.1',
+                resolveChannel('main'),
+            ),
         ).toThrow(/does not belong/)
         expect(() =>
-            assertVersionMatchesChannel('0.9.4-next.1', resolveChannel('release/0.9.x')),
+            assertVersionMatchesChannel(
+                '0.9.4-next.1',
+                resolveChannel('release/0.9.x'),
+            ),
         ).toThrow(/does not belong/)
     })
 
@@ -74,25 +80,38 @@ describe('assertVersionMatchesChannel', () => {
         const c = resolveChannel('release/0.9.x')
         assertVersionMatchesChannel('0.9.0', c)
         assertVersionMatchesChannel('0.9.12', c)
-        expect(() => assertVersionMatchesChannel('0.10.0', c)).toThrow(/does not belong/)
-        expect(() => assertVersionMatchesChannel('0.8.3', c)).toThrow(/does not belong/)
-        expect(() => assertVersionMatchesChannel('1.9.0', c)).toThrow(/does not belong/)
+        expect(() => assertVersionMatchesChannel('0.10.0', c)).toThrow(
+            /does not belong/,
+        )
+        expect(() => assertVersionMatchesChannel('0.8.3', c)).toThrow(
+            /does not belong/,
+        )
+        expect(() => assertVersionMatchesChannel('1.9.0', c)).toThrow(
+            /does not belong/,
+        )
 
         const major = resolveChannel('release/1.x')
         assertVersionMatchesChannel('1.4.2', major)
-        expect(() => assertVersionMatchesChannel('2.0.0', major)).toThrow(/does not belong/)
-        expect(() => assertVersionMatchesChannel('0.9.4', major)).toThrow(/does not belong/)
+        expect(() => assertVersionMatchesChannel('2.0.0', major)).toThrow(
+            /does not belong/,
+        )
+        expect(() => assertVersionMatchesChannel('0.9.4', major)).toThrow(
+            /does not belong/,
+        )
     })
 
     test('prerelease accepts release-please numbering: -next, then -next.N', () => {
         assertVersionMatchesChannel('0.10.0-next', resolveChannel('next'))
         assertVersionMatchesChannel('0.10.0-next.1', resolveChannel('next'))
         assertVersionMatchesChannel('0.10.0-next.3', resolveChannel('next'))
-        expect(() => assertVersionMatchesChannel('0.10.0', resolveChannel('next'))).toThrow(
-            /does not belong/,
-        )
         expect(() =>
-            assertVersionMatchesChannel('0.10.0-beta.1', resolveChannel('next')),
+            assertVersionMatchesChannel('0.10.0', resolveChannel('next')),
+        ).toThrow(/does not belong/)
+        expect(() =>
+            assertVersionMatchesChannel(
+                '0.10.0-beta.1',
+                resolveChannel('next'),
+            ),
         ).toThrow(/does not belong/)
     })
 })

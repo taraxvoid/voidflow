@@ -11,13 +11,22 @@ bun install    # prepare script runs `lefthook install`
 
 `just validate` runs everything CI (`.github/workflows/ci.yml`) runs:
 
-- `just lint-workflows`: jactionlint, including shellcheck on workflow `run:` steps
-- `just lint-actions`: check-jsonschema on workflows and `actions/**/action.yml`
-- `just lint-shell`: shellcheck on `run:` steps in composite actions
-  (`scripts/shellcheck-actions.ts`)
+- `just lint`: every linter below, plus gitleaks
+  - `just lint-ts`: Biome lint and format check (`bun run lint`)
+  - `just lint-workflows`: jactionlint, including shellcheck on workflow `run:` steps
+  - `just lint-actions`: check-jsonschema on workflows and `actions/**/action.yml`
+  - `just lint-shell`: shellcheck on `run:` steps in composite actions
+    (`scripts/shellcheck-actions.ts`)
+- `just check`: typecheck with tsc (`bun run check`)
+- `just test`: unit tests (`bun run test`)
 - `just security`: zizmor
 
-lefthook runs the first three on `pre-commit` and zizmor on `pre-push`.
+`just format` applies Biome's fixes. The TypeScript steps are package.json
+scripts named like a voidflow caller's (`lint` is Biome, `check` is the
+typecheck), and the recipes wrap them.
+
+lefthook runs Biome (fixing staged files), the typecheck and the workflow and
+action linters on `pre-commit`, and zizmor and the tests on `pre-push`.
 
 Pin every third-party action to a full commit SHA with a version comment.
 

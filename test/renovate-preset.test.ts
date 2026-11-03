@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-const preset = await Bun.file(new URL('../default.json', import.meta.url).pathname).json()
+const preset = await Bun.file(
+    new URL('../default.json', import.meta.url).pathname,
+).json()
 
 describe('renovate preset (default.json)', () => {
     test('gates updates on a 3-day release age except our own package', () => {
@@ -22,12 +24,14 @@ describe('renovate preset (default.json)', () => {
             (m: any) => new RegExp(m.matchStrings[0]),
         )
         expect(
-            'bunx --package @taraxvoid/voidflow@0.9.0 unlighthouse-runner'.match(pkg)?.groups
-                ?.currentValue,
+            'bunx --package @taraxvoid/voidflow@0.9.0 unlighthouse-runner'.match(
+                pkg,
+            )?.groups?.currentValue,
         ).toBe('0.9.0')
         expect(
-            'git_url: https://github.com/taraxvoid/voidflow\n    ref: v0.10.0'.match(lefthook)
-                ?.groups?.currentValue,
+            'git_url: https://github.com/taraxvoid/voidflow\n    ref: v0.10.0'.match(
+                lefthook,
+            )?.groups?.currentValue,
         ).toBe('v0.10.0')
         expect(
             '# renovate: datasource=pypi depName=check-jsonschema\ncheck_jsonschema_version := "0.38.0"'.match(

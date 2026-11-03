@@ -111,7 +111,9 @@ if (chrome) {
             : `Using Chromium: ${chrome} (--no-sandbox for CI)`,
     )
 } else {
-    console.log('No Playwright Chromium found; relying on system Chrome lookup.')
+    console.log(
+        'No Playwright Chromium found; relying on system Chrome lookup.',
+    )
 }
 console.log(`Serving ${dir} at ${site}`)
 
