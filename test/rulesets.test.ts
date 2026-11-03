@@ -14,23 +14,22 @@ import {
     tool,
 } from '../rulesets/index.ts'
 
-// A fleet as an infra repo would pass it with --config: Netlify sites on a
-// single main, a site deployed to Cloudflare, and voidflow's release channels.
+// A fleet as an infra repo would pass it with --config: sites on a
+// single main, and voidflow's release channels.
 const site = (over: Partial<RepoConfig> = {}) =>
-    tool({ netlify: true, retire: ['next (staging)', 'live (prod)'], ...over })
+    tool({ retire: ['next (staging)', 'live (prod)'], ...over })
 const REPOS: Record<string, RepoConfig> = {
     'taraxvoid/queeromaha': site({
-        bypass: { main: [app(NETLIFY), app(85455)] },
+        bypass: { main: [app(85455)] },
     }),
     'taraxvoid/soundry': site({
         bypass: { main: [app(85455), app(1236702)] },
         aka: { main: ['main (live)'] },
     }),
     'taraxvoid/synthomaha': site({ bypass: { main: [app(85455)] } }),
-    'taraxvoid/taraxvoid.net': site({ netlify: false }),
+    'taraxvoid/taraxvoid.net': site(),
     'taraxvoid/voidflow': {
         tiers: ['main', 'prerelease', 'maintenance'],
-        netlify: false,
         checks: ['Validation', 'Unit tests'],
         codeowners: false,
         linearHistory: false,
@@ -163,7 +162,7 @@ describe('diff', () => {
         ;(
             b.rules.find((x) => x.type === 'required_status_checks')!
                 .parameters as any
-        ).required_status_checks[1].context = 'pr-checks'
+        ).required_status_checks[0].context = 'pr-checks'
         const lines = diff(normalise(b), normalise(a))
         expect(
             lines.some((l) => l.startsWith('- ') && l.includes('pr-checks')),
@@ -306,8 +305,8 @@ describe('raw rulesets (another fleet, --config)', () => {
 
     test("checkFleet fills a tiered repo's missing fields from tool()", () => {
         expect(checkFleet({ 'a/b': {} })['a/b']).toEqual(tool())
-        expect(checkFleet({ 'a/b': { netlify: true } })['a/b']).toEqual(
-            tool({ netlify: true }),
+        expect(checkFleet({ 'a/b': { codeowners: false } })['a/b']).toEqual(
+            tool({ codeowners: false }),
         )
     })
 
@@ -349,8 +348,7 @@ describe('tool()', () => {
     test('is a main-only repo requiring tool-ci and CODEOWNERS', () => {
         expect(cfg).toEqual({
             tiers: ['main'],
-            netlify: false,
-            checks: ['validate / Validate'],
+                checks: ['validate / Validate'],
             codeowners: true,
             linearHistory: true,
             mergeQueue: false,
@@ -360,7 +358,7 @@ describe('tool()', () => {
         })
     })
 
-    test('main ruleset: no Netlify check, code owner review, squash only', () => {
+    test('main ruleset: code owner review, squash only', () => {
         const r = build('main', cfg)
         expect(statusChecks(r)).toEqual(['validate / Validate'])
         const pr = r.rules.find((x) => x.type === 'pull_request')
@@ -370,9 +368,8 @@ describe('tool()', () => {
 })
 
 describe('taraxvoid.net', () => {
-    test('deploys via voidflow: no Netlify check and no app bypass', () => {
+    test('deploys via voidflow: no app bypass', () => {
         const r = build('main', REPOS['taraxvoid/taraxvoid.net'])
-        expect(JSON.stringify(r)).not.toContain(String(NETLIFY))
         expect(
             r.bypass_actors.some((a) => a.actor_type === 'Integration'),
         ).toBe(false)

@@ -6,7 +6,7 @@ Shared CI/CD, security checks and repo config for TypeScript projects.
 
 - **Reusable workflows** for sites (`site-ci.yml`) and bun tools (`tool-ci.yml`),
   plus SARIF upload
-- **Deploy actions** for Netlify and Cloudflare Workers, per-PR Worker
+- **Deploy actions** for Cloudflare Workers, per-PR Worker
   Previews, and branch-to-environment mapping
 - **npm package** with Lighthouse budgets, a copyleft license check,
   Playwright and Biome configs, and fleet tools (branch rulesets and scoped
@@ -80,6 +80,8 @@ Inputs:
 | `code-paths` | all but Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs that count as code |
 | `e2e-scripts` | `[]` | JSON array of extra e2e scripts, run in order. Missing ones fail |
 | `e2e-ignore-paths` | linter, git hook, Renovate, editor and vitest config | JSON array of globs whose changes alone skip e2e |
+| `renovate-skip-e2e` | `true` | Skip e2e on Renovate PRs that only bump a devDependency outside `renovate-e2e-packages`. `false` opts out |
+| `renovate-e2e-packages` | astro, Playwright, axe-core | JSON array of devDependency names whose Renovate bumps still run e2e (`@scope/` matches a scope) |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI |
 | `red-audits` | `false` | A failed a11y or Lighthouse audit turns its CI job red |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
@@ -199,16 +201,12 @@ each gated with an `if:`.
 
 `cloudflare-deploy` runs `wrangler deploy --env <env>`, so `preview` needs a
 matching env block in the wrangler config, or pass `command` to deploy previews
-another way. `netlify-deploy` makes `prod` a production deploy and anything else
-an alias deploy.
+another way.
 
 | Action | Inputs |
 |---|---|
 | `actions/cloudflare-deploy` | `env`, `cloudflare-api-token`, `cloudflare-account-id`, `migrate-d1`, `package-manager` (runs the migration: `bun`, `pnpm` or `aube`), `working-directory`, `command`, `token-fallback` ([details](CONTRIBUTING.md)) |
 | `actions/cloudflare-preview` | `cloudflare-api-token`, `cloudflare-account-id`, `working-directory`, `name` (default `pr-<number>`), `secrets` (dotenv lines), `github-token`, `delete` |
-| `actions/netlify-deploy` | `env`, `publish-dir`, `netlify-auth-token`, `netlify-site-id`, `working-directory`, `github-token` |
-
-For Netlify, turn off the site's own GitHub auto-deploy or it will deploy twice.
 
 **Worker Previews:** `cloudflare-preview` runs `wrangler preview` per pull
 request and outputs `preview-url` and `deployment-url`. With `github-token`

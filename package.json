@@ -1,7 +1,7 @@
 {
     "name": "@taraxvoid/voidflow",
     "version": "1.0.0-next.1",
-    "description": "Reusable GitHub Actions CI/CD for TypeScript sites and tools: supply-chain and security gates, accessibility and performance budgets, Cloudflare and Netlify deploys.",
+    "description": "Reusable GitHub Actions CI/CD for TypeScript sites and tools: supply-chain and security gates, accessibility and performance budgets, Cloudflare Workers deploys.",
     "type": "module",
     "license": "MIT",
     "keywords": [
