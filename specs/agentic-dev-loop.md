@@ -43,7 +43,7 @@ Split by privilege so one compromised credential does not escalate:
 
 | App | Permissions | Used by |
 |---|---|---|
-| `fleet-reader` | `contents: read`, `pull-requests: read`, `checks: read`, `metadata: read` on fleet repos | queue collector, security review checkout, outcome collector |
+| `fleet-reader` | `contents: read`, `pull-requests: read`, `issues: read`, `checks: read`, `metadata: read` on fleet repos | queue collector, security review checkout, outcome collector |
 | `fleet-writer` | `issues: write` on the infra repo only | queue and findings issues |
 | `fleet-actor` (later, optional) | `pull-requests: write`, `checks: write` on fleet repos | label changes and auto-merge enablement, only after the Detect loop justifies it |
 
@@ -52,6 +52,10 @@ Rules:
 - Mint tokens with `actions/create-github-app-token` in deterministic jobs,
   scoped with `owner`, `repositories` and `permission-*` inputs to the minimum
   for that job. Pin it by SHA.
+- `issues: read` is there because the queue reads each PR's triage brief
+  through the issue-comments API (`GET /repos/{owner}/{repo}/issues/{pr}/comments`),
+  where a PR's conversation comments live; `pull-requests: read` does not cover
+  that path. The queue's tests must exercise this read path.
 - App private keys live as secrets in the infra repo only.
 - No credential is ever passed to a job or step the model runs in. Checkouts
   happen in an earlier deterministic job and are handed over as files.
@@ -71,8 +75,10 @@ grows").
 
 ### Ledger record
 
-One record per decision, written into the check-run output JSON (the
-`deps-review` gate already posts one):
+One record per decision. Serialization contract: the gate job writes the record
+as a single JSON object in the check run's `output.text` field (machine-read);
+`output.title` and `output.summary` stay human-readable. Readers ignore unknown
+fields and treat `null` as "not recorded":
 
 ```json
 {
@@ -93,26 +99,49 @@ One record per decision, written into the check-run output JSON (the
 `prompt_version` is the voidflow release that shipped the prompt, so a change
 in agreement rate can be tied to a prompt edit.
 
+Legacy `deps-review` check runs have only `output.title` and a free-text
+`output.summary`, so they are not ledger records as they stand. Backfill builds
+a partial record from them: `verdict` from the title ("Low risk" or "Needs
+you"), `gate` from the conclusion, `head_sha` and `at` from the check run,
+`signals` from the summary's flag lines when they parse and `null` otherwise,
+and `prompt_version` and `engine` as `null`. Partial records appear in reports
+but do not count toward the promotion rule; only records with `schema` and
+`prompt_version` set do. The `deps-review` gate must start emitting
+`output.text` before the promotion rule can be met.
+
 ### Outcome collector
 
 A scheduled, deterministic job (in the infra repo, using `fleet-reader`).
-For each ledger record whose PR is closed, record exactly one outcome:
+It assigns outcomes **per record, so per `head_sha`**, not from the PR's
+terminal state alone. A PR can have several records (one per pushed head); each
+gets exactly one outcome once the PR is closed:
 
 | Outcome | Meaning |
 |---|---|
-| `merged-unchanged` | merged with the verdict standing |
-| `overridden-up` | verdict was low-risk but a human closed it, or a human pushed changes before merging |
-| `overridden-down` | verdict was needs-you but a human merged it with no changes |
+| `merged-unchanged` | this head was the one merged, with the verdict standing |
+| `superseded` | a later head replaced this one. Where the later push was by a human, see below |
+| `corrected-after-low-risk` | verdict was low-risk and a human pushed changes before merging |
+| `closed-after-low-risk` | verdict was low-risk and a human closed the PR unmerged (not counted if a newer PR from the same bot for the same dependency exists) |
+| `overridden-down` | verdict was needs-you and a human merged the head with no changes |
 | `reverted` | a revert of the merge landed within 14 days |
 | `broke-main` | default-branch CI went red within 24 hours of the merge and the PR is the first suspect commit |
 
-`reverted` and `broke-main` on a low-risk verdict are **false low-risk**.
+Earlier records on a PR that a human later pushed to: a low-risk record becomes
+`corrected-after-low-risk`; a needs-you record becomes `superseded` (the human
+did what the verdict asked for, so it counts as a correct needs-you). A bot
+rebase is `superseded` for either verdict and never counts against it.
+
+**False low-risk** is any low-risk record with outcome `reverted`, `broke-main`
+or `corrected-after-low-risk`. `closed-after-low-risk` is reported separately
+and reviewed by hand, since closing is not always a verdict error.
 
 ### Report: `voidflow detect`
 
 New CLI command, same `--config` fleet map as the other fleet tools.
 
-- **False low-risk count.** The number that matters. Target zero.
+- **False low-risk count.** The number that matters. Target zero. Broken down
+  by outcome (`reverted`, `broke-main`, `corrected-after-low-risk`), with
+  `closed-after-low-risk` listed beside it, not folded in.
 - **Needs-you precision.** Share of needs-you PRs that were not
   `overridden-down`. A low value means the agent is wasting attention.
 - **Time to decision.** Median and p90 from PR open to merge or close, split by
@@ -157,9 +186,17 @@ not verify, with file and line citations. Proposes a state.
 
 Gate job (deterministic): applies exactly one of `queue:merge-ready`,
 `queue:needs-you`, `queue:blocked`, and posts a `pr-triage` check on the
-evaluated head. The state is the stricter of the model's proposal and the
-signals. `queue:merge-ready` requires: CI green, no sensitive paths, no
-signal flags.
+evaluated head.
+
+Precedence is a total order, strictest first: `queue:blocked` >
+`queue:needs-you` > `queue:merge-ready`. The signals map to a state on their
+own: a hard blocker (CI red, merge conflict, draft) gives `queue:blocked`; any
+signal flag, sensitive path, or unmet `queue:merge-ready` condition gives
+`queue:needs-you`; otherwise the signals allow `queue:merge-ready`. The final
+state is the strictest of the signals' state and the model's proposal, so a
+model proposing `queue:merge-ready` cannot override a flag, and a missing or
+invalid proposal counts as `queue:needs-you`. `queue:merge-ready` requires: CI
+green, no sensitive paths, no signal flags.
 
 Merging:
 
