@@ -81,7 +81,9 @@ To require a merge queue on `main`, set `mergeQueue: true` on the repo's entry
 (`tool({ mergeQueue: true })`). GitHub only offers merge queues on public repos
 owned by an organization, and on private org repos with Enterprise Cloud, so
 leave it off elsewhere. The repo's CI must also run on `merge_group`, or the
-required checks never report and the queue stalls.
+required checks never report and the queue stalls. `rulesets` refuses, before
+writing anything, a repo that asks for a queue but isn't org-owned; a private org
+repo without Enterprise Cloud is left to GitHub's API to reject.
 
 Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.

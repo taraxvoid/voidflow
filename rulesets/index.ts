@@ -408,3 +408,29 @@ export function isPlanGated(message: string): boolean {
         /Upgrade to GitHub Pro|make this repository public/.test(message)
     )
 }
+
+// ---- merge queue eligibility ------------------------------------------------
+
+/** True when a fleet entry asks for a merge queue (tiered or spelled out). */
+export function wantsMergeQueue(cfg: RepoConfig | RawConfig): boolean {
+    return isRaw(cfg)
+        ? cfg.rulesets.some((r) =>
+              r.rules.some((u) => u.type === 'merge_queue'),
+          )
+        : cfg.mergeQueue === true && cfg.tiers.includes('main')
+}
+
+/**
+ * Why GitHub cannot give this repo a merge queue, or null when it can or
+ * might. Merge queues need an organization owner; a private org repo also
+ * needs Enterprise Cloud, which `repos/<repo>` does not reveal, so that case
+ * is left to the API. Takes the fields of `gh api repos/<repo>` it reads.
+ */
+export function mergeQueueIneligible(info: {
+    owner: { type: string }
+    private: boolean
+}): string | null {
+    return info.owner.type === 'Organization'
+        ? null
+        : `owner is a ${info.owner.type}, and merge queues need an organization`
+}

@@ -17,6 +17,8 @@
  * ones a repo lists under `retire` are deleted, and only with --prune.
  * Private repos on a plan without rulesets (GitHub answers 403) are skipped
  * and reported, never counted as drift, so --check stays green for them.
+ * A repo asking for a merge queue it can't have (not org-owned) fails the run
+ * up front, before anything is written.
  */
 
 import {
@@ -24,8 +26,10 @@ import {
     desired,
     diff,
     isPlanGated,
+    mergeQueueIneligible,
     normalise,
     type Ruleset,
+    wantsMergeQueue,
 } from '../rulesets/index.ts'
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
@@ -68,6 +72,31 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
     )
     if (repos.length === 0) {
         console.error(`no repo matches --repo ${values.repo}`)
+        process.exit(2)
+    }
+
+    // Fail before any write if a repo wants a merge queue GitHub can't give it.
+    const refused: string[] = []
+    for (const repo of repos.filter((r) => wantsMergeQueue(REPOS[r]))) {
+        let info: { owner: { type: string }; private: boolean }
+        try {
+            info = await gh<typeof info>([`repos/${repo}`])
+        } catch (e) {
+            // Without access to the repo, the rulesets call below reports it.
+            console.log(
+                `note ${repo}: merge queue eligibility not checked (${e})`,
+            )
+            continue
+        }
+        const why = mergeQueueIneligible(info)
+        if (why) refused.push(`${repo}: mergeQueue: true, but ${why}`)
+        else if (info.private)
+            console.log(
+                `note ${repo}: private org repo; a merge queue needs Enterprise Cloud`,
+            )
+    }
+    if (refused.length > 0) {
+        console.error(refused.join('\n'))
         process.exit(2)
     }
 
