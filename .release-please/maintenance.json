@@ -6,7 +6,8 @@
       "include-component-in-tag": false,
       "versioning": "always-bump-patch",
       "extra-files": [
-        "jsr.json"
+        "jsr.json",
+        { "type": "generic", "path": "agentic/workflows/deps-review.md" }
       ]
     }
   }

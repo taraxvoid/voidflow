@@ -17,12 +17,12 @@ Covered by this policy:
 | Reusable workflows (`site-ci.yml`, `tool-ci.yml`, `upload-sarif.yml`) | Workflow paths, inputs and their defaults, secrets, outputs, job names (the required check `validate / Validate`), artifact names (`voidflow-sarif`) |
 | Composite actions (`actions/*`) | Action paths, inputs and their defaults, outputs |
 | `package.json` scripts CI runs | The script names CI looks for (`lint`, `test:unit`, `test:e2e:all`, ...) and when each runs |
-| npm / JSR package | The `./playwright` and `./biome` exports and their options; the `unlighthouse-runner` and `check-licenses` bins and their flags |
+| npm / JSR package | The `./playwright` and `./biome` exports and their options; the `unlighthouse-runner`, `check-licenses` and `deps-signals` bins and their flags (`deps-signals`: its JSON output and which signals it flags) |
 | Biome config (`./biome`) | The rules and formatter options it sets on top of Biome's own (Biome itself is your dependency, so its upgrades are yours) |
 | Renovate preset (`default.json`) | That it validates and extends `config:best-practices` |
 | lefthook config (`lefthook/base.yml`) | Its path, the hooks it installs, the script names each runs |
 | Supported runtimes | Package managers (`bun`, `pnpm`, `aube`), minimum Bun and Node versions, runner OS (`ubuntu-latest`) |
-| Agentic package (`agentic/`) | Workflow paths in `aw.yml`, their triggers, the check run and label names they post (`deps-review`, `deps:low-risk`, `deps:needs-you`), the safe outputs they may use, and what each verdict means |
+| Agentic package (`agentic/`) | Workflow paths in `aw.yml`, their triggers, the check run and label names posted (`deps-review`, `deps:low-risk`, `deps:needs-you`), the safe outputs the model may use, and what each verdict means. The `deps-review` check is posted by a deterministic job, never by the model |
 | Reusable workflows for agentic repos (`agentic-locks.yml`, `deps-review-gate.yml`) | Paths, inputs and defaults, job names, required permissions |
 | Opt-in Renovate preset (`deps-review-automerge.json`) | The update types it automerges and that it merges through GitHub auto-merge |
 | Tags | `vX.Y.Z` release tags, the floating `vN` major tag |
@@ -91,11 +91,15 @@ change, so prompt edits are versioned like code:
   risk can become needs-you), a new optional label or comment section.
 - **Major:** a looser verdict (something that needed you can merge on its own),
   renamed or removed check runs or labels (they break required checks and
-  filters), new write powers (approve, merge, push), or a new default engine.
+  filters), new write powers (approve, merge, push), letting the model post a
+  gating check, or a new default engine. Loosening `deps-signals` (flagging
+  less) is a major too.
 
-Because a model can judge the same evidence differently between runs, a
-verdict is not a guarantee: the gate is the required check plus your
-rulesets, and the agent only ever gets stricter within a major.
+A model reads text an attacker can write (release notes, package metadata),
+so prompt wording is never the control. The `deps-review` check comes from a
+deterministic job: green only when the model says low risk *and*
+`deps-signals`, which reads no free text, finds nothing. The model can only
+make the gate stricter.
 
 ## Deprecation
 

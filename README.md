@@ -343,13 +343,25 @@ gh-aw and fails when a committed `.lock.yml` is stale or missing:
 
 #### deps-review
 
-Reviews Renovate and Dependabot PRs beyond "CI passed": release notes between
-the two versions checked against what your code actually uses, and npm
-supply-chain signals (a new publisher, added install scripts, dropped
-provenance, new transitive dependencies). It posts a `deps-review` check run
-(green: low risk; red: needs you), a `deps:low-risk` or `deps:needs-you`
-label, and one comment with the evidence. It never approves, merges or pushes;
-human PRs never start it.
+Reviews Renovate and Dependabot PRs beyond "CI passed". Two parts, so a
+compromised package can't talk its way to a merge:
+
+- **The agent** reads the release notes between the two versions, checks them
+  against what your code actually uses, and leaves a comment with the evidence
+  and a `deps:low-risk` or `deps:needs-you` label. It treats every upstream
+  string as untrusted and proposes a verdict; it never approves, merges,
+  pushes or posts the check.
+- **The gate job** (deterministic, runs after the agent) recomputes the hard
+  signals with the `deps-signals` bin, which reads no free text: update type
+  (patch or minor on 1.0+ only), a publisher who didn't publish or maintain the
+  previous version, added install scripts, dropped provenance, new
+  dependencies, action pins that don't match their tag, lockfile-only changes,
+  and any file outside `package.json`, lockfiles and workflows. It posts the
+  `deps-review` check on the exact commit the agent reviewed: green only when
+  the agent said low risk **and** `deps-signals` is clean. Anything it can't
+  verify is red.
+
+Human PRs never start it.
 
 Secrets: `COPILOT_GITHUB_TOKEN` (fine-grained PAT, Copilot Requests: Read) as
 an Actions secret, and the same value as a **Dependabot** secret, since runs
@@ -372,8 +384,8 @@ Roll it out in stages:
    { "extends": ["github>taraxvoid/voidflow", "github>taraxvoid/voidflow:deps-review-automerge"] }
    ```
 
-   The opt-in preset automerges patch, minor, digest, pin and lockfile
-   maintenance updates on 1.0+ versions through GitHub auto-merge, which
+   The opt-in preset automerges patch, minor, digest and pin updates on 1.0+
+   versions through GitHub auto-merge, which
    waits for every required check on the current head; a Renovate rebase is
    re-reviewed before it can merge. Enable "Allow auto-merge" in the repo.
    Dependabot can't automerge itself: run `gh pr merge --auto --squash` on its

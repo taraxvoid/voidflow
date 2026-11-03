@@ -38,19 +38,55 @@ describe('deps-review agent', () => {
         expect(fm.tools.github['read-only']).toBe(true)
     })
 
-    // It judges; Renovate and GitHub auto-merge act. Adding any of these is a major.
-    test('never approves, merges or pushes', () => {
-        expect(Object.keys(outputs).sort()).toEqual(
-            ['add-comment', 'add-labels', 'create-check-run', 'remove-labels'].sort(),
-        )
+    // It judges; Renovate and GitHub auto-merge act. Adding any write power is a major.
+    test('the model never approves, merges, pushes or posts the check itself', () => {
+        expect(Object.keys(outputs).sort()).toEqual(['add-comment', 'add-labels', 'jobs', 'remove-labels'])
+        expect(Object.keys(outputs.jobs)).toEqual(['deps-gate'])
     })
 
-    // Renaming the check or the labels breaks callers' required checks and filters.
-    test('posts the deps-review check and only its two labels', () => {
-        expect(outputs['create-check-run'].name).toBe('deps-review')
+    // Renaming the labels breaks callers' filters.
+    test('applies only its two labels', () => {
         const labels = ['deps:low-risk', 'deps:needs-you']
         expect(outputs['add-labels'].allowed).toEqual(labels)
         expect(outputs['remove-labels'].allowed).toEqual(labels)
+    })
+
+    describe('deps-gate job (owns the deps-review check)', () => {
+        const gate = outputs.jobs['deps-gate']
+        const script = gate.steps.find((s: any) => s.name === 'Gate')
+
+        test('can write checks and nothing else', () => {
+            expect(gate.permissions).toEqual({ contents: 'read', 'pull-requests': 'read', checks: 'write' })
+        })
+
+        // The model can only make the gate stricter.
+        test('posts success only when the model says low-risk and deps-signals is clean', () => {
+            expect(script.run).toContain('[ "$verdicts" = "low-risk" ] && [ "$clean" = "true" ]')
+            expect(script.run).toContain('conclusion=failure')
+            expect(script.run).toContain('name: "deps-review"')
+            expect(script.run).toContain('deps-signals --base "$base" --head "$head"')
+        })
+
+        test('evaluates the commit the agent reviewed and posts only while it is still the head', () => {
+            expect(script.env.EVENT_HEAD).toBe('${{ github.event.pull_request.head.sha }}')
+            expect(script.run).toContain('if [ "$(pr headRefOid)" != "$head" ]')
+        })
+
+        // release-please rewrites the marked line, so a release's workflow runs that release's deps-signals.
+        test('runs the deps-signals of the voidflow release it ships in', () => {
+            const pkg = JSON.parse(read('package.json'))
+            expect(script.env.VOIDFLOW).toBe(pkg.version)
+            expect(read('agentic/workflows/deps-review.md')).toContain(`VOIDFLOW: "${pkg.version}" # x-release-please-version`)
+            for (const f of ['next', 'main', 'maintenance']) {
+                const cfg = JSON.parse(read(`.release-please/${f}.json`))
+                expect(cfg.packages['.']['extra-files']).toContainEqual({
+                    type: 'generic',
+                    path: 'agentic/workflows/deps-review.md',
+                })
+            }
+            expect(pkg.bin['deps-signals']).toBe('scripts/deps-signals.ts')
+            expect(pkg.files).toContain('scripts/deps-signals.ts')
+        })
     })
 })
 
@@ -89,9 +125,10 @@ describe('renovate preset (deps-review-automerge.json)', () => {
     const preset = JSON.parse(read('deps-review-automerge.json'))
     const [rule] = preset.packageRules
 
+    // Lockfile maintenance is out: deps-signals can't verify transitive updates.
     test('automerges only low-risk update types on 1.0+ versions', () => {
         expect(preset.packageRules).toHaveLength(1)
-        expect(rule.matchUpdateTypes).not.toContain('major')
+        expect(rule.matchUpdateTypes).toEqual(['patch', 'minor', 'digest', 'pin'])
         expect(rule.matchCurrentVersion).toBe('!/^0/')
         expect(rule.automerge).toBe(true)
     })
