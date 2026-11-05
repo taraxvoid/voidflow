@@ -1,0 +1,5 @@
+remotes:
+  - git_url: https://github.com/taraxvoid/voidflow
+    ref: v{{version}} # a tag, not a SHA
+    configs:
+      - lefthook/base.yml

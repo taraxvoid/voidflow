@@ -6,11 +6,15 @@ Shared CI/CD, security checks and repo config for TypeScript projects.
 
 - **Reusable workflows** for sites (`site-ci.yml`) and bun tools (`tool-ci.yml`),
   plus SARIF upload
-- **Deploy actions** for Netlify and Cloudflare Workers, and
-  branch-to-environment mapping
-- **npm package** with Lighthouse budgets, a copyleft license check, and
-  Playwright and Biome configs
+- **Deploy actions** for Cloudflare Workers, per-PR Worker
+  Previews, and branch-to-environment mapping
+- **npm package** with Lighthouse budgets, a copyleft license check,
+  Playwright and Biome configs, and fleet tools (branch rulesets and scoped
+  Cloudflare deploy tokens as code)
 - **Renovate preset** and **lefthook hooks**
+- **Agentic workflows** ([GitHub Agentic Workflows](https://github.github.com/gh-aw/)):
+  `deps-review`, which judges dependency PRs so low-risk ones can merge
+  themselves
 
 Works with `bun` (default), `pnpm` and `aube`. CI runs whichever
 `package.json` scripts your repo defines (`lint`, `test:unit`, `test:e2e:all`,
@@ -30,6 +34,59 @@ Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md).
 [`STABILITY.md`](STABILITY.md) says what minors, patches and majors may change
 and how deprecations reach you before a removal.
 
+### Starting a repo
+
+`voidflow init` writes the starter files for a tool or an Astro site and
+applies the GitHub repo settings voidflow expects. Run it in a git work tree
+(for a site, after `bun create astro`):
+
+```sh
+npx @taraxvoid/voidflow@<version> init --kind tool    # Node 24+
+bunx @taraxvoid/voidflow@<version> init --kind site
+```
+
+It's safe to re-run: files that match what `init` would write, and settings
+already as wanted, are reported `unchanged`.
+
+| Flag | Effect |
+|---|---|
+| `--kind tool\|site` | which starter files to write (not needed with `--preset settings`) |
+| `--preset full\|files\|settings` | both halves (default), only files, or only settings |
+| `--skip-file <name>` | leave a file out (repeatable): `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security` |
+| `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
+| `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
+| `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
+| `--repo owner/name` | the GitHub repo, if not the `origin` remote |
+| `-f`, `--force` | overwrite files that differ |
+| `--dry-run` | plan both halves, change nothing |
+
+**Files.** `lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`,
+`biome.json`, `.github/workflows/ci.yml` (the CI caller for the kind, pinned to
+the release SHA), and `tsconfig.json` (tool) or `playwright.config.js` and
+`unlighthouse.config.ts` (site). `.gitignore` and `package.json` are merged:
+missing lines, scripts and devDependencies are added and the rest kept. If any
+other file exists with different content, or `package.json` has a script with
+a different value, `init` lists them, writes no files and exits 1; `--force`
+overwrites. Each written file starts with a comment naming the voidflow
+version that wrote it (`renovate.json` carries it in `description`). No
+`dependabot.yml`: Renovate does version updates.
+
+**Settings** need `gh`, authenticated with admin on the repo. Always applied:
+pull requests and issues limited to collaborators (bots with write access
+count), Dependabot alerts and security updates, secret scanning with push
+protection, and CodeQL default setup. On a private repo without GitHub Code
+Security, CodeQL and secret scanning are reported `skipped-plan`; before the
+first push CodeQL has nothing to scan and is `skipped-no-code` (re-run
+`init --preset settings` after it). Neither sets exit 1. Opt-ins are never
+turned off. Settings with no API (Dependabot malware alerts, and the AI
+previews with `--enable-ai-scan`) are printed with a link to the repo's
+settings page.
+
+A file conflict doesn't stop the settings, and a missing `gh` or `origin`
+doesn't stop the files. Exit codes: 0 done, 1 a file conflict or a failed
+setting, 2 a usage error. `init` is experimental
+([`STABILITY.md`](STABILITY.md#experimental)).
+
 ### Site CI
 
 ```yaml
@@ -42,6 +99,10 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
   validate:
@@ -57,9 +118,11 @@ Scripts it runs, if defined:
 |---|---|
 | `lint`, `check`, `build`, `test:unit` | always |
 | `check:licenses` | lockfile or `scripts/` changed |
-| `test:e2e:all` (or `test:e2e:full` if there's no `:all`) | e2e-relevant files changed; always on `merge_group`, `schedule` and `workflow_dispatch` |
+| `test:e2e:all` (or `test:e2e:full` if there's no `:all`) | code outside `e2e-ignore-paths` changed; always on `merge_group`, `schedule` and `workflow_dispatch` |
 | `test:e2e:a11y`, `test:e2e:lighthouse` | `schedule` and `workflow_dispatch` only |
 
+When workflows change it also runs jactionlint and
+[zizmor](https://github.com/zizmorcore/zizmor) (`--min-severity medium`).
 Draft PRs skip the job.
 
 Inputs:
@@ -72,12 +135,18 @@ Inputs:
 | `build-env` | `{}` | JSON object of build env vars (not for secrets) |
 | `code-paths` | all but Markdown, `docs/`, `LICENSE*`, issue templates | JSON array of globs that count as code |
 | `e2e-scripts` | `[]` | JSON array of extra e2e scripts, run in order. Missing ones fail |
-| `e2e-extra-paths` | `["wrangler.jsonc", "site.vars.json"]` | JSON array of globs that also trigger e2e |
+| `e2e-ignore-paths` | linter, git hook, Renovate, editor and vitest config | JSON array of globs whose changes alone skip e2e |
+| `renovate-skip-e2e` | `true` | Skip e2e on Renovate PRs that only bump a devDependency outside `renovate-e2e-packages`. `false` opts out |
+| `renovate-e2e-packages` | astro, Playwright, axe-core | JSON array of devDependency names whose Renovate bumps still run e2e (`@scope/` matches a scope) |
 | `socket-scanner` | `false` | Run the bun install security scanner in CI |
+| `red-audits` | `false` | A failed a11y or Lighthouse audit turns its CI job red |
 | `playwright-install-with-deps` | `true` | Install Playwright system deps |
 
 PRs that only touch non-code paths skip the work but still pass. The required
 check is `validate / Validate`.
+
+**Bun:** pin it with `.bun-version` or `"packageManager": "bun@x.y.z"`.
+Without either, CI takes the latest Bun.
 
 **pnpm / aube:** pnpm reads its version from `packageManager` and Node from
 `engines`. aube must be pinned in `mise.toml` and reads Node from
@@ -88,12 +157,22 @@ check is `validate / Validate`.
 `next`, `live` and pushes to other branches. a11y and Lighthouse no longer run
 on PRs; add a `schedule` (below) to keep them.
 
-**Merge queue:** org-owned repos can use one (personal accounts can't). Set
-`mergeQueue: true` on the repo's ruleset config and add `merge_group:` to
-`on:` so the required check reports on the queue's branch.
+**Migrating from `e2e-extra-paths`:** drop it (GitHub rejects unknown inputs).
+e2e now runs for any code change outside `e2e-ignore-paths`, so paths you
+listed there are already covered.
 
-**Scheduled a11y and Lighthouse:** these run only on a schedule or a manual
-dispatch. The cron is the caller's; drop it to stop running them:
+**Merge queue:** GitHub offers one on public repos owned by an organization,
+and on private org repos only with Enterprise Cloud; personal repos and
+private repos on other plans can't use one. Set `mergeQueue: true` on the
+repo's entry in your fleet's rulesets config (in your infra repo, see
+[`CONTRIBUTING.md`](CONTRIBUTING.md#branch-rulesets)), apply it, and add
+`merge_group:` to your `on:` so the required check reports on the queue's
+branch.
+
+**Scheduled a11y and Lighthouse:** jobs run on a schedule or manual
+dispatch - by default a failed audit adds a warning annotation and
+a job-summary line, uploads the failure reports, and leaves the run green. Set
+`red-audits: true` to make a failed audit fail the run instead.
 
 ```yaml
 on:
@@ -182,15 +261,39 @@ each gated with an `if:`.
 
 `cloudflare-deploy` runs `wrangler deploy --env <env>`, so `preview` needs a
 matching env block in the wrangler config, or pass `command` to deploy previews
-another way. `netlify-deploy` makes `prod` a production deploy and anything else
-an alias deploy.
+another way.
 
 | Action | Inputs |
 |---|---|
-| `actions/cloudflare-deploy` | `env`, `cloudflare-api-token`, `cloudflare-account-id`, `migrate-d1`, `working-directory`, `command`, `token-fallback` ([details](CONTRIBUTING.md)) |
-| `actions/netlify-deploy` | `env`, `publish-dir`, `netlify-auth-token`, `netlify-site-id`, `working-directory`, `github-token` |
+| `actions/cloudflare-deploy` | `env`, `cloudflare-api-token`, `cloudflare-account-id`, `migrate-d1`, `package-manager` (runs the migration: `bun`, `pnpm` or `aube`), `working-directory`, `command`, `token-fallback` ([details](CONTRIBUTING.md)) |
+| `actions/cloudflare-preview` | `cloudflare-api-token`, `cloudflare-account-id`, `working-directory`, `name` (default `pr-<number>`), `secrets` (dotenv lines), `github-token`, `delete` |
 
-For Netlify, turn off the site's own GitHub auto-deploy or it will deploy twice.
+**Worker Previews:** `cloudflare-preview` runs `wrangler preview` per pull
+request and outputs `preview-url` and `deployment-url`. With `github-token`
+(and `pull-requests: write`) it keeps one PR comment with the URL, updated on
+later pushes. Add `closed` to `on.pull_request.types` so the cleanup runs, and
+skip forks, which get no secrets:
+
+```yaml
+  preview:
+    needs: validate
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@<sha> # <version>
+      # install and build, unless the event is 'closed'
+      - uses: taraxvoid/voidflow/actions/cloudflare-preview@<sha> # vX.Y.Z
+        with:
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          github-token: ${{ github.token }}
+          delete: ${{ github.event.action == 'closed' }}
+```
 
 ### npm package
 
@@ -198,7 +301,10 @@ For Netlify, turn off the site's own GitHub auto-deploy or it will deploy twice.
 bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
 ```
 
-Also published as `voidflow`. The bins need `bun` on `PATH`.
+Also published as `voidflow`. `check-licenses` and `unlighthouse-runner` need
+`bun` on `PATH`; the `voidflow` CLI (below) runs under Bun or Node 24+. Each
+npm tarball has a GitHub build attestation;
+[`RELEASING.md`](RELEASING.md#verify-an-npm-tarball) shows how to check one.
 
 **Lighthouse budgets** - runs [Unlighthouse](https://unlighthouse.dev/) against
 the build and fails on a missed budget. Options: `--dir` (default `dist`, use
@@ -214,6 +320,23 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 
 ```json
 "check:licenses": "check-licenses"
+```
+
+**Fleet tools** - the `voidflow` CLI, for branch rulesets and scoped
+Cloudflare deploy tokens as code (and `init`, see
+[Starting a repo](#starting-a-repo)). Run it with `bunx` or `npx` (Node 24+) from
+an org's infra repo that holds the fleet map (`--config`) and pins the version;
+no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
+also needs `CF_TOKEN_ADMIN`. Config shapes and flags are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental while
+they settle: the CLI's commands and flags and the `./cloudflare` and
+`./rulesets` exports may change in a minor
+([`STABILITY.md`](STABILITY.md#experimental)). Pin an exact version.
+
+```sh
+bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
+bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
+npx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts     # the same, under Node 24+
 ```
 
 **Playwright** - for Astro sites testing against `astro preview`. Needs
@@ -254,9 +377,84 @@ lefthook `ref` and annotated `justfile` versions.
 }
 ```
 
+### Agentic workflows
+
+A [gh-aw](https://github.github.com/gh-aw/) package in [`agentic/`](agentic/).
+Each workflow is Markdown you install into your repo and compile there, so it
+runs with your repo's permissions, secrets and (for private repos) private logs.
+Copilot is the default engine; pass `--engine` to `gh aw add` for another.
+
+```sh
+gh extension install github/gh-aw --pin v1.0.1
+gh aw add taraxvoid/voidflow/agentic@vX.Y.Z   # pin a release, like the workflows
+gh aw compile && git add .github/workflows && git commit -m "ci: add voidflow agentic workflows"
+```
+
+`gh aw update` brings later releases in and refuses a major without `--major`.
+Keep the locks honest with the reusable check, which recompiles with a pinned
+gh-aw and fails when a committed `.lock.yml` is stale or missing:
+
+```yaml
+  agentic-locks:
+    uses: taraxvoid/voidflow/.github/workflows/agentic-locks.yml@<sha> # vX.Y.Z
+```
+
+#### deps-review
+
+Reviews Renovate and Dependabot PRs beyond "CI passed". Two parts, so a
+compromised package can't talk its way to a merge:
+
+- **The agent** reads the release notes between the two versions, checks them
+  against what your code actually uses, and leaves a comment with the evidence
+  and a `deps:low-risk` or `deps:needs-you` label. It treats every upstream
+  string as untrusted and proposes a verdict; it never approves, merges,
+  pushes or posts the check.
+- **The gate job** (deterministic, runs after the agent) recomputes the hard
+  signals with the `deps-signals` bin, which reads no free text: update type
+  (patch or minor on 1.0+ only), a publisher who didn't publish or maintain the
+  previous version, added install scripts, dropped provenance, new
+  dependencies, action pins that don't match their tag, lockfile-only changes,
+  and any file outside `package.json`, lockfiles and workflows. It posts the
+  `deps-review` check on the exact commit the agent reviewed: green only when
+  the agent said low risk **and** `deps-signals` is clean. Anything it can't
+  verify is red.
+
+Human PRs never start it.
+
+Secrets: `COPILOT_GITHUB_TOKEN` (fine-grained PAT, Copilot Requests: Read) as
+an Actions secret, and the same value as a **Dependabot** secret, since runs
+Dependabot triggers only see Dependabot secrets.
+
+Roll it out in stages:
+
+1. **Shadow.** Install it and read its verdicts for a few weeks. Nothing merges.
+2. **Gate.** Make `deps-review` a required check, give human PRs a passing one
+   with the gate workflow, and let Renovate automerge low-risk updates:
+
+   ```yaml
+     deps-review-gate:
+       uses: taraxvoid/voidflow/.github/workflows/deps-review-gate.yml@<sha> # vX.Y.Z
+       permissions:
+         checks: write
+   ```
+
+   ```json
+   { "extends": ["github>taraxvoid/voidflow", "github>taraxvoid/voidflow:deps-review-automerge"] }
+   ```
+
+   The opt-in preset automerges patch, minor, digest and pin updates on 1.0+
+   versions through GitHub auto-merge, which
+   waits for every required check on the current head; a Renovate rebase is
+   re-reviewed before it can merge. Enable "Allow auto-merge" in the repo.
+   Dependabot can't automerge itself: run `gh pr merge --auto --squash` on its
+   PRs from a workflow, and the required check still gates the merge.
+3. **Wider.** Add update classes (0.x minors, grouped monorepos) only with
+   evidence from stage 2. Majors stay human.
+
 ### Git hooks
 
-Shared lefthook hooks. Each step runs your `package.json` script if it exists.
+Shared lefthook hooks for bun, pnpm or aube repos (aube is detected from
+`packageManager`). Each step runs your `package.json` script if it exists.
 
 - `pre-commit`: dependency guard, `format`, `lint:actions`, `check`,
   `test:unit`, plus `check:licenses` / `audit` when the lockfile changed

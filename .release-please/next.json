@@ -9,8 +9,10 @@
       "prerelease-type": "next",
       "skip-changelog": true,
       "extra-files": [
-        "jsr.json"
-      ]
+        "jsr.json",
+        { "type": "generic", "path": "agentic/workflows/deps-review.md" }
+      ],
+      "bump-minor-pre-major": true
     }
   }
 }

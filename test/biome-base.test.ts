@@ -7,7 +7,9 @@ const repo = new URL('..', import.meta.url).pathname
 const biome = join(repo, 'node_modules/.bin/biome')
 // Drop inherited GIT_* vars: inside a git hook GIT_DIR points at the real
 // repo, and `git init` would reinitialise it instead of the temp dir.
-const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
+const env = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
+)
 
 // A throwaway site that depends on voidflow and extends the base by package
 // name, the way a real site does.
@@ -28,8 +30,13 @@ function site(config: object, files: Record<string, string>): string {
 // shebang: on a fresh CI runner the first exec of the image's Node can take
 // over 5s and time the first test out.
 function check(dir: string, ...files: string[]) {
-    const proc = Bun.spawnSync([process.execPath, biome, 'check', ...files], { cwd: dir })
-    return { code: proc.exitCode, out: proc.stdout.toString() + proc.stderr.toString() }
+    const proc = Bun.spawnSync([process.execPath, biome, 'check', ...files], {
+        cwd: dir,
+    })
+    return {
+        code: proc.exitCode,
+        out: proc.stdout.toString() + proc.stderr.toString(),
+    }
 }
 
 const extendsBase = { extends: ['@taraxvoid/voidflow/biome'] }
@@ -60,7 +67,10 @@ describe('biome/base.json', () => {
     test('the .astro override matches files in the extending site', () => {
         const astro = "---\nimport { a } from './b'\n---\n\n<p>hi</p>\n"
         // Control: without the base's override, recommended flags the import.
-        const bare = site({ linter: { rules: { preset: 'recommended' } } }, { 'page.astro': astro })
+        const bare = site(
+            { linter: { rules: { preset: 'recommended' } } },
+            { 'page.astro': astro },
+        )
         expect(check(bare, 'page.astro').out).toContain('noUnusedImports')
 
         const dir = site(extendsBase, { 'page.astro': astro })
@@ -71,7 +81,10 @@ describe('biome/base.json', () => {
 
     test('a setting in the site overrides the base', () => {
         const dir = site(
-            { ...extendsBase, javascript: { formatter: { semicolons: 'always' } } },
+            {
+                ...extendsBase,
+                javascript: { formatter: { semicolons: 'always' } },
+            },
             { 'semi.ts': 'export const c = 1;\n' },
         )
         expect(check(dir, 'semi.ts').code).toBe(0)
@@ -90,15 +103,22 @@ function runIn(version: string | null, shell: string, script: string) {
         )
     }
     const proc = Bun.spawnSync([shell, '-c', script], { cwd: dir })
-    return { code: proc.exitCode, out: proc.stdout.toString() + proc.stderr.toString() }
+    return {
+        code: proc.exitCode,
+        out: proc.stdout.toString() + proc.stderr.toString(),
+    }
 }
 
 const read = (path: string) => Bun.file(join(repo, path)).text()
 
 describe('Biome 1.x warning', async () => {
-    const hook = Bun.YAML.parse(await read('lefthook/base.yml'))['pre-commit'].commands['biome-version']
+    const hook = (Bun.YAML.parse(await read('lefthook/base.yml')) as any)[
+        'pre-commit'
+    ].commands['biome-version']
     const hookScript = hook.run.replaceAll('{pm}', 'bun')
-    const ciStep = Bun.YAML.parse(await read('.github/workflows/site-ci.yml')).jobs.validate.steps.find(
+    const ciStep = (
+        Bun.YAML.parse(await read('.github/workflows/site-ci.yml')) as any
+    ).jobs.validate.steps.find(
         (s: { name?: string }) => s.name === 'Check Biome version',
     )
 

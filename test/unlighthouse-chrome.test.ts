@@ -31,6 +31,9 @@ describe('noSandboxWrapper', () => {
 
     test('handles chrome paths with spaces and quotes', async () => {
         const wrapper = noSandboxWrapper(fakeChrome("Google Chrome 'x'"))
-        expect(await run(wrapper, '--flag')).toEqual(['arg:--no-sandbox', 'arg:--flag'])
+        expect(await run(wrapper, '--flag')).toEqual([
+            'arg:--no-sandbox',
+            'arg:--flag',
+        ])
     })
 })

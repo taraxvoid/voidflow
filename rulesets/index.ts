@@ -1,14 +1,20 @@
 /**
- * Canonical branch rulesets for the voidflow fleet, as data.
+ * Branch rulesets as code: the fleet config shape and the plan logic.
  *
- * `scripts/apply-rulesets.ts` diffs these against what GitHub has and (with
- * --apply) creates/updates them. Rulesets that exist in a repo but are not
- * described here are reported, never deleted.
+ * The fleet itself (which repos, with which tiers and bypasses) lives in the
+ * org's infra repo and is passed with --config; this module only builds and
+ * checks it. `scripts/apply-rulesets.ts` diffs the result against what GitHub
+ * has and (with --apply) creates/updates it. Rulesets that exist in a repo but
+ * are not described in the config are reported, never deleted.
  */
 
 export type BypassActor = {
     actor_id: number | null
-    actor_type: 'RepositoryRole' | 'Integration' | 'DeployKey' | 'OrganizationAdmin'
+    actor_type:
+        | 'RepositoryRole'
+        | 'Integration'
+        | 'DeployKey'
+        | 'OrganizationAdmin'
     bypass_mode: 'always' | 'pull_request'
 }
 
@@ -23,7 +29,6 @@ export type Ruleset = {
 
 // Integration (GitHub App) ids as they appear in required status checks.
 export const GITHUB_ACTIONS = 15368
-export const NETLIFY = 13473
 
 // RepositoryRole 5 is "Admin".
 const ADMIN_VIA_PR: BypassActor = {
@@ -48,8 +53,6 @@ export type Tier = 'main' | 'next' | 'live' | 'prerelease' | 'maintenance'
 export type RepoConfig = {
     /** Tiers to manage; a tier not listed gets no ruleset. */
     tiers: Tier[]
-    /** Require Netlify's deploy status (sites deployed via Netlify). */
-    netlify: boolean
     /** Status check contexts from GitHub Actions. */
     checks: string[]
     /** Require CODEOWNERS review. */
@@ -60,9 +63,11 @@ export type RepoConfig = {
      */
     linearHistory: boolean
     /**
-     * Require a merge queue on main (default false). GitHub only offers
-     * merge queues on org-owned repos, so personal repos leave it off. The
-     * required checks must also run on `merge_group` (see site-ci.yml).
+     * Require a merge queue on main (default false). GitHub offers merge
+     * queues on public repos owned by an organization, and on private org
+     * repos only with Enterprise Cloud. Personal repos and private repos on
+     * other plans leave it off. The required checks must also run on
+     * `merge_group` (see site-ci.yml).
      */
     mergeQueue?: boolean
     /** Extra bypass actors per tier, on top of the tier defaults. */
@@ -94,26 +99,10 @@ const isRaw = (cfg: RepoConfig | RawConfig): cfg is RawConfig =>
 // Reported by both site-ci.yml and tool-ci.yml when the caller job is `validate`.
 const VALIDATE_CHECK = 'validate / Validate'
 
-// Sites run a single stable `main` that deploys to prod (previews on PRs).
-// Repos that still use next/live tiers list them explicitly.
-const site = (over: Partial<RepoConfig> = {}): RepoConfig => ({
-    tiers: ['main'],
-    netlify: true,
-    checks: [VALIDATE_CHECK],
-    codeowners: true,
-    linearHistory: true,
-    mergeQueue: false,
-    bypass: {},
-    aka: {},
-    retire: ['next (staging)', 'live (prod)'],
-    ...over,
-})
-
 // Tools (CLIs, libraries) run a single `main` validated by tool-ci.yml, with
-// no Netlify deploy and nothing to retire.
+// nothing to retire.
 export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     tiers: ['main'],
-    netlify: false,
     checks: [VALIDATE_CHECK],
     codeowners: true,
     linearHistory: true,
@@ -123,41 +112,6 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     retire: [],
     ...over,
 })
-
-// Integration bypasses are preserved as-is; they are believed to be the
-// Netlify/Cloudflare apps and come out once deploys run from Actions (see
-// the "Deploy via Actions" issue).
-// Private repos can be listed: on a plan without rulesets for private repos
-// the API returns 403 and the script skips them (see isPlanGated).
-export const REPOS: Record<string, RepoConfig> = {
-    'taraxvoid/queeromaha': site({
-        bypass: { main: [app(NETLIFY), app(85455)] },
-    }),
-    'taraxvoid/soundry': site({
-        bypass: { main: [app(85455), app(1236702)] },
-        aka: { main: ['main (live)'] },
-    }),
-    'taraxvoid/synthomaha': site({
-        bypass: { main: [app(85455)] },
-    }),
-    // Deploys to Cloudflare through voidflow, so no Netlify check and no
-    // deploy app bypass. Private, so skipped until rulesets are available.
-    'taraxvoid/taraxvoid.net': site({ netlify: false }),
-    'taraxvoid/voidflow': {
-        // main (stable), next (prerelease channel), release/* (maintenance).
-        // See RELEASING.md. Promotion next -> main uses merge commits, so no
-        // linear history here.
-        tiers: ['main', 'prerelease', 'maintenance'],
-        netlify: false,
-        checks: ['Validation', 'Unit tests'],
-        codeowners: false,
-        linearHistory: false,
-        mergeQueue: false,
-        bypass: {},
-        aka: { main: ['main/prod'] },
-        retire: [],
-    },
-}
 
 const NAMES: Record<Tier, string> = {
     main: 'main (prod)',
@@ -205,9 +159,6 @@ function bypassFor(tier: Tier, cfg: RepoConfig): BypassActor[] {
 
 export function build(tier: Tier, cfg: RepoConfig): Ruleset {
     const contexts = [
-        ...(cfg.netlify
-            ? [{ context: 'deploy/netlify', integration_id: NETLIFY }]
-            : []),
         ...cfg.checks.map((context) => ({
             context,
             integration_id: GITHUB_ACTIONS,
@@ -239,7 +190,9 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
                               grouping_strategy: 'ALLGREEN',
                               max_entries_to_build: 5,
                               max_entries_to_merge: 5,
-                              merge_method: cfg.linearHistory ? 'SQUASH' : 'MERGE',
+                              merge_method: cfg.linearHistory
+                                  ? 'SQUASH'
+                                  : 'MERGE',
                               min_entries_to_merge: 1,
                               min_entries_to_merge_wait_minutes: 0,
                           },
@@ -276,7 +229,7 @@ export function build(tier: Tier, cfg: RepoConfig): Ruleset {
 /** Every ruleset we want, per repo, with the names it may already have. */
 export function desired(
     repo: string,
-    fleet: Fleet = REPOS,
+    fleet: Fleet,
 ): Array<{ ruleset: Ruleset; aka: string[] }> {
     const cfg = fleet[repo]
     if (!cfg) throw new Error(`unknown repo ${repo}`)
@@ -299,10 +252,11 @@ const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
  * an unknown one (likely a typo) is an error. Returns the filled-in fleet.
  */
 export function checkFleet(x: unknown): Fleet {
-    const isObj = (v: unknown): v is Record<string, any> =>
+    const isObj = (v: unknown): v is Record<string, unknown> =>
         typeof v === 'object' && v !== null && !Array.isArray(v)
     const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
     const strList = (v: unknown) => Array.isArray(v) && v.every(isStr)
+    const field = (v: unknown, k: string) => (isObj(v) ? v[k] : undefined)
     if (!isObj(x)) throw new Error('config is not an object of repos')
     const errs: string[] = []
     const bad = (path: string, why: string) => errs.push(`${path}: ${why}`)
@@ -331,11 +285,14 @@ export function checkFleet(x: unknown): Fleet {
                     continue
                 }
                 if (!isStr(r.name)) bad(`${rs}.name`, 'missing')
-                if (!strList(r.conditions?.ref_name?.include))
+                if (!strList(field(field(r.conditions, 'ref_name'), 'include')))
                     bad(`${rs}.conditions.ref_name.include`, 'not a list')
                 if (!Array.isArray(r.bypass_actors))
                     bad(`${rs}.bypass_actors`, 'not a list')
-                if (!Array.isArray(r.rules) || !r.rules.every((u: any) => isStr(u?.type)))
+                if (
+                    !Array.isArray(r.rules) ||
+                    !r.rules.every((u) => isStr(field(u, 'type')))
+                )
                     bad(`${rs}.rules`, 'not a list')
             }
             continue
@@ -350,8 +307,12 @@ export function checkFleet(x: unknown): Fleet {
         for (const k of ['checks', 'retire'])
             if (Array.isArray(full[k]) && !strList(full[k]))
                 bad(`${at}.${k}`, 'not a list of names')
-        for (const [i, t] of (Array.isArray(full.tiers) ? full.tiers : []).entries()) {
-            if (!TIERS.includes(t)) bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
+        for (const [i, t] of (Array.isArray(full.tiers)
+            ? full.tiers
+            : []
+        ).entries()) {
+            if (!TIERS.includes(t))
+                bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
         }
         out[repo] = full as RepoConfig
     }
@@ -362,7 +323,10 @@ export function checkFleet(x: unknown): Fleet {
 // ---- normalisation + diff -------------------------------------------------
 
 /** Order-insensitive canonical form so GitHub's ordering never shows as drift. */
-export function normalise(r: Ruleset): unknown {
+export function normalise(
+    r: Ruleset,
+    opts: { bypass?: boolean } = {},
+): unknown {
     const sortBy = <T>(xs: T[], key: (x: T) => string) =>
         [...xs].sort((a, b) => key(a).localeCompare(key(b)))
     return {
@@ -370,20 +334,29 @@ export function normalise(r: Ruleset): unknown {
         target: r.target,
         enforcement: r.enforcement,
         conditions: r.conditions,
-        bypass_actors: sortBy(
-            r.bypass_actors,
-            (a) => `${a.actor_type}:${a.actor_id}:${a.bypass_mode}`,
-        ),
+        // GitHub omits bypass_actors from tokens without write access to the
+        // repo (the read-only drift App), so the caller can drop the field
+        // from both sides rather than report it as drift.
+        ...(opts.bypass === false
+            ? {}
+            : {
+                  bypass_actors: sortBy(
+                      r.bypass_actors,
+                      (a) => `${a.actor_type}:${a.actor_id}:${a.bypass_mode}`,
+                  ),
+              }),
         rules: sortBy(r.rules, (x) => x.type).map((rule) => {
-            const p = rule.parameters as any
+            const p = rule.parameters
             if (rule.type === 'required_status_checks' && p) {
                 return {
                     type: rule.type,
                     parameters: {
                         ...p,
                         required_status_checks: sortBy(
-                            p.required_status_checks,
-                            (c: any) => c.context,
+                            p.required_status_checks as Array<{
+                                context: string
+                            }>,
+                            (c: { context: string }) => c.context,
                         ),
                     },
                 }
@@ -401,11 +374,13 @@ export function normalise(r: Ruleset): unknown {
 }
 
 function flatten(v: unknown, path = ''): string[] {
-    if (v === null || typeof v !== 'object') return [`${path} = ${JSON.stringify(v)}`]
+    if (v === null || typeof v !== 'object')
+        return [`${path} = ${JSON.stringify(v)}`]
     const entries = Array.isArray(v)
         ? v.map((x, i) => [String(i), x] as const)
         : Object.entries(v as Record<string, unknown>)
-    if (entries.length === 0) return [`${path} = ${Array.isArray(v) ? '[]' : '{}'}`]
+    if (entries.length === 0)
+        return [`${path} = ${Array.isArray(v) ? '[]' : '{}'}`]
     return entries.flatMap(([k, x]) => flatten(x, path ? `${path}.${k}` : k))
 }
 
@@ -428,5 +403,34 @@ export function diff(have: unknown, want: unknown): string[] {
  * Other errors, including other 403s, still abort the run.
  */
 export function isPlanGated(message: string): boolean {
-    return /\(HTTP 403\)/.test(message) && /Upgrade to GitHub Pro|make this repository public/.test(message)
+    return (
+        /\(HTTP 403\)/.test(message) &&
+        /Upgrade to GitHub Pro|make this repository public/.test(message)
+    )
+}
+
+// ---- merge queue eligibility ------------------------------------------------
+
+/** True when a fleet entry asks for a merge queue (tiered or spelled out). */
+export function wantsMergeQueue(cfg: RepoConfig | RawConfig): boolean {
+    return isRaw(cfg)
+        ? cfg.rulesets.some((r) =>
+              r.rules.some((u) => u.type === 'merge_queue'),
+          )
+        : cfg.mergeQueue === true && cfg.tiers.includes('main')
+}
+
+/**
+ * Why GitHub cannot give this repo a merge queue, or null when it can or
+ * might. Merge queues need an organization owner; a private org repo also
+ * needs Enterprise Cloud, which `repos/<repo>` does not reveal, so that case
+ * is left to the API. Takes the fields of `gh api repos/<repo>` it reads.
+ */
+export function mergeQueueIneligible(info: {
+    owner: { type: string }
+    private: boolean
+}): string | null {
+    return info.owner.type === 'Organization'
+        ? null
+        : `owner is a ${info.owner.type}, and merge queues need an organization`
 }

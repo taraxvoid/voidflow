@@ -5,8 +5,10 @@
       "release-type": "node",
       "include-component-in-tag": false,
       "extra-files": [
-        "jsr.json"
-      ]
+        "jsr.json",
+        { "type": "generic", "path": "agentic/workflows/deps-review.md" }
+      ],
+      "bump-minor-pre-major": true
     }
   }
 }

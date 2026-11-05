@@ -1,138 +1,205 @@
-#!/usr/bin/env bun
 /**
- * Plan or apply the branch rulesets described in rulesets/index.ts.
+ * Plan or apply the branch rulesets of the fleet in a --config module (the
+ * org's infra repo), shaped as in rulesets/index.ts. Every invocation takes
+ * --config <module>, e.g. ../infra/rulesets.ts:
  *
- *   bun scripts/apply-rulesets.ts                  # plan (read-only) for every repo
- *   bun scripts/apply-rulesets.ts --repo soundry   # plan for one repo
- *   bun scripts/apply-rulesets.ts --check          # plan, exit 1 on drift (for CI)
- *   bun scripts/apply-rulesets.ts --apply          # create/update to match
- *   bun scripts/apply-rulesets.ts --apply --prune  # ...and delete retired rulesets
- *   bun scripts/apply-rulesets.ts --config ../infra/rulesets.ts   # another fleet's config
+ *   voidflow rulesets --config <m>                              # plan (read-only) for every repo
+ *   voidflow rulesets --config <m> --repo soundry               # plan for one repo
+ *   voidflow rulesets --config <m> --check                      # plan, exit 1 on drift (for CI)
+ *   voidflow rulesets --config <m> --apply                      # create/update to match
+ *   voidflow rulesets --config <m> --apply --prune              # ...and delete retired rulesets
  *
- * The config is REPOS in rulesets/index.ts unless --config names a module
- * exporting `REPOS` (or a default) of the same shape, where a repo may also
- * spell out its rulesets in full (see RawConfig and scripts/lib/config.ts).
+ * The module exports `REPOS` (or a default); a repo may be tiered or spell
+ * out its rulesets in full (see RawConfig and scripts/lib/config.ts).
  *
  * Uses the `gh` CLI for auth, so run it as someone with admin on the repos.
  * Rulesets not described in the config are reported and left alone; only the
  * ones a repo lists under `retire` are deleted, and only with --prune.
  * Private repos on a plan without rulesets (GitHub answers 403) are skipped
  * and reported, never counted as drift, so --check stays green for them.
+ * A repo asking for a merge queue it can't have (not org-owned) fails the run
+ * up front, before anything is written.
  */
-import { parseArgs } from 'node:util'
-import { loadOrExit } from './lib/config.ts'
+
 import {
-    REPOS as BUILTIN,
     checkFleet,
     desired,
     diff,
     isPlanGated,
+    mergeQueueIneligible,
     normalise,
     type Ruleset,
+    wantsMergeQueue,
 } from '../rulesets/index.ts'
+import { parseOrExit } from './lib/args.ts'
+import { loadOrExit } from './lib/config.ts'
+import { capture } from './lib/proc.ts'
 
-const { values } = parseArgs({
-    options: {
-        apply: { type: 'boolean', default: false },
-        prune: { type: 'boolean', default: false },
-        check: { type: 'boolean', default: false },
-        repo: { type: 'string' },
-        config: { type: 'string' },
-    },
-})
+const OPTIONS = {
+    apply: { type: 'boolean', default: false },
+    prune: { type: 'boolean', default: false },
+    check: { type: 'boolean', default: false },
+    repo: { type: 'string' },
+    config: { type: 'string' },
+} as const
 
-const REPOS = await loadOrExit(values.config, BUILTIN, checkFleet)
+const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
 
-async function gh(args: string[], body?: unknown): Promise<any> {
-    const proc = Bun.spawn(['gh', 'api', ...args], {
-        stdin: body === undefined ? 'ignore' : new Blob([JSON.stringify(body)]),
-        stdout: 'pipe',
-        stderr: 'pipe',
-    })
-    const [out, err, code] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-    ])
+  --config <module>  the fleet map: a module exporting REPOS (or a default)
+  --repo <name>      only this repo (owner/name, or just name)
+  --check            exit 1 on drift
+  --apply            create and update rulesets to match
+  --prune            with --apply, also delete the rulesets listed under retire`
+
+async function gh<T = unknown>(args: string[], body?: unknown): Promise<T> {
+    const { code, out, err } = await capture(
+        ['gh', 'api', ...args],
+        body === undefined ? undefined : JSON.stringify(body),
+    )
     if (code !== 0) throw new Error(`gh api ${args.join(' ')}: ${err || out}`)
-    return out ? JSON.parse(out) : null
+    return (out ? JSON.parse(out) : null) as T
 }
 
-const repos = Object.keys(REPOS).filter(
-    (r) => !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
-)
-if (repos.length === 0) {
-    console.error(`no repo matches --repo ${values.repo}`)
-    process.exit(2)
-}
+/** `prog` names the command in the --help usage. */
+export async function main(argv: string[], prog = 'voidflow rulesets') {
+    const { values } = parseOrExit(argv, { options: OPTIONS }, usage(prog))
 
-let drift = 0
-const gated: string[] = []
+    const REPOS = await loadOrExit(values.config, checkFleet)
 
-for (const repo of repos) {
-    console.log(`\n== ${repo}`)
-    let listed: Array<{ id: number; name: string }>
-    try {
-        listed = await gh([`repos/${repo}/rulesets`])
-    } catch (e) {
-        if (!isPlanGated(String(e))) throw e
-        gated.push(repo)
-        console.log('  skipped: private repo on a plan without rulesets (HTTP 403)')
-        continue
+    const repos = Object.keys(REPOS).filter(
+        (r) =>
+            !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
+    )
+    if (repos.length === 0) {
+        console.error(`no repo matches --repo ${values.repo}`)
+        process.exit(2)
     }
-    const matched = new Set<number>()
 
-    for (const { ruleset, aka } of desired(repo, REPOS)) {
-        const hit = listed.find(
-            (r) => r.name === ruleset.name || aka.includes(r.name),
-        )
-        if (!hit) {
-            drift++
-            console.log(`+ create "${ruleset.name}"`)
-            if (values.apply) {
-                await gh(['-X', 'POST', `repos/${repo}/rulesets`, '--input', '-'], ruleset)
-                console.log('  created')
-            }
-            continue
-        }
-        matched.add(hit.id)
-        const have: Ruleset = await gh([`repos/${repo}/rulesets/${hit.id}`])
-        const lines = diff(normalise(have), normalise(ruleset))
-        if (lines.length === 0) {
-            console.log(`  ok "${ruleset.name}"`)
-            continue
-        }
-        drift++
-        console.log(`~ update "${hit.name}" (id ${hit.id})`)
-        for (const l of lines) console.log(`    ${l}`)
-        if (values.apply) {
-            await gh(
-                ['-X', 'PUT', `repos/${repo}/rulesets/${hit.id}`, '--input', '-'],
-                ruleset,
+    // Fail before any write if a repo wants a merge queue GitHub can't give it.
+    const refused: string[] = []
+    for (const repo of repos.filter((r) => wantsMergeQueue(REPOS[r]))) {
+        let info: { owner: { type: string }; private: boolean }
+        try {
+            info = await gh<typeof info>([`repos/${repo}`])
+        } catch (e) {
+            // Without access to the repo, the rulesets call below reports it.
+            console.log(
+                `note ${repo}: merge queue eligibility not checked (${e})`,
             )
-            console.log('  updated')
-        }
-    }
-
-    const retire = new Set(REPOS[repo].retire)
-    for (const r of listed.filter((r) => !matched.has(r.id))) {
-        if (!retire.has(r.name)) {
-            console.log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
             continue
         }
-        drift++
-        console.log(`- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`)
-        if (values.apply && values.prune) {
-            await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
-            console.log('  deleted')
+        const why = mergeQueueIneligible(info)
+        if (why) refused.push(`${repo}: mergeQueue: true, but ${why}`)
+        else if (info.private)
+            console.log(
+                `note ${repo}: private org repo; a merge queue needs Enterprise Cloud`,
+            )
+    }
+    if (refused.length > 0) {
+        console.error(refused.join('\n'))
+        process.exit(2)
+    }
+
+    let drift = 0
+    const gated: string[] = []
+
+    for (const repo of repos) {
+        console.log(`\n== ${repo}`)
+        let listed: Array<{ id: number; name: string }>
+        try {
+            listed = await gh<typeof listed>([`repos/${repo}/rulesets`])
+        } catch (e) {
+            if (!isPlanGated(String(e))) throw e
+            gated.push(repo)
+            console.log(
+                '  skipped: private repo on a plan without rulesets (HTTP 403)',
+            )
+            continue
+        }
+        const matched = new Set<number>()
+
+        for (const { ruleset, aka } of desired(repo, REPOS)) {
+            const hit = listed.find(
+                (r) => r.name === ruleset.name || aka.includes(r.name),
+            )
+            if (!hit) {
+                drift++
+                console.log(`+ create "${ruleset.name}"`)
+                if (values.apply) {
+                    await gh(
+                        [
+                            '-X',
+                            'POST',
+                            `repos/${repo}/rulesets`,
+                            '--input',
+                            '-',
+                        ],
+                        ruleset,
+                    )
+                    console.log('  created')
+                }
+                continue
+            }
+            matched.add(hit.id)
+            const have = await gh<Ruleset>([`repos/${repo}/rulesets/${hit.id}`])
+            // A read-only token gets no bypass_actors back; compare the rest.
+            const bypass = Array.isArray(have.bypass_actors)
+            if (!bypass)
+                console.log(
+                    `  note "${ruleset.name}": bypass_actors not visible to this token, not compared`,
+                )
+            const lines = diff(
+                normalise(have, { bypass }),
+                normalise(ruleset, { bypass }),
+            )
+            if (lines.length === 0) {
+                console.log(`  ok "${ruleset.name}"`)
+                continue
+            }
+            drift++
+            console.log(`~ update "${hit.name}" (id ${hit.id})`)
+            for (const l of lines) console.log(`    ${l}`)
+            if (values.apply) {
+                await gh(
+                    [
+                        '-X',
+                        'PUT',
+                        `repos/${repo}/rulesets/${hit.id}`,
+                        '--input',
+                        '-',
+                    ],
+                    ruleset,
+                )
+                console.log('  updated')
+            }
+        }
+
+        const retire = new Set(REPOS[repo].retire)
+        for (const r of listed.filter((r) => !matched.has(r.id))) {
+            if (!retire.has(r.name)) {
+                console.log(
+                    `? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`,
+                )
+                continue
+            }
+            drift++
+            console.log(
+                `- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`,
+            )
+            if (values.apply && values.prune) {
+                await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
+                console.log('  deleted')
+            }
         }
     }
-}
 
-if (gated.length > 0) {
-    console.log(`\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`)
+    if (gated.length > 0) {
+        console.log(
+            `\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`,
+        )
+    }
+    console.log(
+        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
+    )
+    if (values.check && drift > 0) process.exit(1)
 }
-console.log(
-    `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
-)
-if (values.check && drift > 0) process.exit(1)

@@ -1,30 +1,30 @@
 import { describe, expect, test } from 'bun:test'
 import {
     checkRepos,
-    fromWrangler,
-    resolveTarget,
-    routeHost,
-    zoneOf,
-    RENEW_DAYS,
-    WORKERS_ROUTES_WRITE,
-    WORKERS_SCRIPTS_WRITE,
     expiresOn,
+    fromWrangler,
+    type Policy,
     plan,
     policies,
-    repoAccounts,
-    retireTargets,
-    tokenName,
+    RENEW_DAYS,
     type RepoConfig,
-    type Policy,
+    repoAccounts,
+    resolveTarget,
+    retireTargets,
+    routeHost,
     type Token,
+    tokenName,
+    WORKERS_ROUTES_WRITE,
+    WORKERS_SCRIPTS_WRITE,
+    zoneOf,
 } from '../cloudflare/tokens.ts'
 
 // A fleet like taraxvoid/infra's cf-tokens.ts (the real one lives there).
 const REPOS: Record<string, RepoConfig> = {
-    'taraxvoid/transbot': {
+    'taraxvoid/example_project': {
         account: 'c6a445a43a801403a8e33968be40c19c',
         envs: [{ env: 'prod' }],
-        retire: ['transbot-deploy-token'],
+        retire: ['example_project-deploy-token'],
     },
     'taraxvoid/taraxvoid.net': {
         account: 'c6a445a43a801403a8e33968be40c19c',
@@ -32,30 +32,33 @@ const REPOS: Record<string, RepoConfig> = {
         retire: [],
     },
 }
-const transbot = REPOS['taraxvoid/transbot']
-const prod = transbot.envs[0]
-const ids = { scriptTag: 'tag123', zoneIds: { 'transbot.net': 'zone456' } }
-const acct = `com.cloudflare.api.account.${transbot.account}`
+const example_project = REPOS['taraxvoid/example_project']
+const prod = example_project.envs[0]
+const ids = {
+    scriptTag: 'tag123',
+    zoneIds: { 'example_project.net': 'zone456' },
+}
+const acct = `com.cloudflare.api.account.${example_project.account}`
 const now = new Date('2026-10-15T12:00:00Z')
 
 const token = (over: Partial<Token> = {}): Token => ({
     id: 't1',
-    name: tokenName('taraxvoid/transbot', 'prod'),
-    policies: policies(transbot, prod, ids),
+    name: tokenName('taraxvoid/example_project', 'prod'),
+    policies: policies(example_project, prod, ids),
     expires_on: expiresOn(now),
     ...over,
 })
 
 describe('policies', () => {
     test('scope the editor groups to the one Worker by tag', () => {
-        const [worker] = policies(transbot, prod, ids)
+        const [worker] = policies(example_project, prod, ids)
         expect(worker.resources).toEqual({
             [acct]: { 'com.cloudflare.edge.worker.script.tag123': '*' },
         })
     })
 
     test('grant routes write on the configured zones only, never zone.*', () => {
-        const zone = policies(transbot, prod, ids)[1]
+        const zone = policies(example_project, prod, ids)[1]
         expect(zone.permission_groups).toEqual([{ id: WORKERS_ROUTES_WRITE }])
         // Same shape the dashboard produces for "Specific zone".
         expect(zone.resources).toEqual({
@@ -67,10 +70,10 @@ describe('policies', () => {
     test('no account-wide grant unless a fallback is recorded', () => {
         const wide = (ps: Policy[]) =>
             ps.filter((p) => p.resources[acct] === '*')
-        expect(wide(policies(transbot, prod, ids))).toEqual([])
+        expect(wide(policies(example_project, prod, ids))).toEqual([])
         const fb = wide(
             policies(
-                transbot,
+                example_project,
                 {
                     ...prod,
                     fallback: { reason: 'custom-domain', since: '2026-10-15' },
@@ -85,10 +88,10 @@ describe('policies', () => {
 
     test('a zone without an id fails rather than widening', () => {
         expect(() =>
-            policies(transbot, prod, { scriptTag: 't', zoneIds: {} }, [
-                'transbot.net',
+            policies(example_project, prod, { scriptTag: 't', zoneIds: {} }, [
+                'example_project.net',
             ]),
-        ).toThrow('transbot.net')
+        ).toThrow('example_project.net')
     })
 
     test('every env has a unique token name', () => {
@@ -149,7 +152,7 @@ describe('expiresOn', () => {
 })
 
 describe('plan', () => {
-    const want = policies(transbot, prod, ids)
+    const want = policies(example_project, prod, ids)
 
     test('creates a missing token', () => {
         expect(plan(want, [], now).map((a) => a.kind)).toEqual(['create'])
@@ -192,9 +195,30 @@ describe('plan', () => {
         )
     })
 
+    // A token's value can't be read back, so a token whose GitHub secret is
+    // gone (repo recreated, secret deleted) is useless: replace it.
+    test('rotates when the GitHub secret is missing', () => {
+        const [a] = plan(want, [token({ id: 'old' })], now, {
+            secretMissing: true,
+        })
+        expect(a.kind).toBe('rotate')
+        expect(a.kind === 'rotate' && a.reason).toBe('secret not set')
+        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
+            'old',
+        ])
+    })
+
+    test('still creates when both the token and the secret are missing', () => {
+        expect(
+            plan(want, [], now, { secretMissing: true }).map((a) => a.kind),
+        ).toEqual(['create'])
+    })
+
     test('a rotation replaces the token it found', () => {
         const [a] = plan(want, [token({ id: 'old' })], now, { rotate: true })
-        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual(['old'])
+        expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
+            'old',
+        ])
     })
 
     // Either duplicate may be the one in the GitHub secret (a stop between
@@ -270,7 +294,7 @@ describe('checkRepos', () => {
             '"nope".envs: empty',
             '"a/b".account: not a 32-hex account id',
             '"a/b".envs[0].worker: not a name',
-            '"a/b".envs[0].secret: \'env\' or \'repo\'',
+            "\"a/b\".envs[0].secret: 'env' or 'repo'",
             '"a/b".envs[0].wranglr: unknown field',
             '"a/b".envs[3].secret: a second \'repo\' env',
             '"a/b".envs[0].zones: not a list of zone names',
@@ -289,12 +313,11 @@ describe('checkRepos', () => {
     })
 })
 
-
 describe('wrangler config', () => {
-    // Shaped like transbot's real config.
+    // Shaped like example_project's real config.
     const single = {
-        name: 'transbot',
-        routes: [{ pattern: 'transbot.net', custom_domain: true }],
+        name: 'example_project',
+        routes: [{ pattern: 'example_project.net', custom_domain: true }],
     }
     const multi = {
         name: 'site',
@@ -314,7 +337,12 @@ describe('wrangler config', () => {
             staging: {},
         },
     }
-    const zones = ['example.com', 'other.biz', 'transbot.net', 'sub.other.biz']
+    const zones = [
+        'example.com',
+        'other.biz',
+        'example_project.net',
+        'sub.other.biz',
+    ]
 
     test('routeHost strips scheme, path, port and a leading wildcard', () => {
         expect(routeHost('*.example.com/api/*')).toBe('example.com')
@@ -331,8 +359,8 @@ describe('wrangler config', () => {
 
     test('top level when there is no env block named like the env', () => {
         expect(fromWrangler(single, 'prod')).toEqual({
-            worker: 'transbot',
-            hosts: ['transbot.net'],
+            worker: 'example_project',
+            hosts: ['example_project.net'],
             zones: [],
         })
     })
@@ -372,15 +400,19 @@ describe('wrangler config', () => {
     test('a route outside every account zone fails instead of being dropped', () => {
         expect(() =>
             resolveTarget({ env: 'prod' }, single, ['example.com']),
-        ).toThrow('transbot.net')
+        ).toThrow('example_project.net')
     })
 
     test("the env's own worker and zones win; zones: [] grants none", () => {
         expect(
             resolveTarget({ env: 'preview', zones: [] }, single, zones),
-        ).toEqual({ worker: 'transbot', zones: [] })
+        ).toEqual({ worker: 'example_project', zones: [] })
         expect(
-            resolveTarget({ env: 'x', worker: 'w', zones: ['a.org'] }, undefined, []),
+            resolveTarget(
+                { env: 'x', worker: 'w', zones: ['a.org'] },
+                undefined,
+                [],
+            ),
         ).toEqual({ worker: 'w', zones: ['a.org'] })
     })
 })

@@ -183,7 +183,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: 2.1.0
+          VERSION: 2.3.0 # renovate: datasource=github-releases depName=jdx/jactionlint
 
       - name: Setup uv
         if: steps.changes.outputs.workflows == 'true'

@@ -4,7 +4,10 @@ name: Validation
 # for self-hosted runners pass `runner`
 # Callers need pull_request/workflow_dispatch triggers, plus push on main
 # so direct pushes are validated too, and merge_group if the repo uses a
-# merge queue (the required check must report there or the queue stalls)
+# merge queue (the required check must report there or the queue stalls),
+# and must grant `contents: read` and `pull-requests: read`.
+# Callers may add `closed` to the pull_request types (e.g. to clean up PR
+# previews); validation skips closed events, so they need no guard of their own.
 # e2e:all runs on ready (non-draft) PRs, merge_group and push; the heavy,
 # non-blocking a11y and lighthouse suites run only on schedule and
 # workflow_dispatch. The cron lives in the caller; remove it to stop paying.
@@ -55,8 +58,8 @@ on:
       e2e-scripts:
         description: >
           JSON array of extra package.json script names to run, in order,
-          after the built-in e2e tiers whenever e2e-relevant files changed,
-          e.g. '["test:e2e", "test:e2e:gtm"]'. Unlike the built-in tiers, a
+          after the built-in e2e tiers whenever e2e-relevant files changed
+          (see e2e-ignore-paths), e.g. '["test:e2e", "test:e2e:gtm"]'. Unlike the built-in tiers, a
           listed script that is missing fails the job.
         type: string
         default: '[]'
@@ -66,13 +69,32 @@ on:
           scripts already build, to avoid building twice.
         type: boolean
         default: true
-      e2e-extra-paths:
+      e2e-ignore-paths:
         description: >
-          JSON array of extra globs that count as e2e-relevant changes, on top
-          of the built-in src/, public/, test/, scripts/, astro/playwright
-          config, package.json, lockfile, tsconfig.json and workflows.
+          JSON array of globs for files that can't affect an e2e run. A pull
+          request or push runs the e2e tiers when it changes any code (see
+          code-paths) outside these. The default skips linter, git hook,
+          Renovate, editor and unit-test-runner config. A path missing here
+          only costs an extra e2e run, so list only files you're sure of.
         type: string
-        default: '["wrangler.jsonc", "site.vars.json"]'
+        default: '["biome.json", "biome.jsonc", "lefthook.yml", "renovate.json", "vitest.config.*", "unlighthouse.config.*", ".editorconfig", ".gitignore", ".gitleaksignore", ".vscode/**", ".cursor/**", ".claude/**", ".agents/**"]'
+      renovate-skip-e2e:
+        description: >
+          Skip e2e on Renovate pull requests whose only effect is a
+          devDependency bump outside renovate-e2e-packages (an unrelated
+          linter or formatter, say). Opt out with false. Any other change keeps
+          e2e: a runtime dependency, a package.json field other than
+          devDependencies, a lockfile-only change, or a file outside
+          package.json and the lockfile that e2e cares about.
+        type: boolean
+        default: true
+      renovate-e2e-packages:
+        description: >
+          JSON array of devDependency names whose Renovate bumps still run e2e
+          (see renovate-skip-e2e). An entry ending in `/` matches a whole
+          scope, e.g. '@playwright/'.
+        type: string
+        default: '["astro", "@astrojs/", "playwright", "playwright-core", "@playwright/", "@axe-core/"]'
       build-env:
         description: >
           JSON object of environment variables for the build step, e.g.
@@ -90,18 +112,14 @@ on:
           ignored for pnpm.
         type: boolean
         default: false
-    secrets:
-      GITLEAKS_LICENSE:
+      red-audits:
         description: >
-          Deprecated and unused: the scan now uses the OSS gitleaks binary, which needs
-          no license. Kept so existing callers that pass it don't fail. Formerly: optional
-          gitleaks Organization license (gitleaks.io). Cross-account
-          `secrets: inherit` doesn't reliably forward repo secrets to a
-          reusable workflow owned by a different account, so callers on a
-          gitleaks Organization plan should pass this explicitly via
-          `secrets: { GITLEAKS_LICENSE: secrets.GITLEAKS_LICENSE }` (wrapped
-          in the caller's own expression syntax).
-        required: false
+          Report a failed accessibility or Lighthouse audit (test:e2e:a11y,
+          test:e2e:lighthouse, run on schedule and workflow_dispatch) as a
+          warning and a job-summary line instead of failing the run. The
+          failure reports still upload. Set false to make a red audit fail CI.
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -111,7 +129,7 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: read # paths-filter lists PR files through the API
 
 jobs:
   validate:
@@ -121,7 +139,7 @@ jobs:
     env:
       PM: ${{ inputs.package-manager }}
       LOCKFILE: ${{ inputs.package-manager == 'bun' && 'bun.lock' || 'pnpm-lock.yaml' }}
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && github.event.action != 'closed'
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -157,42 +175,78 @@ jobs:
             *) echo "::error::package-manager must be 'bun', 'pnpm' or 'aube', got '$PM'" >&2; exit 1 ;;
           esac
 
+      # e2e relevance is code-paths minus e2e-ignore-paths, so a changed file
+      # nobody listed runs e2e rather than skipping it.
+      - name: Build e2e filter
+        id: e2e-filter
+        run: echo "globs=$(jq -cn --argjson code "$CODE" --argjson ignore "$IGNORE" '$code + ($ignore | map("!" + ltrimstr("!")))')" >> "$GITHUB_OUTPUT"
+        env:
+          CODE: ${{ inputs.code-paths }}
+          IGNORE: ${{ inputs.e2e-ignore-paths }}
+
+      # Same filter minus package.json and the lockfile: a Renovate PR that
+      # changes anything else e2e cares about never skips e2e.
+      - name: Build e2e filter (without manifests)
+        id: e2e-other-filter
+        run: echo "globs=$(jq -cn --argjson e2e "$E2E" --arg lock "$LOCKFILE" '$e2e + ["!package.json", "!" + $lock]')" >> "$GITHUB_OUTPUT"
+        env:
+          E2E: ${{ steps.e2e-filter.outputs.globs }}
+
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: changes
         # merge_group and schedule have no meaningful diff base; they always run e2e.
         if: github.event_name != 'merge_group' && github.event_name != 'schedule'
         with:
-          # Lets `code` below use `!` excludes; the other filters have none, so
-          # they match as before.
+          # Lets `code` and `e2e` below use `!` excludes; the other filters have
+          # none, so they match as before.
           predicate-quantifier: some-with-excludes
           filters: |
             code: ${{ inputs.code-paths }}
+            e2e: ${{ steps.e2e-filter.outputs.globs }}
+            e2e-other: ${{ steps.e2e-other-filter.outputs.globs }}
             lockfile:
               - '${{ env.LOCKFILE }}'
             scripts:
               - 'scripts/**'
             workflows:
               - '.github/workflows/**'
-            e2e_relevant:
-              - 'src/**'
-              - 'public/**'
-              - 'test/**'
-              - 'scripts/**'
-              - 'astro.config.*'
-              - 'playwright.config.*'
-              - 'package.json'
-              - '${{ env.LOCKFILE }}'
-              - 'tsconfig.json'
-              - '.github/workflows/**'
-            e2e_extra: ${{ inputs.e2e-extra-paths }}
+
+      # Renovate PRs that only bump a devDependency outside renovate-e2e-packages
+      # skip e2e. Conservative: anything unclear (not a merge commit, lockfile
+      # only, other e2e-relevant files, any package.json change beyond those
+      # devDependencies) leaves e2e on. Compares package.json at the merge
+      # commit's first parent (the base) with the merge commit itself.
+      - name: Renovate e2e opt-out
+        id: renovate-skip
+        if: inputs.renovate-skip-e2e && github.event_name == 'pull_request' && steps.changes.outputs.e2e == 'true'
+        shell: bash
+        run: |
+          case "$AUTHOR" in *renovate*"[bot]") ;; *) exit 0 ;; esac
+          [[ "$OTHER" == true ]] && exit 0
+          git rev-parse -q --verify HEAD^2 >/dev/null || exit 0
+          git diff --quiet HEAD^1 HEAD -- package.json && exit 0
+          # keep only the devDependencies that still need e2e; the rest must be
+          # identical before and after for the bump to count as tooling-only
+          # shellcheck disable=SC2016 # jq program, not shell
+          norm='if has("devDependencies") then .devDependencies |= with_entries(select(.key as $k | any($pkgs[]; . as $p | $k == $p or ($p | endswith("/") and ($k | startswith($p)))))) else . end'
+          before=$(git show HEAD^1:package.json | jq -S --argjson pkgs "$PACKAGES" "$norm") || exit 0
+          after=$(git show HEAD:package.json | jq -S --argjson pkgs "$PACKAGES" "$norm") || exit 0
+          if [[ "$before" == "$after" ]]; then
+            echo "::notice::Renovate devDependency bump outside renovate-e2e-packages; skipping e2e."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          OTHER: ${{ steps.changes.outputs.e2e-other }}
+          PACKAGES: ${{ inputs.renovate-e2e-packages }}
 
       - name: Resolve e2e relevance
         id: e2e
-        run: echo "relevant=$([[ "$ALWAYS" == true || "$MAIN" == true || "$EXTRA" == true ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: echo "relevant=$([[ "$SKIP" != true && ("$ALWAYS" == true || "$CHANGED" == true) ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
         env:
           ALWAYS: ${{ contains(fromJSON('["merge_group", "schedule", "workflow_dispatch"]'), github.event_name) }}
-          MAIN: ${{ steps.changes.outputs.e2e_relevant }}
-          EXTRA: ${{ steps.changes.outputs.e2e_extra }}
+          CHANGED: ${{ steps.changes.outputs.e2e }}
+          SKIP: ${{ steps.renovate-skip.outputs.skip }}
 
       - name: Decide whether to validate
         id: decide
@@ -211,12 +265,10 @@ jobs:
       - name: Setup Bun
         if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'bun'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        # XXX holding off on pinning here until 1.4.x is stable
-        # in caller: specify version in package.json or .bun-version to override
-        # falls through to 'latest' if not provided
-        # with:
-          # bun-version: 1.4.2
-          # bun-version-file: ".bun-version"
+        # The caller pins Bun (STABILITY.md). Without a .bun-version, setup-bun
+        # reads package.json `packageManager`, then `engines.bun`, then takes latest.
+        with:
+          bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
 
       - name: Setup pnpm
         if: steps.decide.outputs.validate == 'true' && inputs.package-manager == 'pnpm'
@@ -351,7 +403,17 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: 2.1.0
+          VERSION: 2.3.0 # renovate: datasource=github-releases depName=jdx/jactionlint
+
+      - name: Setup uv
+        if: steps.decide.outputs.validate == 'true' && steps.changes.outputs.workflows == 'true'
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Audit CI workflows
+        if: steps.decide.outputs.validate == 'true' && steps.changes.outputs.workflows == 'true'
+        run: uvx zizmor@1.30.1 --min-severity medium .github
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Check Biome version
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.lint == 'true'
@@ -425,14 +487,33 @@ jobs:
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_all != 'true' && steps.scripts.outputs.test_e2e_full == 'true' && steps.e2e.outputs.relevant == 'true')
         run: '"$PM" run test:e2e:full'
 
-      # Heavy and non-blocking in spirit: only on the caller's cron or a manual run.
+      # a11y and lighthouse checks run on a cron / manually
+      # Set 'red-audits' = true to have them fail CI instead of warning
       - name: E2E - Accessibility
+        id: a11y
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_a11y == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
+        continue-on-error: ${{ !inputs.red-audits }}
         run: '"$PM" run test:e2e:a11y'
 
       - name: E2E - Lighthouse
+        id: lighthouse
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.test_e2e_lighthouse == 'true' && steps.e2e.outputs.relevant == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
+        continue-on-error: ${{ !inputs.red-audits }}
         run: '"$PM" run test:e2e:lighthouse'
+
+      - name: Report informational audit failures
+        if: steps.decide.outputs.validate == 'true' && (steps.a11y.outcome == 'failure' || steps.lighthouse.outcome == 'failure')
+        env:
+          A11Y: ${{ steps.a11y.outcome }}
+          LIGHTHOUSE: ${{ steps.lighthouse.outcome }}
+        run: |
+          for audit in "Accessibility:${A11Y}" "Lighthouse:${LIGHTHOUSE}"; do
+            name=${audit%%:*}
+            if [ "${audit#*:}" = failure ]; then
+              echo "::warning title=E2E - ${name} failed::The ${name} audit failed. It is informational (red-audits not set), so the run stays green; see that step's log and the ci-reports artifact."
+              echo "- :warning: **E2E - ${name}** failed (informational; see the step log and the \`ci-reports\` artifact)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       - name: E2E - Extra scripts
         if: steps.decide.outputs.validate == 'true' && steps.e2e.outputs.relevant == 'true' && inputs.e2e-scripts != '[]'
@@ -444,7 +525,7 @@ jobs:
           SCRIPTS: ${{ inputs.e2e-scripts }}
 
       - name: Upload failure reports
-        if: steps.decide.outputs.validate == 'true' && failure()
+        if: steps.decide.outputs.validate == 'true' && (failure() || steps.a11y.outcome == 'failure' || steps.lighthouse.outcome == 'failure')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-reports

@@ -3,7 +3,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 # renovate: datasource=github-releases depName=zizmorcore/zizmor
 zizmor_version := "1.30.1"
 # renovate: datasource=github-releases depName=jdx/jactionlint
-jactionlint_version := "2.1.0"
+jactionlint_version := "2.3.0"
 # renovate: datasource=pypi depName=check-jsonschema
 check_jsonschema_version := "0.38.2"
 
@@ -11,10 +11,30 @@ check_jsonschema_version := "0.38.2"
 default:
     just --list
 
-# Lint all
+# The TypeScript steps live in package.json (lint, format, check, test), named
+# like a voidflow caller's, so tool-ci and lefthook/base.yml conventions hold
+# here too. The recipes below wrap them with the repo-only checks.
 
-lint: gitleaks lint-actions lint-shell lint-workflows
-    
+# Every linter: Biome, workflows, action schemas, action shell, secrets
+lint: lint-ts lint-workflows lint-actions lint-shell gitleaks
+
+# Biome lint and format check (`bun run lint`)
+lint-ts:
+    bun run lint
+
+# Apply Biome fixes and formatting
+format:
+    bun run format
+
+# Typecheck with tsc
+check:
+    bun run check
+
+# Unit tests
+test:
+    bun run test
+
+# Scan the git history for secrets
 gitleaks:
     gitleaks detect --source . --redact -v --no-banner
 
@@ -71,11 +91,15 @@ security-fix:
     uvx zizmor@{{ zizmor_version }} --min-severity medium --fix=all .
 
 # Run everything ci.yml runs, locally
-validate: lint security
+validate: lint check test security
 
 # Full local dry-run of ci.yml via act (needs Docker running)
 dry-run *ARGS:
     act pull_request -W .github/workflows/ci.yml {{ ARGS }}
+
+# Regenerate templates/ (the files `voidflow init` writes) from their sources
+templates:
+    bun scripts/build-templates.ts
 
 # Install lefthook git hooks
 install-hooks:
@@ -94,20 +118,20 @@ doctor:
 # was run, not this directory. See scripts/lib/config.ts.
 config_base := "env VOIDFLOW_CONFIG_BASE=" + quote(invocation_directory())
 
-# Show how each repo's branch rulesets differ from rulesets/index.ts (read-only)
-rulesets-plan *args:
-    {{ config_base }} bun scripts/apply-rulesets.ts {{ args }}
+# The rulesets-* and cf-tokens-* recipes all take --config <module>: the fleet
+# map in your infra repo (e.g. taraxvoid/infra), whose justfile wraps these.
 
-# Create/update branch rulesets to match rulesets/index.ts (needs repo admin via gh)
+# Show how each repo's branch rulesets differ from the config (read-only; needs gh)
+rulesets-plan *args:
+    {{ config_base }} bun scripts/cli.ts rulesets {{ args }}
+
+# Create/update branch rulesets to match the config (needs repo admin via gh)
 rulesets-apply *args:
-    {{ config_base }} bun scripts/apply-rulesets.ts --apply {{ args }}
+    {{ config_base }} bun scripts/cli.ts rulesets --apply {{ args }}
 
 # CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
 cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
-cf_tokens := cf_admin + " " + config_base + " bun scripts/cf-tokens.ts"
-
-# The cf-tokens-* recipes all take --config <module>: the fleet map in your
-# infra repo (e.g. taraxvoid/infra), whose justfile wraps these.
+cf_tokens := cf_admin + " " + config_base + " bun scripts/cli.ts cf-tokens"
 
 # Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
 cf-tokens-plan *args:
@@ -121,7 +145,7 @@ cf-tokens-apply *args:
 cf-tokens-groups *args:
     {{ cf_tokens }} --groups {{ args }}
 
-# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts transbot prod bunx wrangler deploy`
+# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts example_project prod bunx wrangler deploy`
 cf-tokens-try config repo env +cmd:
     {{ cf_tokens }} --config {{ quote(config) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 

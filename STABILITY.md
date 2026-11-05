@@ -17,16 +17,35 @@ Covered by this policy:
 | Reusable workflows (`site-ci.yml`, `tool-ci.yml`, `upload-sarif.yml`) | Workflow paths, inputs and their defaults, secrets, outputs, job names (the required check `validate / Validate`), artifact names (`voidflow-sarif`) |
 | Composite actions (`actions/*`) | Action paths, inputs and their defaults, outputs |
 | `package.json` scripts CI runs | The script names CI looks for (`lint`, `test:unit`, `test:e2e:all`, ...) and when each runs |
-| npm / JSR package | `exports` entries and their options (`./playwright`, `./biome`), `bin` names and their flags |
+| npm / JSR package | The `./playwright` and `./biome` exports and their options; the `unlighthouse-runner`, `check-licenses` and `deps-signals` bins and their flags (`deps-signals`: its JSON output and which signals it flags) |
 | Biome config (`./biome`) | The rules and formatter options it sets on top of Biome's own (Biome itself is your dependency, so its upgrades are yours) |
 | Renovate preset (`default.json`) | That it validates and extends `config:best-practices` |
 | lefthook config (`lefthook/base.yml`) | Its path, the hooks it installs, the script names each runs |
 | Supported runtimes | Package managers (`bun`, `pnpm`, `aube`), minimum Bun and Node versions, runner OS (`ubuntu-latest`) |
+| Agentic package (`agentic/`) | Workflow paths in `aw.yml`, their triggers, the check run and label names posted (`deps-review`, `deps:low-risk`, `deps:needs-you`), the safe outputs the model may use, and what each verdict means. The `deps-review` check is posted by a deterministic job, never by the model |
+| Reusable workflows for agentic repos (`agentic-locks.yml`, `deps-review-gate.yml`) | Paths, inputs and defaults, job names, required permissions |
+| Opt-in Renovate preset (`deps-review-automerge.json`) | The update types it automerges and that it merges through GitHub auto-merge |
 | Tags | `vX.Y.Z` release tags, the floating `vN` major tag |
 
 Not covered: anything the README doesn't document, `scripts/` other than the
-published bins, `rulesets/`, `cloudflare/`, tests, this repo's own CI, and
+covered bins, the experimental parts below, tests, this repo's own CI, and
 prerelease `-next.N` versions, which may change or break between prereleases.
+
+### Experimental
+
+The fleet tools are published but outside this policy: the `voidflow` CLI
+(`cf-tokens`, `rulesets`, `init`, and the starter files `init` writes) and the `./cloudflare` and `./rulesets` exports that
+type their configs. They're new and still settling, so their commands, flags
+and config shapes may change in any minor. The changelog says when. Pin an
+exact version where you run them.
+
+**Pinning your runtime is your job.** voidflow sets minimums, not versions.
+Pin Bun with a `.bun-version` file or `"packageManager": "bun@x.y.z"` in
+`package.json` (`tool-ci.yml` also honors a `bun` entry in `mise.toml`).
+Without a pin, CI installs the latest Bun, so a Bun release can change your CI
+without a voidflow release. pnpm and aube versions already come from
+`packageManager`, and Node from `engines`/`volta` or `devEngines.runtime` (see
+the README).
 
 ## What each release may change
 
@@ -62,6 +81,26 @@ to catch is a patch (e.g. gitleaks wasn't scanning a path it should have).
 Every major ships a migration section in its release notes: each change, why,
 and the exact edit a caller makes.
 
+### Agentic workflow prompts
+
+An agentic workflow's prompt is behavior, even when its frontmatter doesn't
+change, so prompt edits are versioned like code:
+
+- **Patch:** wording, typos, clearer instructions that don't change a verdict.
+- **Minor:** new evidence or checks, a stricter verdict (something that was low
+  risk can become needs-you), a new optional label or comment section.
+- **Major:** a looser verdict (something that needed you can merge on its own),
+  renamed or removed check runs or labels (they break required checks and
+  filters), new write powers (approve, merge, push), letting the model post a
+  gating check, or a new default engine. Loosening `deps-signals` (flagging
+  less) is a major too.
+
+A model reads text an attacker can write (release notes, package metadata),
+so prompt wording is never the control. The `deps-review` check comes from a
+deterministic job: green only when the model says low risk *and*
+`deps-signals`, which reads no free text, finds nothing. The model can only
+make the gate stricter.
+
 ## Deprecation
 
 Nothing in the public surface is removed in the release that deprecates it.
@@ -79,9 +118,9 @@ When a rename would otherwise fail silently, the old name stays as a stub
 that fails loudly with the fix, as `lefthook/site.yml` does for
 `lefthook/base.yml`.
 
-Inputs that become no-ops are kept and accepted until the next major (GitHub
-rejects unknown inputs, so removing one breaks every caller that passes it), as
-`GITLEAKS_LICENSE` is in `site-ci.yml`.
+Inputs and secrets that become no-ops are kept and accepted until the next
+major (GitHub rejects unknown ones, so removing one breaks every caller that
+passes it).
 
 ## Security exception
 

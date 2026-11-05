@@ -1,25 +1,56 @@
 import { describe, expect, test } from 'bun:test'
 import {
-    NETLIFY,
-    REPOS,
+    app,
     build,
     checkFleet,
     desired,
     diff,
-    isPlanGated,
-    normalise,
-    tool,
     type Fleet,
+    isPlanGated,
+    mergeQueueIneligible,
+    normalise,
     type RepoConfig,
     type Ruleset,
+    tool,
+    wantsMergeQueue,
 } from '../rulesets/index.ts'
 
+// A fleet as an infra repo would pass it with --config: sites on a
+// single main, and voidflow's release channels.
+const site = (over: Partial<RepoConfig> = {}) =>
+    tool({ retire: ['next (staging)', 'live (prod)'], ...over })
+const REPOS: Record<string, RepoConfig> = {
+    'taraxvoid/queeromaha': site({
+        bypass: { main: [app(85455)] },
+    }),
+    'taraxvoid/soundry': site({
+        bypass: { main: [app(85455), app(1236702)] },
+        aka: { main: ['main (live)'] },
+    }),
+    'taraxvoid/synthomaha': site({ bypass: { main: [app(85455)] } }),
+    'taraxvoid/taraxvoid.net': site(),
+    'taraxvoid/voidflow': {
+        tiers: ['main', 'prerelease', 'maintenance'],
+        checks: ['Validation', 'Unit tests'],
+        codeowners: false,
+        linearHistory: false,
+        mergeQueue: false,
+        bypass: {},
+        aka: { main: ['main/prod'] },
+        retire: [],
+    },
+}
+
+const statusCheckParams = <T>(r: ReturnType<typeof build>): T => {
+    const rule = r.rules.find((x) => x.type === 'required_status_checks')
+    if (!rule) throw new Error('required_status_checks rule missing')
+    return rule.parameters as T
+}
+
 const statusChecks = (r: ReturnType<typeof build>) =>
-    (
-        r.rules.find((x) => x.type === 'required_status_checks')?.parameters as {
-            required_status_checks: Array<{ context: string }>
-        }
-    ).required_status_checks.map((c) => c.context)
+    statusCheckParams<{
+        required_status_checks: Array<{ context: string }>
+    }>(r).required_status_checks.map((c) => c.context)
 
 describe('canonical rulesets', () => {
     test('main is squash-only with linear history and no unreviewed bypass', () => {
@@ -29,27 +60,31 @@ describe('canonical rulesets', () => {
         expect(pr?.parameters?.allowed_merge_methods).toEqual(['squash'])
         expect(
             r.bypass_actors.filter(
-                (a) => a.actor_type === 'RepositoryRole' && a.bypass_mode === 'always',
+                (a) =>
+                    a.actor_type === 'RepositoryRole' &&
+                    a.bypass_mode === 'always',
             ),
         ).toEqual([])
     })
 
     test('every tier of every site requires the reusable workflow check name', () => {
         for (const repo of Object.keys(REPOS)) {
-            for (const { ruleset } of desired(repo)) {
+            for (const { ruleset } of desired(repo, REPOS)) {
                 const names = statusChecks(ruleset)
                 // Bare "Validate" / "pr-checks" never reports from site-ci.yml.
                 expect(names).not.toContain('Validate')
                 expect(names).not.toContain('pr-checks')
             }
         }
-        expect(statusChecks(build('live', REPOS['taraxvoid/soundry']))).toContain(
-            'validate / Validate',
-        )
+        expect(
+            statusChecks(build('live', REPOS['taraxvoid/soundry'])),
+        ).toContain('validate / Validate')
     })
 
     test('live has no bypass actors unless configured', () => {
-        expect(build('live', REPOS['taraxvoid/synthomaha']).bypass_actors).toEqual([])
+        expect(
+            build('live', REPOS['taraxvoid/synthomaha']).bypass_actors,
+        ).toEqual([])
     })
 
     test('sites manage only main and retire next/live', () => {
@@ -61,16 +96,27 @@ describe('canonical rulesets', () => {
     })
 
     test('merge queue is only required where configured (org-owned repos)', () => {
-        const queueOf = (cfg: RepoConfig) => build('main', cfg).rules.find((x) => x.type === 'merge_queue')
-        for (const repo of Object.keys(REPOS)) expect(queueOf(REPOS[repo])).toBeUndefined()
-        expect(queueOf(tool({ mergeQueue: true }))?.parameters?.merge_method).toBe('SQUASH')
-        expect(queueOf(tool({ mergeQueue: true, linearHistory: false }))?.parameters?.merge_method).toBe('MERGE')
-        expect(build('next', tool({ mergeQueue: true })).rules.some((x) => x.type === 'merge_queue')).toBe(false)
+        const queueOf = (cfg: RepoConfig) =>
+            build('main', cfg).rules.find((x) => x.type === 'merge_queue')
+        for (const repo of Object.keys(REPOS))
+            expect(queueOf(REPOS[repo])).toBeUndefined()
+        expect(
+            queueOf(tool({ mergeQueue: true }))?.parameters?.merge_method,
+        ).toBe('SQUASH')
+        expect(
+            queueOf(tool({ mergeQueue: true, linearHistory: false }))
+                ?.parameters?.merge_method,
+        ).toBe('MERGE')
+        expect(
+            build('next', tool({ mergeQueue: true })).rules.some(
+                (x) => x.type === 'merge_queue',
+            ),
+        ).toBe(false)
     })
 
     test('names within a repo are unique', () => {
         for (const repo of Object.keys(REPOS)) {
-            const names = desired(repo).map((d) => d.ruleset.name)
+            const names = desired(repo, REPOS).map((d) => d.ruleset.name)
             expect(new Set(names).size).toBe(names.length)
         }
     })
@@ -81,8 +127,24 @@ describe('normalise', () => {
         const want = build('main', REPOS['taraxvoid/queeromaha'])
         const have = structuredClone(want)
         const pr = have.rules.find((x) => x.type === 'pull_request')
-        if (pr?.parameters) pr.parameters.dismissal_restriction = { enabled: false, allowed_actors: [] }
+        if (pr?.parameters)
+            pr.parameters.dismissal_restriction = {
+                enabled: false,
+                allowed_actors: [],
+            }
         expect(diff(normalise(have), normalise(want))).toEqual([])
+    })
+})
+
+describe('normalise without bypass_actors', () => {
+    test('a read-only API response (no bypass_actors) neither throws nor drifts when bypass is skipped', () => {
+        const want = build('main', REPOS['taraxvoid/queeromaha'])
+        const have = structuredClone(want) as Partial<Ruleset>
+        delete have.bypass_actors
+        const opts = { bypass: false }
+        expect(
+            diff(normalise(have as Ruleset, opts), normalise(want, opts)),
+        ).toEqual([])
     })
 })
 
@@ -99,11 +161,18 @@ describe('diff', () => {
         const a = build('next', REPOS['taraxvoid/synthomaha'])
         const b = structuredClone(a)
         ;(
-            b.rules.find((x) => x.type === 'required_status_checks')!.parameters as any
-        ).required_status_checks[1].context = 'pr-checks'
+            b.rules.find((x) => x.type === 'required_status_checks')!
+                .parameters as any
+        ).required_status_checks[0].context = 'pr-checks'
         const lines = diff(normalise(b), normalise(a))
-        expect(lines.some((l) => l.startsWith('- ') && l.includes('pr-checks'))).toBe(true)
-        expect(lines.some((l) => l.startsWith('+ ') && l.includes('validate / Validate'))).toBe(true)
+        expect(
+            lines.some((l) => l.startsWith('- ') && l.includes('pr-checks')),
+        ).toBe(true)
+        expect(
+            lines.some(
+                (l) => l.startsWith('+ ') && l.includes('validate / Validate'),
+            ),
+        ).toBe(true)
     })
 })
 
@@ -115,14 +184,18 @@ describe('voidflow release channels', () => {
 
     test('main drops linear history and allows merge commits for promotion, no rebase', () => {
         const r = build('main', cfg)
-        expect(r.rules.map((x) => x.type)).not.toContain('required_linear_history')
+        expect(r.rules.map((x) => x.type)).not.toContain(
+            'required_linear_history',
+        )
         expect(mergeMethods(r)).toEqual(['squash', 'merge'])
     })
 
     test('sites are byte-for-byte unchanged: linear history, squash only', () => {
         for (const repo of ['queeromaha', 'soundry', 'synthomaha']) {
             const r = build('main', REPOS[`taraxvoid/${repo}`])
-            expect(r.rules.map((x) => x.type)).toContain('required_linear_history')
+            expect(r.rules.map((x) => x.type)).toContain(
+                'required_linear_history',
+            )
             expect(mergeMethods(r)).toEqual(['squash'])
         }
     })
@@ -132,7 +205,9 @@ describe('voidflow release channels', () => {
         expect(r.name).toBe('next (prerelease)')
         expect(r.conditions.ref_name.include).toEqual(['refs/heads/next'])
         expect(mergeMethods(r)).toEqual(['squash', 'merge'])
-        expect(r.rules.map((x) => x.type)).not.toContain('required_linear_history')
+        expect(r.rules.map((x) => x.type)).not.toContain(
+            'required_linear_history',
+        )
     })
 
     test('maintenance protects release/* and is squash only', () => {
@@ -149,15 +224,16 @@ describe('voidflow release channels', () => {
             expect(types).toContain('deletion')
             expect(types).toContain('non_fast_forward')
             expect(statusChecks(r)).toEqual(['Validation', 'Unit tests'])
-            expect(r.bypass_actors.some((a) => a.actor_type === 'DeployKey')).toBe(false)
+            expect(
+                r.bypass_actors.some((a) => a.actor_type === 'DeployKey'),
+            ).toBe(false)
         }
     })
 
     test('only maintenance may be created without passing checks (a fresh release/N.x has none)', () => {
         const create = (tier: 'main' | 'prerelease' | 'maintenance') =>
-            (
-                build(tier, cfg).rules.find((x) => x.type === 'required_status_checks')
-                    ?.parameters as { do_not_enforce_on_create: boolean }
+            statusCheckParams<{ do_not_enforce_on_create: boolean }>(
+                build(tier, cfg),
             ).do_not_enforce_on_create
         expect(create('maintenance')).toBe(true)
         expect(create('main')).toBe(false)
@@ -181,7 +257,11 @@ describe('raw rulesets (another fleet, --config)', () => {
             },
         },
         bypass_actors: [
-            { actor_id: null, actor_type: 'OrganizationAdmin', bypass_mode: 'always' },
+            {
+                actor_id: null,
+                actor_type: 'OrganizationAdmin',
+                bypass_mode: 'always',
+            },
         ],
         rules: [
             { type: 'deletion' },
@@ -204,7 +284,7 @@ describe('raw rulesets (another fleet, --config)', () => {
 
     test('tiered repos in the same fleet still build from tiers', () => {
         expect(desired('taraxvoid/voidflow', fleet)).toEqual(
-            desired('taraxvoid/voidflow'),
+            desired('taraxvoid/voidflow', REPOS),
         )
     })
 
@@ -219,15 +299,15 @@ describe('raw rulesets (another fleet, --config)', () => {
         expect(diff(normalise(fromApi), normalise(live))).toEqual([])
     })
 
-    test('checkFleet accepts the built-in config and raw rulesets', () => {
+    test('checkFleet accepts tiered and raw rulesets', () => {
         expect(checkFleet(REPOS)).toEqual(REPOS)
         expect(checkFleet(fleet)).toEqual(fleet)
     })
 
     test("checkFleet fills a tiered repo's missing fields from tool()", () => {
         expect(checkFleet({ 'a/b': {} })['a/b']).toEqual(tool())
-        expect(checkFleet({ 'a/b': { netlify: true } })['a/b']).toEqual(
-            tool({ netlify: true }),
+        expect(checkFleet({ 'a/b': { codeowners: false } })['a/b']).toEqual(
+            tool({ codeowners: false }),
         )
     })
 
@@ -237,7 +317,10 @@ describe('raw rulesets (another fleet, --config)', () => {
             checkFleet({
                 nope: { rulesets: [], retire: [] },
                 'a/b': { rulesets: [{ name: '', rules: {} }] },
-                'a/c': { ...REPOS['taraxvoid/voidflow'], tiers: ['main', 'dev'] },
+                'a/c': {
+                    ...REPOS['taraxvoid/voidflow'],
+                    tiers: ['main', 'dev'],
+                },
                 'a/d': { checks: 'validate', codeowners: 'yes' },
                 'a/e': { linearhistory: false },
             })
@@ -266,7 +349,6 @@ describe('tool()', () => {
     test('is a main-only repo requiring tool-ci and CODEOWNERS', () => {
         expect(cfg).toEqual({
             tiers: ['main'],
-            netlify: false,
             checks: ['validate / Validate'],
             codeowners: true,
             linearHistory: true,
@@ -277,7 +359,7 @@ describe('tool()', () => {
         })
     })
 
-    test('main ruleset: no Netlify check, code owner review, squash only', () => {
+    test('main ruleset: code owner review, squash only', () => {
         const r = build('main', cfg)
         expect(statusChecks(r)).toEqual(['validate / Validate'])
         const pr = r.rules.find((x) => x.type === 'pull_request')
@@ -287,10 +369,11 @@ describe('tool()', () => {
 })
 
 describe('taraxvoid.net', () => {
-    test('deploys via voidflow: no Netlify check and no app bypass', () => {
+    test('deploys via voidflow: no app bypass', () => {
         const r = build('main', REPOS['taraxvoid/taraxvoid.net'])
-        expect(JSON.stringify(r)).not.toContain(String(NETLIFY))
-        expect(r.bypass_actors.some((a) => a.actor_type === 'Integration')).toBe(false)
+        expect(
+            r.bypass_actors.some((a) => a.actor_type === 'Integration'),
+        ).toBe(false)
         expect(statusChecks(r)).toEqual(['validate / Validate'])
     })
 })
@@ -305,7 +388,62 @@ describe('isPlanGated', () => {
     })
 
     test('does not swallow other errors, including other 403s', () => {
-        expect(isPlanGated('gh: Resource not accessible by integration (HTTP 403)')).toBe(false)
+        expect(
+            isPlanGated(
+                'gh: Resource not accessible by integration (HTTP 403)',
+            ),
+        ).toBe(false)
         expect(isPlanGated('gh: Not Found (HTTP 404)')).toBe(false)
+    })
+})
+
+describe('wantsMergeQueue', () => {
+    test('is true only for a tiered repo with mergeQueue on main', () => {
+        expect(wantsMergeQueue(tool({ mergeQueue: true }))).toBe(true)
+        expect(wantsMergeQueue(tool())).toBe(false)
+        expect(
+            wantsMergeQueue(tool({ mergeQueue: true, tiers: ['next'] })),
+        ).toBe(false)
+    })
+
+    test('sees a merge_queue rule in a spelled-out ruleset', () => {
+        const rs = (type: string) =>
+            ({
+                name: 'main',
+                target: 'branch',
+                enforcement: 'active',
+                conditions: { ref_name: { include: [], exclude: [] } },
+                bypass_actors: [],
+                rules: [{ type }],
+            }) as Ruleset
+        expect(
+            wantsMergeQueue({ rulesets: [rs('merge_queue')], retire: [] }),
+        ).toBe(true)
+        expect(
+            wantsMergeQueue({ rulesets: [rs('deletion')], retire: [] }),
+        ).toBe(false)
+    })
+})
+
+describe('mergeQueueIneligible', () => {
+    test('refuses a user-owned repo', () => {
+        expect(
+            mergeQueueIneligible({ owner: { type: 'User' }, private: false }),
+        ).toMatch(/User.*organization/)
+    })
+
+    test('allows org repos, public or private (the plan is left to the API)', () => {
+        expect(
+            mergeQueueIneligible({
+                owner: { type: 'Organization' },
+                private: false,
+            }),
+        ).toBeNull()
+        expect(
+            mergeQueueIneligible({
+                owner: { type: 'Organization' },
+                private: true,
+            }),
+        ).toBeNull()
     })
 })

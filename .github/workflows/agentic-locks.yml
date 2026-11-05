@@ -1,0 +1,43 @@
+name: agentic locks
+
+# Reusable. Recompiles the caller's agentic workflows (.github/workflows/*.md)
+# with a pinned gh-aw and fails when a committed .lock.yml is stale or missing,
+# so the lock that runs is always the one the reviewed Markdown produces.
+
+on:
+  workflow_call:
+    inputs:
+      gh-aw-version:
+        description: gh-aw release to compile with. Match the version you compile with locally.
+        type: string
+        default: v1.0.1
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Agentic locks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install gh-aw
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_AW_VERSION: ${{ inputs.gh-aw-version }}
+        run: gh extension install github/gh-aw --pin "$GH_AW_VERSION"
+      - name: Compile (strict) and fail on a stale or missing lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh aw compile --strict
+          if ! git diff --quiet -- .github/workflows \
+            || [ -n "$(git ls-files --others --exclude-standard .github/workflows)" ]; then
+            git status --porcelain .github/workflows
+            echo "::error::Agentic workflow locks are stale or missing. Run 'gh aw compile' with gh-aw $GH_AW_VERSION and commit the .lock.yml files."
+            exit 1
+          fi
+        shell: bash

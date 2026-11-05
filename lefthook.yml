@@ -1,6 +1,19 @@
+# Hooks call the same `just` recipes as a manual run (see the justfile).
+# Biome is the one exception: it fixes only the staged files.
 pre-commit:
   parallel: true
   commands:
+    biome:
+      glob: "*.{ts,mts,mjs,json}"
+      run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --diagnostic-level=error {staged_files}
+      stage_fixed: true
+    templates:
+      glob: "{package.json,mise.toml,bunfig.toml,scripts/build-templates.ts,scripts/lib/template-format.ts,scripts/unlighthouse/unlighthouse.config.example.ts}"
+      run: just templates
+      stage_fixed: true
+    typecheck:
+      glob: "{*.{ts,mts},tsconfig.json,package.json}"
+      run: just check
     jactionlint:
       glob: ".github/workflows/*.{yml,yaml}"
       run: just lint-workflows
@@ -26,4 +39,4 @@ pre-push:
       # tests that run git in temp repos can't touch this one.
       run: |
         unset $(git rev-parse --local-env-vars)
-        bun test
+        just test

@@ -102,10 +102,7 @@ export const RENEW_DAYS = 14
 //
 // WORKER_EDITOR is the set the dashboard produced for "Specified Workers >
 // Editor" (2026-10, twice). It mixes the new Workers role groups with legacy
-// ones (KV, R2, Scripts, Account Settings). Shaken down 2026-10 on transbot
-// (custom domain, zone grant only) and taraxvoid.net (KV bound by id, two
-// zones): both deployed with no fallback. Whether every group is needed is
-// untested.
+// ones (KV, R2, Scripts, Account Settings).
 export const WORKER_EDITOR = [
     'cb142f7fbc3540f0bade0cbe75f606dc',
     'bdbcd690c763475a985e8641dddc09f7',
@@ -123,8 +120,7 @@ export const WORKERS_ROUTES_WRITE = '28f4b596e7d643029c524985477ae49a'
 /** Legacy account-wide Workers Scripts Write, used only for a fallback. */
 export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
 
-export const tokenName = (repo: string, env: string) =>
-    `${TAG}:${repo}:${env}`
+export const tokenName = (repo: string, env: string) => `${TAG}:${repo}:${env}`
 
 /** The account an env's Worker and token live in. */
 export const envAccount = (cfg: RepoConfig, env: EnvConfig) =>
@@ -236,8 +232,7 @@ const ENV_FIELDS = [
 export function checkRepos(x: unknown): Record<string, RepoConfig> {
     const isObj = (v: unknown): v is Record<string, unknown> =>
         typeof v === 'object' && v !== null && !Array.isArray(v)
-    const isStr = (v: unknown): v is string =>
-        typeof v === 'string' && v !== ''
+    const isStr = (v: unknown): v is string => typeof v === 'string' && v !== ''
     const isAcct = (v: unknown) =>
         typeof v === 'string' && /^[0-9a-f]{32}$/.test(v)
     if (!isObj(x)) throw new Error('config is not an object of repos')
@@ -250,12 +245,16 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
             bad(at, 'not an object')
             continue
         }
-        if (!isAcct(cfg.account)) bad(`${at}.account`, 'not a 32-hex account id')
+        if (!isAcct(cfg.account))
+            bad(`${at}.account`, 'not a 32-hex account id')
         if (!Array.isArray(cfg.envs)) bad(`${at}.envs`, 'not a list')
         else if (cfg.envs.length === 0) bad(`${at}.envs`, 'empty')
         const seen = new Set<string>()
         let repoScoped = 0
-        for (const [i, env] of (Array.isArray(cfg.envs) ? cfg.envs : []).entries()) {
+        for (const [i, env] of (Array.isArray(cfg.envs)
+            ? cfg.envs
+            : []
+        ).entries()) {
             const e = `${at}.envs[${i}]`
             if (!isObj(env)) {
                 bad(e, 'not an object')
@@ -264,14 +263,23 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
             for (const k of Object.keys(env))
                 if (!ENV_FIELDS.includes(k)) bad(`${e}.${k}`, 'unknown field')
             if (!isStr(env.env)) bad(`${e}.env`, 'missing')
-            else if (seen.has(env.env)) bad(`${e}.env`, `duplicate "${env.env}"`)
+            else if (seen.has(env.env))
+                bad(`${e}.env`, `duplicate "${env.env}"`)
             else seen.add(env.env)
-            if (env.secret !== undefined && env.secret !== 'env' && env.secret !== 'repo')
+            if (
+                env.secret !== undefined &&
+                env.secret !== 'env' &&
+                env.secret !== 'repo'
+            )
                 bad(`${e}.secret`, "'env' or 'repo'")
             if (env.secret === 'repo' && ++repoScoped === 2)
-                bad(`${e}.secret`, "a second 'repo' env would overwrite the first's secret")
+                bad(
+                    `${e}.secret`,
+                    "a second 'repo' env would overwrite the first's secret",
+                )
             for (const k of ['worker', 'wrangler', 'wranglerEnv'])
-                if (env[k] !== undefined && !isStr(env[k])) bad(`${e}.${k}`, 'not a name')
+                if (env[k] !== undefined && !isStr(env[k]))
+                    bad(`${e}.${k}`, 'not a name')
             if (
                 env.zones !== undefined &&
                 (!Array.isArray(env.zones) || !env.zones.every(isStr))
@@ -290,7 +298,10 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
                 bad(`${e}.fallback`, 'needs reason and since')
         }
         if (!Array.isArray(cfg.retire)) bad(`${at}.retire`, 'not a list')
-        for (const [i, r] of (Array.isArray(cfg.retire) ? cfg.retire : []).entries()) {
+        for (const [i, r] of (Array.isArray(cfg.retire)
+            ? cfg.retire
+            : []
+        ).entries()) {
             if (!(isStr(r) || (isObj(r) && isAcct(r.account) && isStr(r.name))))
                 bad(`${at}.retire[${i}]`, 'a name or { account, name }')
         }
@@ -319,8 +330,7 @@ export function policies(
             permission_groups: WORKER_EDITOR.map((id) => ({ id })),
             resources: {
                 [acct]: {
-                    [`com.cloudflare.edge.worker.script.${ids.scriptTag}`]:
-                        '*',
+                    [`com.cloudflare.edge.worker.script.${ids.scriptTag}`]: '*',
                 },
             },
         },
@@ -401,7 +411,7 @@ export function plan(
     want: Policy[],
     have: Token[],
     now: Date,
-    opts: { rotate?: boolean } = {},
+    opts: { rotate?: boolean; secretMissing?: boolean } = {},
 ): Action[] {
     if (have.length === 0) return [{ kind: 'create', reason: 'missing' }]
     if (have.length > 1) {
@@ -414,6 +424,11 @@ export function plan(
         ]
     }
     const [token] = have
+    // The value can't be read back from Cloudflare, so a token nothing holds
+    // is replaced, whatever its expiry.
+    if (opts.secretMissing) {
+        return [{ kind: 'rotate', tokens: [token], reason: 'secret not set' }]
+    }
     const left = token.expires_on ? daysLeft(token.expires_on, now) : null
     if (opts.rotate || left === null || left < RENEW_DAYS) {
         // The replacement is created with the wanted policies, so a rotation

@@ -11,13 +11,22 @@ bun install    # prepare script runs `lefthook install`
 
 `just validate` runs everything CI (`.github/workflows/ci.yml`) runs:
 
-- `just lint-workflows`: jactionlint, including shellcheck on workflow `run:` steps
-- `just lint-actions`: check-jsonschema on workflows and `actions/**/action.yml`
-- `just lint-shell`: shellcheck on `run:` steps in composite actions
-  (`scripts/shellcheck-actions.ts`)
+- `just lint`: every linter below, plus gitleaks
+  - `just lint-ts`: Biome lint and format check (`bun run lint`)
+  - `just lint-workflows`: jactionlint, including shellcheck on workflow `run:` steps
+  - `just lint-actions`: check-jsonschema on workflows and `actions/**/action.yml`
+  - `just lint-shell`: shellcheck on `run:` steps in composite actions
+    (`scripts/shellcheck-actions.ts`)
+- `just check`: typecheck with tsc (`bun run check`)
+- `just test`: unit tests (`bun run test`)
 - `just security`: zizmor
 
-lefthook runs the first three on `pre-commit` and zizmor on `pre-push`.
+`just format` applies Biome's fixes. The TypeScript steps are package.json
+scripts named like a voidflow caller's (`lint` is Biome, `check` is the
+typecheck), and the recipes wrap them.
+
+lefthook runs Biome (fixing staged files), the typecheck and the workflow and
+action linters on `pre-commit`, and zizmor and the tests on `pre-push`.
 
 Pin every third-party action to a full commit SHA with a version comment.
 
@@ -31,6 +40,16 @@ Pin every third-party action to a full commit SHA with a version comment.
   and pass vacuously.
 - Colima works: `.actrc` already disables the docker socket mount.
 
+## Starter templates
+
+`voidflow init` copies the files under `templates/` (`common/`, `tool/`,
+`site/`). They're generated: edit `scripts/build-templates.ts` (or a source it
+reads, such as `mise.toml`, the README snippets or `bunfig.toml`), then run
+`just templates`. `test/templates.test.ts` fails when the committed templates
+differ from a fresh build. `.gitignore` templates are stored as `gitignore`
+because `npm pack` drops files named `.gitignore`. `{{version}}`, `{{sha}}`,
+`{{kind}}`, `{{cron_minute}}` and `{{repo}}` are filled in when `init` runs.
+
 ## Branches and commits
 
 Feature PRs target `next`. Use [Conventional Commits](https://www.conventionalcommits.org);
@@ -39,9 +58,12 @@ for the release flow.
 
 ## Branch rulesets
 
-Rulesets for the fleet's repos are defined in
-[`rulesets/index.ts`](rulesets/index.ts). Sites use `site()`, tools use
-`tool()`. Needs `gh` with admin on the repos.
+[`rulesets/index.ts`](rulesets/index.ts) holds the config shape and the plan
+logic; the fleet (which repos, tiers, checks and bypasses) lives in the org's
+own infra repo (see [Fleet config](#fleet-config---config)). A tiered repo's
+missing fields take `tool()`'s defaults; a repo whose protection doesn't fit
+the tiers spells out its rulesets in full. Needs `gh` with admin on the repos.
+From the infra repo, whose justfile passes `--config`:
 
 ```sh
 just rulesets-plan                  # diff every repo against the config
@@ -51,8 +73,24 @@ just rulesets-apply                 # create/update to match
 just rulesets-apply --prune         # also delete rulesets listed under `retire`
 ```
 
+Fleet keys are `owner/name`, so one infra repo can cover repos under several
+owners. A repo not listed in the fleet is never touched, so repos whose rulesets
+are managed by hand can stay out of it.
+
+To require a merge queue on `main`, set `mergeQueue: true` on the repo's entry
+(`tool({ mergeQueue: true })`). GitHub only offers merge queues on public repos
+owned by an organization, and on private org repos with Enterprise Cloud, so
+leave it off elsewhere. The repo's CI must also run on `merge_group`, or the
+required checks never report and the queue stalls. `rulesets` refuses, before
+writing anything, a repo that asks for a queue but isn't org-owned; a private org
+repo without Enterprise Cloud is left to GitHub's API to reject.
+
 Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.
+
+The infra repo runs `--check` on a schedule (taraxvoid/infra's `Ruleset
+drift` workflow), since the config lives there. Applying stays a manual
+`just rulesets-apply`.
 
 ## Cloudflare deploy tokens as code
 
@@ -135,7 +173,7 @@ deploy with a throwaway token that has the same policies. From the site's
 checkout:
 
 ```sh
-just -f ../infra/justfile cf-tokens-try transbot prod bunx wrangler deploy
+just -f ../infra/justfile cf-tokens-try example_project prod bunx wrangler deploy
 ```
 
 The real token can't be used locally (its value only exists in GitHub), and
@@ -172,17 +210,42 @@ Limits worth knowing:
   ```
 
 Cut over one repo at a time: `just cf-tokens-apply --repo <name>`, deploy, then
-`just cf-tokens-apply --repo <name> --prune` to delete its old token. Repo
-tooling, not part of the published package.
+`just cf-tokens-apply --repo <name> --prune` to delete its old token.
 
 ## Fleet config (`--config`)
 
 voidflow holds the tools; each org keeps its fleet map (repo names, account
 ids, envs) in its own private infra repo, e.g. `taraxvoid/infra`, as modules
-that export `REPOS` (or a default). The infra repo's justfile wraps voidflow's
-recipes with `--config` pointing at them. `cf-tokens-*` requires it;
-`rulesets-*` still falls back to the built-in `REPOS` in `rulesets/index.ts`
-until that moves out too.
+that export `REPOS` (or a default). The package's `voidflow` bin runs both
+tools, so the infra repo needs a pinned release rather than a voidflow
+checkout; `rulesets` and `cf-tokens` both require `--config`.
+
+```sh
+bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts --check
+npx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts --apply --repo example_project
+```
+
+Each command takes its script's flags (`scripts/apply-rulesets.ts`,
+`scripts/cf-tokens.ts`) and lists them with `--help`. The bin runs under Bun or
+Node 24+ (`bunx` or `npx`); the package ships it built to `dist/`. In this repo,
+the `rulesets-*` and `cf-tokens-*` recipes run the same entry point
+(`scripts/cli.ts`) from the checkout.
+
+The config modules stay TypeScript under either runtime. Node 24 loads them by
+stripping types, which covers erasable syntax only: type annotations, `type` /
+`interface`, `as` and `satisfies`, but no `enum`, `namespace` or constructor
+parameter properties. Write configs as plain data plus types, as below.
+
+With `@taraxvoid/voidflow` as a devDependency of the infra repo (the same
+version the recipes pin), a config module can type its map against its
+shapes and use its helpers (`tool()` for rulesets, say). Type-only imports
+need nothing at run time; value imports resolve from the infra repo's
+`node_modules`:
+
+```ts
+import type { RepoConfig } from '@taraxvoid/voidflow/cloudflare'
+import { tool, type Fleet } from '@taraxvoid/voidflow/rulesets'
+```
 
 ```ts
 // cf-tokens.ts in the org's infra repo
@@ -200,17 +263,20 @@ export const REPOS = {
 
 ```just
 # justfile in the org's infra repo
-voidflow := env_var_or_default("VOIDFLOW", home_directory() / "projects/personal/voidflow")
-vf := "just -f " + quote(voidflow / "justfile")
+vf := "bunx @taraxvoid/voidflow@<version>"
 tokens := justfile_directory() / "cf-tokens.ts"
+# CF_TOKEN_ADMIN from fnox unless already set. fnox.toml is a copy of
+# voidflow's; -c finds it from a [no-cd] recipe too.
+fnox := "fnox -c " + quote(justfile_directory() / "fnox.toml") + " exec -- "
+cf := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { fnox + vf } else { vf }
 
 cf-tokens-plan *args:
-    {{ vf }} cf-tokens-plan --config {{ quote(tokens) }} {{ args }}
+    {{ cf }} cf-tokens --config {{ quote(tokens) }} {{ args }}
 
 # [no-cd]: the command runs in the site checkout `just -f` was called from
 [no-cd]
 cf-tokens-try repo env +cmd:
-    {{ vf }} cf-tokens-try {{ quote(tokens) }} {{ repo }} {{ env }} {{ cmd }}
+    {{ cf }} cf-tokens --config {{ quote(tokens) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 ```
 
 A rulesets config can use the tier model, where any field left out takes
@@ -221,7 +287,12 @@ the tiers. A snapshot of what GitHub has now (`gh api
 repos/<repo>/rulesets/<id>`, keeping `name`, `target`, `enforcement`,
 `conditions`, `bypass_actors` and `rules`) plans with no drift.
 
-A relative path resolves from the directory `just` runs in. Each config is
+A relative `--config` resolves from `VOIDFLOW_CONFIG_BASE` when that is set,
+else the current directory. This repo's recipes set it to the directory
+`just` was run from; the bin doesn't, so with the infra justfile above a
+relative path resolves from the infra repo, or from the site checkout for the
+`[no-cd]` recipe (hence `justfile_directory()`). `--try` runs its command
+in the same directory. Each config is
 checked before any API call, and every problem is reported by its path.
 `CF_TOKEN_ADMIN` then needs to cover that org's accounts, and `gh` needs admin
 on its repos.

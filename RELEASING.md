@@ -63,6 +63,25 @@ patch bump. Fix it with a squash-merged PR to `main` whose body ends with a
 `Release-As: X.Y.Z` footer (the squash commit message is the PR body), then
 add the missed entries to the release PR's `CHANGELOG.md` by hand.
 
+## Approve the npm release
+
+npm packages are published with `npm stage publish`: the workflow uploads each
+version to npm's staging area and it is not live until a human approves it
+with 2FA. Each release stages two packages (`@taraxvoid/voidflow` and the
+unscoped `voidflow` mirror), so approve both, via the Staged Packages tab on
+npmjs.com or `npm stage approve <id>`. The GitHub release, `vX.Y.Z` tag and
+floating `v0` tag are created before approval; actions consumers pin git tags,
+so this is fine, but `npm install` of the new version works only after
+approval. JSR publishes directly. CI cannot approve: approval and
+`npm stage list` need a 2FA-capable npm session, not the workflow's OIDC token.
+The publish job's summary lists each staged id with its `npm stage approve <id>`
+command, so you don't need the npm email to find them.
+
+Rerunning the publish job is safe: a version that is already published is
+skipped, and one that is already staged makes the registry return a 409,
+which the job reports as a notice. To restage a version (for example with a
+different dist-tag), first reject it with `npm stage reject <id>`.
+
 ## Hotfix
 
 Fix on a branch off `main`, PR to `main`, squash-merge, release as above. The
@@ -108,3 +127,23 @@ backwards. Commit, push, open the PR against `next` and merge it with a merge co
 ## Consuming
 
 See [Pinning](README.md#pinning) for pinning options.
+
+### Verify an npm tarball
+
+The publish job packs each npm tarball (`@taraxvoid/voidflow` and the
+`voidflow` mirror), attests it with
+[`actions/attest`](https://github.com/actions/attest), then publishes that same
+file. The attestation is SLSA build provenance in GitHub's attestation store,
+separate from npm's own `--provenance`, so `gh` can check a tarball from the
+registry against this repo's release workflow:
+
+```sh
+npm pack @taraxvoid/voidflow@<version>
+gh attestation verify taraxvoid-voidflow-<version>.tgz \
+  --repo taraxvoid/voidflow \
+  --signer-workflow taraxvoid/voidflow/.github/workflows/release-please.yml
+```
+
+`npm pack <spec>` downloads the registry's tarball as is. Releases before the
+first one with this change have no attestation. A republish (`workflow_dispatch`)
+attests only what it actually publishes, and a dry run attests nothing.

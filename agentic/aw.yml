@@ -1,0 +1,5 @@
+manifest-version: "1"
+name: voidflow agentic
+description: Agentic workflows for voidflow repos. deps-review judges Renovate and Dependabot PRs beyond "CI passed"; it never merges.
+files:
+  - workflows/deps-review.md
