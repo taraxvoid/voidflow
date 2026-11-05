@@ -51,7 +51,8 @@ already as wanted, are reported `unchanged`.
 | Flag | Effect |
 |---|---|
 | `--kind tool\|site` | which starter files to write (not needed with `--preset settings`) |
-| `--preset full\|files\|settings` | both halves (default), only files, or only settings |
+| `--preset full\|files\|settings\|rulesets` | both halves (default), only files, only settings, or only branch rulesets (opt-in, never part of `full`) |
+| `--config <module>` | with `--preset rulesets`: apply this repo's entry from your fleet map instead of the default `tool()` (required for `--kind site`) |
 | `--skip-file <name>` | leave a file out (repeatable): `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security` |
 | `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
@@ -78,7 +79,11 @@ protection, and CodeQL default setup. On a private repo without GitHub Code
 Security, CodeQL and secret scanning are reported `skipped-plan`; before the
 first push CodeQL has nothing to scan and is `skipped-no-code` (re-run
 `init --preset settings` after it). Neither sets exit 1. Opt-ins are never
-turned off. Settings with no API (Dependabot malware alerts, and the AI
+turned off. `--preset rulesets` applies the same rulesets as `voidflow rulesets`
+(default `tool()`, or the repo's entry with `--config`), creating or updating
+but never pruning; a re-run is `unchanged`, and a private repo on a plan without
+rulesets is `skipped-plan`. Applying them blocks direct pushes to the default
+branch, so run it after the first push. Settings with no API (Dependabot malware alerts, and the AI
 previews with `--enable-ai-scan`) are printed with a link to the repo's
 settings page.
 
