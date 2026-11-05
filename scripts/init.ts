@@ -62,6 +62,8 @@ const OPTIONS = {
     skip: { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
+    'enable-agentic': { type: 'boolean', default: false },
+    'agentic-stage': { type: 'string', default: 'shadow' },
     repo: { type: 'string' },
     config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
@@ -75,6 +77,8 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests
+  --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
+  --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
   --config <module>       with --preset rulesets: take this repo's entry from the fleet map
   -f, --force             overwrite files that differ
@@ -88,6 +92,11 @@ Settings: ${settingNames().join(', ')}`
 
 type Deps = {
     gh?: Gh
+    /** Runs `gh aw` in dir; for tests. */
+    ghAw?: (
+        args: string[],
+        dir: string,
+    ) => Promise<{ code: number; err: string }>
     resolveSha?: (version: string) => Promise<string | null>
 }
 
@@ -108,6 +117,57 @@ function existingCronMinute(dir: string): number | null {
     const m = /cron:\s*'(\d{1,2}) 6 \* \* \*'/.exec(text)
     const n = m ? Number(m[1]) : Number.NaN
     return n >= 0 && n <= 59 ? n : null
+}
+
+async function defaultGhAw(
+    args: string[],
+    dir: string,
+): Promise<{ code: number; err: string }> {
+    try {
+        const r = await capture(['gh', 'aw', ...args], undefined, {
+            timeoutMs: 120_000,
+            cwd: dir,
+        })
+        return { code: r.code, err: r.err }
+    } catch (e) {
+        return { code: 127, err: (e as Error).message }
+    }
+}
+
+/** The gh-aw version the reusable agentic-locks workflow compiles with by default. */
+function agenticLocksGhAwVersion(): string | null {
+    try {
+        const text = readFileSync(
+            join(packageRoot(), 'templates/common/gh-aw-version'),
+            'utf8',
+        ).trim()
+        return /^v\d[\w.-]*$/.test(text) ? text : null
+    } catch {
+        return null
+    }
+}
+
+/** Install the deps-review workflow with `gh aw add`, pinned to this version. */
+async function installDepsReview(
+    dir: string,
+    version: string,
+    dryRun: boolean,
+    run: NonNullable<Deps['ghAw']>,
+): Promise<{ name: string; status: string; detail: string }> {
+    const name = 'deps-review'
+    const spec = `taraxvoid/voidflow/agentic@v${version}`
+    if (existsSync(join(dir, '.github/workflows/deps-review.md')))
+        return { name, status: 'unchanged', detail: '' }
+    if (dryRun)
+        return { name, status: 'would-apply', detail: `gh aw add ${spec}` }
+    const r = await run(['add', spec], dir)
+    return r.code === 0
+        ? { name, status: 'applied', detail: `gh aw add ${spec}` }
+        : {
+              name,
+              status: 'failed',
+              detail: `${r.err.trim().split('\n')[0] || `exit ${r.code}`}; install gh-aw and run: gh aw add ${spec}`,
+          }
 }
 
 async function isWorkTree(dir: string): Promise<boolean> {
@@ -178,9 +238,17 @@ export async function main(
     if (!(await isWorkTree(dir)))
         fail(`${dir} is not a git work tree (run git init first)`, prog)
 
+    const stage = values['agentic-stage']
+    if (stage !== 'shadow' && stage !== 'gate')
+        fail(
+            `unknown --agentic-stage "${stage}", expected shadow or gate`,
+            prog,
+        )
+
     const dryRun = values['dry-run']
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
+    const enableAgentic = values['enable-agentic']
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -216,6 +284,7 @@ export async function main(
             repo,
             cronMinute:
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
+            stage,
         }
         const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
@@ -224,7 +293,13 @@ export async function main(
         ])
         fileActions = planFiles(
             dir,
-            { kind, skip, force: values.force, enablePvr },
+            {
+                kind,
+                skip,
+                force: values.force,
+                enablePvr,
+                enableAgentic: values['enable-agentic'],
+            },
             ctx,
         )
         const conflicts = fileActions.filter((a) => a.status === 'conflict')
@@ -245,6 +320,24 @@ export async function main(
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
         }
+        const agenticPlanned = fileActions.some((a) => a.name === 'agentic')
+        if (enableAgentic && (!agenticPlanned || conflicts.length > 0)) {
+            notes.push(
+                conflicts.length > 0
+                    ? 'deps-review was not installed (file conflicts, nothing written)'
+                    : 'deps-review was not installed (the files half did not include agentic)',
+            )
+        } else if (enableAgentic) {
+            const r = await installDepsReview(
+                dir,
+                version,
+                dryRun,
+                deps.ghAw ?? defaultGhAw,
+            )
+            out.push('agentic:')
+            out.push(row(r.status, r.name, r.detail))
+            if (r.status === 'failed' && !dryRun) exitCode = 1
+        }
     }
 
     // Settings half.
@@ -261,6 +354,7 @@ export async function main(
                 skip: new Set(values.skip),
                 enablePvr,
                 enableAiScan,
+                enableAgentic,
                 dryRun,
             })
             for (const r of settingResults)
@@ -312,9 +406,24 @@ export async function main(
         }
     }
 
+    if (enableAgentic && !preset.settings) {
+        notes.push(
+            'agentic settings were not applied (the settings half did not run)',
+        )
+    }
+    if (enableAgentic) {
+        const pin = agenticLocksGhAwVersion()
+        if (pin) {
+            notes.push(
+                `agentic-locks recompiles with gh-aw ${pin} and fails on a different lock; use the same version locally: gh extension install github/gh-aw --pin ${pin}`,
+            )
+        }
+    }
+
     if (repo && preset.settings) {
         out.push('manual:')
-        for (const l of manualReminders(repo, enableAiScan)) out.push(`  ${l}`)
+        for (const l of manualReminders(repo, enableAiScan, enableAgentic))
+            out.push(`  ${l}`)
     }
     if (notes.length > 0) {
         out.push('notes:')

@@ -109,6 +109,12 @@ describe('settings', () => {
             'codeql',
             'pvr',
             'ai-scan',
+            'auto-merge',
+            'update-branch',
+            'delete-branch-on-merge',
+            'actions-permissions',
+            'label deps:low-risk',
+            'label deps:needs-you',
         ])
     })
 
