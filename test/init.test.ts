@@ -314,6 +314,17 @@ describe('voidflow init', () => {
         expect(existsSync(join(dir, 'playwright.config.js'))).toBe(false)
     })
 
+    test('an existing playwright.config.ts means no .js is written', async () => {
+        const dir = repo()
+        writeFileSync(join(dir, 'playwright.config.ts'), 'export default {}\n')
+        const r = await run(['--kind', 'site', '--preset', 'files', dir])
+        expect(r.code).toBe(0)
+        expect(existsSync(join(dir, 'playwright.config.js'))).toBe(false)
+        expect(r.out).toContain('playwright.config.ts already exists')
+        expect(r.out).toContain("': {},")
+        expect(r.out).not.toContain('tool()')
+    })
+
     test('a re-run is all unchanged and keeps the cron minute', async () => {
         const dir = repo()
         const f = fakeGh()
