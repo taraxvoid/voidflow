@@ -15,8 +15,8 @@
  * Each token is owned by its env's account (envs can live in different
  * accounts) and scoped to one Worker (Workers Editor on that
  * Worker), plus Workers Routes Write on the zones of its routes. An env that
- * sets `d1` also gets D1 write on those databases only (for a deploy that
- * runs `wrangler d1 migrations apply`).
+ * sets `d1` also gets D1 Write on its account (the permission has no
+ * per-database scope), for a deploy that runs `wrangler d1 migrations apply`.
  * Custom Domains do not support per-Worker roles yet; when a deploy proves the
  * zone grant is not enough, record a `fallback` and the token also gets
  * account-wide Workers Scripts Write. Every plan and every deploy says so.
@@ -51,12 +51,12 @@ export type EnvConfig = {
      */
     zones?: string[]
     /**
-     * D1 databases the token may write, for a deploy that applies migrations.
-     * `true` takes the database ids of the wrangler config's d1_databases;
-     * a list names ids. Default: none, so a preview token never gets the
-     * production database just because they share a wrangler config.
+     * Grant D1 Write on every database in the env's account, for a deploy
+     * that applies migrations. Cloudflare scopes that permission to the
+     * account only. Default: off, so a preview token never gets D1 just
+     * because it shares a wrangler config with prod.
      */
-    d1?: true | string[]
+    d1?: boolean
     /** Wrangler config path in the repo (default branch). Default: wrangler.jsonc. */
     wrangler?: string
     /**
@@ -70,7 +70,7 @@ export type EnvConfig = {
 }
 
 /** What an env's token is scoped to, once resolved. */
-export type Target = { worker: string; zones: string[]; d1: string[] }
+export type Target = { worker: string; zones: string[] }
 
 /** An old token to retire; a bare name means the repo's `account`. */
 export type Retire = string | { account: string; name: string }
@@ -124,7 +124,7 @@ export const WORKER_EDITOR = [
     'e086da7e2179491d91ee5f35b3ca210a',
     'c1fde68c7bcc44588cbb6ddbc16d6480',
 ]
-/** Account > D1 > Write, scoped per database id. */
+/** Account > D1 > Write. Account-scoped only: no per-database resource. */
 export const D1_WRITE = '09b2857d1c31407795e75e3fed8617a1'
 /** Zone > Workers Routes > Write: add or keep routes and custom domains. */
 export const WORKERS_ROUTES_WRITE = '28f4b596e7d643029c524985477ae49a'
@@ -159,20 +159,14 @@ type Route = string | { pattern: string; zone_name?: string }
  * The Worker name and route hostnames an env deploys, read from a parsed
  * wrangler config the way wrangler reads it: an `env.<name>` block's `name`,
  * else the top-level name plus `-<name>`; its `routes`/`route`, else the
- * top level's. A route's `zone_name`, when set, is used as is. `d1` is the
- * block's own database ids: bindings are not inherited into an env block.
+ * top level's. A route's `zone_name`, when set, is used as is.
  */
 export function fromWrangler(
     config: unknown,
     env: string,
     wranglerEnv?: string,
-): { worker: string; hosts: string[]; zones: string[]; d1: string[] } {
-    type Block = {
-        name?: string
-        route?: Route
-        routes?: Route[]
-        d1_databases?: Array<{ database_id?: string }>
-    }
+): { worker: string; hosts: string[]; zones: string[] } {
+    type Block = { name?: string; route?: Route; routes?: Route[] }
     const top = config as Block & { env?: Record<string, Block> }
     const block = wranglerEnv ?? (top.env?.[env] ? env : undefined)
     const sub = block === undefined ? undefined : top.env?.[block]
@@ -189,10 +183,7 @@ export function fromWrangler(
         if (typeof r !== 'string' && r.zone_name) zones.push(r.zone_name)
         else hosts.push(routeHost(typeof r === 'string' ? r : r.pattern))
     }
-    const d1 = (sub ?? top).d1_databases
-        ?.map((d) => d.database_id)
-        .filter((id): id is string => typeof id === 'string' && id !== '')
-    return { worker, hosts, zones, d1: d1 ?? [] }
+    return { worker, hosts, zones }
 }
 
 /** `*.example.com/api/*` and `https://example.com:443/` to their hostname. */
@@ -222,22 +213,14 @@ export function resolveTarget(
 ): Target {
     const from = () => fromWrangler(wrangler, env.env, env.wranglerEnv)
     const worker = env.worker ?? from().worker
-    let d1: string[] = []
-    if (env.d1 === true) {
-        d1 = from().d1
-        if (d1.length === 0)
-            throw new Error(
-                `env ${env.env} has d1: true but the wrangler config has no d1_databases with a database_id`,
-            )
-    } else if (env.d1) d1 = env.d1
-    if (env.zones) return { worker, zones: env.zones, d1 }
+    if (env.zones) return { worker, zones: env.zones }
     const { hosts, zones } = from()
     for (const h of hosts) {
         const z = zoneOf(h, zoneNames)
         if (!z) throw new Error(`route host ${h} is in no zone of the account`)
         zones.push(z)
     }
-    return { worker, zones: [...new Set(zones)].sort(), d1 }
+    return { worker, zones: [...new Set(zones)].sort() }
 }
 
 // ---- config from elsewhere --------------------------------------------------
@@ -314,12 +297,8 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
                 (!Array.isArray(env.zones) || !env.zones.every(isStr))
             )
                 bad(`${e}.zones`, 'not a list of zone names')
-            if (
-                env.d1 !== undefined &&
-                env.d1 !== true &&
-                !(Array.isArray(env.d1) && env.d1.every(isStr))
-            )
-                bad(`${e}.d1`, 'true or a list of database ids')
+            if (env.d1 !== undefined && typeof env.d1 !== 'boolean')
+                bad(`${e}.d1`, 'not true or false')
             if (env.account !== undefined && !isAcct(env.account))
                 bad(`${e}.account`, 'not a 32-hex account id')
             if (
@@ -355,7 +334,7 @@ const account = (id: string) => `com.cloudflare.api.account.${id}`
 export function policies(
     cfg: RepoConfig,
     env: EnvConfig,
-    ids: { scriptTag: string; zoneIds: Record<string, string>; d1?: string[] },
+    ids: { scriptTag: string; zoneIds: Record<string, string> },
     zones: string[] = Object.keys(ids.zoneIds),
 ): Policy[] {
     const acct = account(envAccount(cfg, env))
@@ -383,18 +362,11 @@ export function policies(
             resources,
         })
     }
-    if (ids.d1?.length) {
+    if (env.d1) {
         out.push({
             effect: 'allow',
             permission_groups: [{ id: D1_WRITE }],
-            resources: {
-                [acct]: Object.fromEntries(
-                    ids.d1.map((id) => [
-                        `com.cloudflare.edge.d1.database.${id}`,
-                        '*',
-                    ]),
-                ),
-            },
+            resources: { [acct]: '*' },
         })
     }
     if (env.fallback) {
