@@ -283,7 +283,7 @@ export async function main(
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
     out.push(
-        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': tool(),`,
+        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': ${kind === 'site' ? '{}' : 'tool()'},`,
         '    (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
     )
     console.log(out.join('\n'))
