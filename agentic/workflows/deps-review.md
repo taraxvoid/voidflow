@@ -59,12 +59,12 @@ tools:
 
 safe-outputs:
   add-labels:
-    allowed: ["deps:low-risk", "deps:needs-you"]
+    allowed: ["low-risk", "needs-you"]
     create-if-missing: true
     target: "${{ github.event.pull_request.number || inputs.pr }}" # this PR only, never "*"
     max: 1
   remove-labels:
-    allowed: ["deps:low-risk", "deps:needs-you"]
+    allowed: ["low-risk", "needs-you"]
     target: "${{ github.event.pull_request.number || inputs.pr }}" # this PR only, never "*"
     max: 2
   add-comment:
@@ -216,7 +216,7 @@ summarise the migration steps that apply to this repo.
 
 1. Call `deps_gate` exactly once with `verdict` set to `low-risk` or
    `needs-you`. Any other value, or no call, counts as needs you.
-2. Remove whichever of `deps:low-risk` / `deps:needs-you` no longer
+2. Remove whichever of `low-risk` / `needs-you` no longer
    applies, then add the one that does.
 3. One comment:
    - first line: **Low risk** or **Needs you**, with the reason in one

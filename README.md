@@ -63,7 +63,7 @@ npx @taraxvoid/voidflow init --kind site --dry-run
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
 | `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default) installs deps-review and the `agentic-locks` caller; `gate` also adds the `deps-review-gate` job and the Renovate `deps-review-automerge` preset (merged into `extends`). Moving a repo from shadow to gate merges both files, no `--force` needed |
-| `--enable-agentic` | opt in, experimental: installs deps-review with `gh aw add` (pinned to this version, needs the gh-aw extension), writes `.github/workflows/agentic.yml`, and applies the repo settings and labels the workflows rely on: allow auto-merge, always suggest updating PR branches, delete head branches on merge, workflow token read-only with Actions unable to approve PRs, and the `deps:low-risk` and `deps:needs-you` labels. The `COPILOT_GITHUB_TOKEN` secret is printed as a manual step. Each piece also works with `--skip <name>` |
+| `--enable-agentic` | opt in, experimental: installs deps-review with `gh aw add` (pinned to this version, needs the gh-aw extension), writes `.github/workflows/agentic.yml`, and applies the repo settings and labels the workflows rely on: allow auto-merge, always suggest updating PR branches, delete head branches on merge, workflow token read-only with Actions unable to approve PRs, and the `low-risk` and `needs-you` labels. The `COPILOT_GITHUB_TOKEN` secret is printed as a manual step. Each piece also works with `--skip <name>` |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
 | `-f`, `--force` | overwrite files that differ |
 | `--dry-run` | plan both halves, change nothing |
@@ -431,7 +431,7 @@ compromised package can't talk its way to a merge:
 
 - **The agent** reads the release notes between the two versions, checks them
   against what your code actually uses, and leaves a comment with the evidence
-  and a `deps:low-risk` or `deps:needs-you` label. It treats every upstream
+  and a `low-risk` or `needs-you` label. It treats every upstream
   string as untrusted and proposes a verdict; it never approves, merges,
   pushes or posts the check.
 - **The gate job** (deterministic, runs after the agent) recomputes the hard

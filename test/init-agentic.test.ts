@@ -45,6 +45,11 @@ function fakeGh() {
             }
             const m = /^repos\/o\/r\/labels\/(.+)$/.exec(path)
             if (m) {
+                if (method === 'PATCH') {
+                    labels.delete(decodeURIComponent(m[1]))
+                    labels.add((body as { new_name: string }).new_name)
+                    return { status: 200, body: body }
+                }
                 return labels.has(decodeURIComponent(m[1]))
                     ? { status: 200, body: {} }
                     : { status: 404, body: { message: 'Not Found' } }
@@ -134,8 +139,8 @@ describe('init --enable-agentic', () => {
             'update-branch',
             'delete-branch-on-merge',
             'actions-permissions',
-            'label deps:low-risk',
-            'label deps:needs-you',
+            'label-low-risk',
+            'label-needs-you',
         ])
             expect(r.out).toMatch(new RegExp(`would-apply\\s+${n}`))
         expect(f.writes.filter((w) => w.includes('labels'))).toEqual([])
@@ -151,17 +156,22 @@ describe('init --enable-agentic', () => {
             allow_update_branch: true,
             delete_branch_on_merge: true,
         })
-        expect([...f.labels].sort()).toEqual([
-            'deps:low-risk',
-            'deps:needs-you',
-        ])
+        expect([...f.labels].sort()).toEqual(['low-risk', 'needs-you'])
         const again = await run([...ARGV, dir], f.gh)
-        for (const n of [
-            'auto-merge',
-            'actions-permissions',
-            'label deps:low-risk',
-        ])
+        for (const n of ['auto-merge', 'actions-permissions', 'label-low-risk'])
             expect(again.out).toMatch(new RegExp(`unchanged\\s+${n}`))
+    })
+
+    test('renames the old deps: labels in place', async () => {
+        const f = fakeGh()
+        f.labels.add('deps:low-risk')
+        f.labels.add('deps:needs-you')
+        const r = await run([...ARGV, repo()], f.gh)
+        expect(r.out).toMatch(/applied\s+label-low-risk/)
+        expect([...f.labels].sort()).toEqual(['low-risk', 'needs-you'])
+        expect(
+            f.writes.some((w) => w.startsWith('POST') && w.includes('labels')),
+        ).toBe(false)
     })
 
     test('prints the Copilot token secret as a manual step', async () => {

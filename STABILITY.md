@@ -22,7 +22,7 @@ Covered by this policy:
 | Renovate preset (`default.json`) | That it validates and extends `config:best-practices` |
 | lefthook config (`lefthook/base.yml`) | Its path, the hooks it installs, the script names each runs |
 | Supported runtimes | Package managers (`bun`, `pnpm`, `aube`), minimum Bun and Node versions, runner OS (`ubuntu-latest`) |
-| Agentic package (`agentic/`) | Workflow paths in `aw.yml`, their triggers, the check run and label names posted (`deps-review`, `deps:low-risk`, `deps:needs-you`), the safe outputs the model may use, and what each verdict means. The `deps-review` check is posted by a deterministic job, never by the model |
+| Agentic package (`agentic/`) | Workflow paths in `aw.yml`, their triggers, the check run and label names posted (`deps-review`, `low-risk`, `needs-you`), the safe outputs the model may use, and what each verdict means. The `deps-review` check is posted by a deterministic job, never by the model |
 | Reusable workflows for agentic repos (`agentic-locks.yml`, `deps-review-gate.yml`) | Paths, inputs and defaults, job names, required permissions |
 | Opt-in Renovate preset (`deps-review-automerge.json`) | The update types it automerges and that it merges through GitHub auto-merge |
 | Tags | `vX.Y.Z` release tags, the floating `vN` major tag |
