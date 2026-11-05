@@ -113,7 +113,7 @@ describe('withMarker', () => {
         const y = withMarker('lefthook.yml', 'a: 1\n', ctx).split('\n')
         expect(y.slice(0, 2)).toEqual([`# ${L1}`, `# ${L2}`])
         const b = withMarker('biome.json', '{}\n', ctx).split('\n')
-        expect(b.slice(0, 2)).toEqual([`// ${L1}`, `// ${L2}`])
+        expect(b.join('\n')).toBe('{}\n')
         expect(withMarker('tsconfig.json', '{}\n', ctx).startsWith('// ')).toBe(
             true,
         )

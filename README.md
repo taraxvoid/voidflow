@@ -1,59 +1,65 @@
 # voidflow
 
-Shared CI/CD, security checks and repo config for TypeScript projects.
-
-## What this is
-
-- **Reusable workflows** for sites (`site-ci.yml`) and bun tools (`tool-ci.yml`),
-  plus SARIF upload
-- **Deploy actions** for Cloudflare Workers, per-PR Worker
-  Previews, and branch-to-environment mapping
-- **npm package** with Lighthouse budgets, a copyleft license check,
-  Playwright and Biome configs, and fleet tools (branch rulesets and scoped
-  Cloudflare deploy tokens as code)
-- **Renovate preset** and **lefthook hooks**
-- **Agentic workflows** ([GitHub Agentic Workflows](https://github.github.com/gh-aw/)):
-  `deps-review`, which judges dependency PRs so low-risk ones can merge
-  themselves
-
-Works with `bun` (default), `pnpm` and `aube`. CI runs whichever
-`package.json` scripts your repo defines (`lint`, `test:unit`, `test:e2e:all`,
-...) and skips the rest.
-
-## Usage
-
-### Pinning
-
-Pin to a release SHA with the version in a comment. Renovate keeps it current.
-
-```yaml
-uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
-```
-
-Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md).
-[`STABILITY.md`](STABILITY.md) says what minors, patches and majors may change
-and how deprecations reach you before a removal.
-
-### Starting a repo
-
-`voidflow init` writes the starter files for a tool or an Astro site and
-applies the GitHub repo settings voidflow expects. Run it in a git work tree
-(for a site, after `bun create astro`):
+Secure-by-default CI/CD, GitHub repo settings and local git hooks for TypeScript projects, applied to a repo with one command.
 
 ```sh
-npx @taraxvoid/voidflow@<version> init --kind tool    # Node 24+
-bunx @taraxvoid/voidflow@<version> init --kind site
+cd my-repo
+npx @taraxvoid/voidflow init --kind site    # or --kind tool
 ```
 
-It's safe to re-run: files that match what `init` would write, and settings
-already as wanted, are reported `unchanged`.
+`init` writes the starter files (CI caller, Biome, Renovate, lefthook, mise,
+Playwright and more) and applies the GitHub settings voidflow expects
+(collaborator-only PRs and issues, Dependabot, secret scanning, CodeQL). It is
+additive and safe to re-run: anything already as wanted is reported
+`unchanged`, and a file that differs is never overwritten without `--force`.
+Run it in a git work tree (for a site, after `bun create astro`). Needs Node 24+
+or Bun, and the `gh` CLI for the settings half. `bunx @taraxvoid/voidflow init`
+works too.
+
+Built for Astro sites, bun tools and Cloudflare deploys. Works with `aube`,
+`bun`, `pnpm` and `npm`.
+
+## Highlights
+
+- **CI and deploys** for a stable `main` and per-PR previews
+- **License check** that blocks copyleft dependencies
+- **Renovate and Dependabot** to keep dependencies current and cut malicious-dependency risk
+- **zizmor and actionlint** to keep your GitHub Actions clean
+- **Branch rulesets** that lock down `main` against pwn requests and agent misbehavior
+- **Git hooks with lefthook** so the checks run before CI does
+- **(experimental) Agentic workflows** ([GitHub Agentic Workflows](https://github.github.com/gh-aw/)):
+  `deps-review` judges dependency PRs so low-risk ones can merge themselves
+
+# Usage
+
+## Initial setup
+
+```sh
+# Everything for an Astro site: files and settings
+npx @taraxvoid/voidflow init --kind site
+
+# Everything for a CLI tool
+npx @taraxvoid/voidflow init --kind tool
+
+# Just the CI workflow
+npx @taraxvoid/voidflow init --kind site --preset ci
+
+# Everything except Renovate and the lefthook config
+npx @taraxvoid/voidflow init --kind site --skip renovate --skip lefthook
+
+# Branch rulesets (opt-in, run after the first push)
+npx @taraxvoid/voidflow init --kind tool --preset rulesets
+
+# See the plan, change nothing
+npx @taraxvoid/voidflow init --kind site --dry-run
+```
 
 | Flag | Effect |
 |---|---|
-| `--kind tool\|site` | which starter files to write (not needed with `--preset settings`) |
-| `--preset full\|files\|settings` | both halves (default), only files, or only settings |
-| `--skip-file <name>` | leave a file out (repeatable): `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security` |
-| `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
+| `--kind tool\|site` | which starter files to write (not needed with `--preset settings` or `rulesets --config`) |
+| `--preset full\|ci\|files\|settings\|rulesets` | full setup (default), only the `ci.yml` workflow, only files, only settings, or only branch rulesets (opt-in, never part of `full`) |
+| `--skip <name>` | leave one file or setting out (repeatable). Files: `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security`. Settings: `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
+| `--config <module>` | with `--preset rulesets`: apply this repo's entry from your fleet map instead of the default `tool()` (required for `--kind site`) |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
 | `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default) installs deps-review and the `agentic-locks` caller; `gate` also adds the `deps-review-gate` job and the Renovate `deps-review-automerge` preset (merged into `extends`). Moving a repo from shadow to gate merges both files, no `--force` needed |
@@ -80,7 +86,11 @@ protection, and CodeQL default setup. On a private repo without GitHub Code
 Security, CodeQL and secret scanning are reported `skipped-plan`; before the
 first push CodeQL has nothing to scan and is `skipped-no-code` (re-run
 `init --preset settings` after it). Neither sets exit 1. Opt-ins are never
-turned off. Settings with no API (Dependabot malware alerts, and the AI
+turned off. `--preset rulesets` applies the same rulesets as `voidflow rulesets`
+(default `tool()`, or the repo's entry with `--config`), creating or updating
+but never pruning; a re-run is `unchanged`, and a private repo on a plan without
+rulesets is `skipped-plan`. Applying them blocks direct pushes to the default
+branch, so run it after the first push. Settings with no API (Dependabot malware alerts, and the AI
 previews with `--enable-ai-scan`) are printed with a link to the repo's
 settings page.
 
@@ -88,6 +98,19 @@ A file conflict doesn't stop the settings, and a missing `gh` or `origin`
 doesn't stop the files. Exit codes: 0 done, 1 a file conflict or a failed
 setting, 2 a usage error. `init` is experimental
 ([`STABILITY.md`](STABILITY.md#experimental)).
+
+## Use in CI
+
+### Pinning the action
+
+You can pin `voidflow` to a release SHA with the version in a comment, which Renovate will helpfully keep updated.
+
+```yaml
+uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
+```
+
+Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md) and 
+[`STABILITY.md`](STABILITY.md) for semver contract and deprecation policy.
 
 ### Site CI
 

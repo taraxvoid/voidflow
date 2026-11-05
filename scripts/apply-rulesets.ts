@@ -25,6 +25,7 @@ import {
     checkFleet,
     desired,
     diff,
+    type Fleet,
     isPlanGated,
     mergeQueueIneligible,
     normalise,
@@ -58,6 +59,117 @@ async function gh<T = unknown>(args: string[], body?: unknown): Promise<T> {
     )
     if (code !== 0) throw new Error(`gh api ${args.join(' ')}: ${err || out}`)
     return (out ? JSON.parse(out) : null) as T
+}
+
+/** One call against the GitHub rulesets API; throws with `(HTTP nnn)` on failure. */
+export type RulesetApi = <T = unknown>(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body?: unknown,
+) => Promise<T>
+
+export type RulesetOutcome = {
+    name: string
+    kind: 'ok' | 'create' | 'update' | 'retire' | 'unmanaged'
+    /** True when the change was written. */
+    done: boolean
+}
+
+/**
+ * Plan (and with `apply`, write) one repo's rulesets against `fleet`. Shared
+ * by `voidflow rulesets` and `voidflow init --preset rulesets`. A repo that is
+ * private on a plan without rulesets comes back `gated`, never as drift.
+ */
+export async function syncRepo(
+    api: RulesetApi,
+    repo: string,
+    fleet: Fleet,
+    opts: { apply: boolean; prune: boolean },
+    log: (line: string) => void,
+): Promise<{ drift: number; gated: boolean; outcomes: RulesetOutcome[] }> {
+    let drift = 0
+    const outcomes: RulesetOutcome[] = []
+    let listed: Array<{ id: number; name: string }>
+    try {
+        listed = await api<typeof listed>('GET', `repos/${repo}/rulesets`)
+    } catch (e) {
+        if (!isPlanGated(String(e))) throw e
+        log('  skipped: private repo on a plan without rulesets (HTTP 403)')
+        return { drift, gated: true, outcomes }
+    }
+    const matched = new Set<number>()
+
+    for (const { ruleset, aka } of desired(repo, fleet)) {
+        const hit = listed.find(
+            (r) => r.name === ruleset.name || aka.includes(r.name),
+        )
+        if (!hit) {
+            drift++
+            log(`+ create "${ruleset.name}"`)
+            if (opts.apply) {
+                await api('POST', `repos/${repo}/rulesets`, ruleset)
+                log('  created')
+            }
+            outcomes.push({
+                name: ruleset.name,
+                kind: 'create',
+                done: opts.apply,
+            })
+            continue
+        }
+        matched.add(hit.id)
+        const have = await api<Ruleset>(
+            'GET',
+            `repos/${repo}/rulesets/${hit.id}`,
+        )
+        // A read-only token gets no bypass_actors back; compare the rest.
+        const bypass = Array.isArray(have.bypass_actors)
+        if (!bypass)
+            log(
+                `  note "${ruleset.name}": bypass_actors not visible to this token, not compared`,
+            )
+        const lines = diff(
+            normalise(have, { bypass }),
+            normalise(ruleset, { bypass }),
+        )
+        if (lines.length === 0) {
+            log(`  ok "${ruleset.name}"`)
+            outcomes.push({ name: ruleset.name, kind: 'ok', done: false })
+            continue
+        }
+        drift++
+        log(`~ update "${hit.name}" (id ${hit.id})`)
+        for (const l of lines) log(`    ${l}`)
+        if (opts.apply) {
+            await api('PUT', `repos/${repo}/rulesets/${hit.id}`, ruleset)
+            log('  updated')
+        }
+        outcomes.push({
+            name: ruleset.name,
+            kind: 'update',
+            done: opts.apply,
+        })
+    }
+
+    const retire = new Set(fleet[repo].retire)
+    for (const r of listed.filter((r) => !matched.has(r.id))) {
+        if (!retire.has(r.name)) {
+            log(`? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`)
+            outcomes.push({ name: r.name, kind: 'unmanaged', done: false })
+            continue
+        }
+        drift++
+        log(
+            `- retire "${r.name}" (id ${r.id})${opts.prune ? '' : ' (needs --prune)'}`,
+        )
+        const done = opts.apply && opts.prune
+        if (done) {
+            await api('DELETE', `repos/${repo}/rulesets/${r.id}`)
+            log('  deleted')
+        }
+        outcomes.push({ name: r.name, kind: 'retire', done })
+    }
+    return { drift, gated: false, outcomes }
 }
 
 /** `prog` names the command in the --help usage. */
@@ -102,95 +214,19 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
 
     let drift = 0
     const gated: string[] = []
+    const api: RulesetApi = (method, path, body) =>
+        gh(
+            method === 'GET' ? [path] : ['-X', method, path, '--input', '-'],
+            body,
+        )
 
     for (const repo of repos) {
         console.log(`\n== ${repo}`)
-        let listed: Array<{ id: number; name: string }>
-        try {
-            listed = await gh<typeof listed>([`repos/${repo}/rulesets`])
-        } catch (e) {
-            if (!isPlanGated(String(e))) throw e
-            gated.push(repo)
-            console.log(
-                '  skipped: private repo on a plan without rulesets (HTTP 403)',
-            )
-            continue
-        }
-        const matched = new Set<number>()
-
-        for (const { ruleset, aka } of desired(repo, REPOS)) {
-            const hit = listed.find(
-                (r) => r.name === ruleset.name || aka.includes(r.name),
-            )
-            if (!hit) {
-                drift++
-                console.log(`+ create "${ruleset.name}"`)
-                if (values.apply) {
-                    await gh(
-                        [
-                            '-X',
-                            'POST',
-                            `repos/${repo}/rulesets`,
-                            '--input',
-                            '-',
-                        ],
-                        ruleset,
-                    )
-                    console.log('  created')
-                }
-                continue
-            }
-            matched.add(hit.id)
-            const have = await gh<Ruleset>([`repos/${repo}/rulesets/${hit.id}`])
-            // A read-only token gets no bypass_actors back; compare the rest.
-            const bypass = Array.isArray(have.bypass_actors)
-            if (!bypass)
-                console.log(
-                    `  note "${ruleset.name}": bypass_actors not visible to this token, not compared`,
-                )
-            const lines = diff(
-                normalise(have, { bypass }),
-                normalise(ruleset, { bypass }),
-            )
-            if (lines.length === 0) {
-                console.log(`  ok "${ruleset.name}"`)
-                continue
-            }
-            drift++
-            console.log(`~ update "${hit.name}" (id ${hit.id})`)
-            for (const l of lines) console.log(`    ${l}`)
-            if (values.apply) {
-                await gh(
-                    [
-                        '-X',
-                        'PUT',
-                        `repos/${repo}/rulesets/${hit.id}`,
-                        '--input',
-                        '-',
-                    ],
-                    ruleset,
-                )
-                console.log('  updated')
-            }
-        }
-
-        const retire = new Set(REPOS[repo].retire)
-        for (const r of listed.filter((r) => !matched.has(r.id))) {
-            if (!retire.has(r.name)) {
-                console.log(
-                    `? unmanaged ruleset "${r.name}" (id ${r.id}), left alone`,
-                )
-                continue
-            }
-            drift++
-            console.log(
-                `- retire "${r.name}" (id ${r.id})${values.prune ? '' : ' (needs --prune)'}`,
-            )
-            if (values.apply && values.prune) {
-                await gh(['-X', 'DELETE', `repos/${repo}/rulesets/${r.id}`])
-                console.log('  deleted')
-            }
-        }
+        const r = await syncRepo(api, repo, REPOS, values, (l) =>
+            console.log(l),
+        )
+        drift += r.drift
+        if (r.gated) gated.push(repo)
     }
 
     if (gated.length > 0) {

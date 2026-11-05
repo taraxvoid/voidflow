@@ -22,6 +22,8 @@ export type FileItem = {
     kinds: Kind[]
     merge?: 'package' | 'gitignore'
     optIn?: 'pvr' | 'agentic'
+    /** Existing files that already fill this item's role; the item is left alone when one is present. */
+    altTargets?: string[]
 }
 
 const BOTH: Kind[] = ['tool', 'site']
@@ -81,6 +83,11 @@ export const FILE_ITEMS: FileItem[] = [
         target: 'playwright.config.js',
         templates: ['site/playwright.config.js'],
         kinds: ['site'],
+        altTargets: [
+            'playwright.config.ts',
+            'playwright.config.mjs',
+            'playwright.config.cjs',
+        ],
     },
     {
         name: 'unlighthouse',
@@ -328,6 +335,17 @@ export function planFiles(
         if (item.optIn === 'pvr' && !sel.enablePvr) continue
         if (item.optIn === 'agentic' && !sel.enableAgentic) continue
         const path = join(dir, item.target)
+        const alt = item.altTargets?.find((t) => existsSync(join(dir, t)))
+        if (alt && !existsSync(path)) {
+            actions.push({
+                name: item.name,
+                target: alt,
+                status: 'unchanged',
+                content: readFileSync(join(dir, alt), 'utf8'),
+                detail: `${alt} already exists`,
+            })
+            continue
+        }
         const texts = templateTexts(item, ctx)
         const base = { name: item.name, target: item.target }
         if (item.merge === 'gitignore') {

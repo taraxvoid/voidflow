@@ -11,6 +11,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
     applyFiles,
     FILE_ITEMS,
@@ -24,6 +25,7 @@ import {
     type Kind,
     type RenderCtx,
 } from './init/render.ts'
+import { defaultFleet, runRulesets } from './init/rulesets.ts'
 import {
     manualReminders,
     runSettings,
@@ -31,6 +33,7 @@ import {
     settingNames,
 } from './init/settings.ts'
 import { parseOrExit } from './lib/args.ts'
+import { loadOrExit } from './lib/config.ts'
 import { packageRoot } from './lib/package-root.ts'
 import { capture } from './lib/proc.ts'
 
@@ -40,11 +43,15 @@ import { capture } from './lib/proc.ts'
  */
 export const PRESETS: Record<
     string,
-    { files: 'all' | string[] | null; settings: boolean }
+    { files: 'all' | string[] | null; settings: boolean; rulesets?: boolean }
 > = {
     full: { files: 'all', settings: true },
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
+    ci: { files: ['ci'], settings: false },
+    // Opt-in only: rulesets block direct pushes to main, which surprises a
+    // fresh repo before its first push.
+    rulesets: { files: null, settings: false, rulesets: true },
 }
 
 const KINDS: Kind[] = ['tool', 'site']
@@ -52,13 +59,13 @@ const KINDS: Kind[] = ['tool', 'site']
 const OPTIONS = {
     kind: { type: 'string' },
     preset: { type: 'string', default: 'full' },
-    'skip-file': { type: 'string', multiple: true, default: [] as string[] },
-    'skip-setting': { type: 'string', multiple: true, default: [] as string[] },
+    skip: { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
     'enable-agentic': { type: 'boolean', default: false },
     'agentic-stage': { type: 'string', default: 'shadow' },
     repo: { type: 'string' },
+    config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
     'dry-run': { type: 'boolean', default: false },
 } as const
@@ -67,13 +74,13 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
 
   --kind tool|site        which starter files to write (not needed with --preset settings)
   --preset <name>         ${Object.keys(PRESETS).join('|')} (default full)
-  --skip-file <name>      leave this file out (repeatable)
-  --skip-setting <name>   leave this setting alone (repeatable)
+  --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests
   --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
+  --config <module>       with --preset rulesets: take this repo's entry from the fleet map
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
 
@@ -206,21 +213,25 @@ export async function main(
     if (wantFiles && kind === undefined)
         fail(`--preset ${values.preset} needs --kind tool|site`, prog)
 
-    const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
-    for (const n of values['skip-file']) {
-        if (!validFiles.includes(n))
-            fail(
-                `unknown --skip-file "${n}", expected one of: ${validFiles.join(', ')}`,
-                prog,
-            )
+    if (values.config && !preset.rulesets)
+        fail('--config only applies with --preset rulesets', prog)
+    if (preset.rulesets && !values.config && kind !== 'tool') {
+        fail(
+            kind === 'site'
+                ? '--preset rulesets for a site needs --config <module> (no default site rulesets yet)'
+                : '--preset rulesets needs --kind tool or --config <module>',
+            prog,
+        )
     }
-    for (const n of values['skip-setting']) {
-        if (!settingNames().includes(n)) {
+
+    const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
+    const valid = [...validFiles, ...settingNames()]
+    for (const n of values.skip) {
+        if (!valid.includes(n))
             fail(
-                `unknown --skip-setting "${n}", expected one of: ${settingNames().join(', ')}`,
+                `unknown --skip "${n}", expected one of: ${valid.join(', ')}`,
                 prog,
             )
-        }
     }
 
     const dir = resolve(positionals[0] ?? '.')
@@ -277,7 +288,7 @@ export async function main(
         }
         const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
-            ...values['skip-file'],
+            ...values.skip,
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
         fileActions = planFiles(
@@ -340,7 +351,7 @@ export async function main(
             if (!dryRun) exitCode = 1
         } else if (repo) {
             settingResults = await runSettings(gh, repo, {
-                skip: new Set(values['skip-setting']),
+                skip: new Set(values.skip),
                 enablePvr,
                 enableAiScan,
                 enableAgentic,
@@ -349,6 +360,36 @@ export async function main(
             for (const r of settingResults)
                 out.push(row(r.status, r.name, r.detail))
             if (settingResults.some((r) => r.status === 'failed')) exitCode = 1
+        }
+    }
+
+    // Rulesets half. A bad --config is reported even when gh is unavailable.
+    if (preset.rulesets) {
+        let fleet: Fleet | undefined
+        if (values.config) {
+            fleet = await loadOrExit(values.config, checkFleet)
+            if (repo && !fleet[repo]) {
+                console.error(
+                    `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
+                )
+                process.exit(2)
+            }
+        }
+        out.push(dryRun ? 'rulesets (dry run):' : 'rulesets:')
+        const gh = deps.gh ?? ghCli()
+        const unavailable = repoError ?? (await ghAvailable(gh))
+        if (unavailable) {
+            out.push(row('unavailable', 'rulesets', unavailable))
+            if (!dryRun) exitCode = 1
+        } else if (repo) {
+            const results = await runRulesets(
+                gh,
+                repo,
+                fleet ?? defaultFleet(repo),
+                dryRun,
+            )
+            for (const r of results) out.push(row(r.status, r.name, r.detail))
+            if (results.some((r) => r.status === 'failed')) exitCode = 1
         }
     }
 
@@ -391,7 +432,7 @@ export async function main(
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
     out.push(
-        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': tool(),`,
+        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': ${kind === 'site' ? '{}' : 'tool()'},`,
         '    (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
     )
     console.log(out.join('\n'))

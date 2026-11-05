@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
     checkRepos,
+    D1_WRITE,
     expiresOn,
     fromWrangler,
     type Policy,
@@ -84,6 +85,33 @@ describe('policies', () => {
         expect(fb.map((p) => p.permission_groups)).toEqual([
             [{ id: WORKERS_SCRIPTS_WRITE }],
         ])
+    })
+
+    test('no D1 grant unless the env sets d1', () => {
+        const groups = policies(example_project, prod, ids).flatMap(
+            (p) => p.permission_groups,
+        )
+        expect(groups).not.toContainEqual({ id: D1_WRITE })
+        expect(policies(example_project, { ...prod, d1: false }, ids)).toEqual(
+            policies(example_project, prod, ids),
+        )
+    })
+
+    test("d1 adds D1 Write on the env's own account, in its own policy", () => {
+        const d1 = policies(example_project, { ...prod, d1: true }, ids).filter(
+            (p) => p.permission_groups.some((g) => g.id === D1_WRITE),
+        )
+        expect(d1).toEqual([
+            {
+                effect: 'allow',
+                permission_groups: [{ id: D1_WRITE }],
+                resources: { [acct]: '*' },
+            },
+        ])
+        const other = { ...prod, d1: true, account: 'e'.repeat(32) }
+        expect(policies(example_project, other, ids).at(-1)?.resources).toEqual(
+            { [`com.cloudflare.api.account.${'e'.repeat(32)}`]: '*' },
+        )
     })
 
     test('a zone without an id fails rather than widening', () => {
@@ -267,6 +295,7 @@ describe('checkRepos', () => {
                         env: 'prod',
                         worker: 3,
                         zones: 'example.com',
+                        d1: 'yes',
                         account: 'x',
                         secret: 'org',
                         wranglr: 'wrangler.toml',
@@ -298,6 +327,7 @@ describe('checkRepos', () => {
             '"a/b".envs[0].wranglr: unknown field',
             '"a/b".envs[3].secret: a second \'repo\' env',
             '"a/b".envs[0].zones: not a list of zone names',
+            '"a/b".envs[0].d1: not true or false',
             '"a/b".envs[0].account: not a 32-hex account id',
             '"a/b".envs[1].env: duplicate "prod"',
             '"a/b".envs[1].fallback: needs reason and since',
