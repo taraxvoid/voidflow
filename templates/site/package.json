@@ -9,7 +9,7 @@
     },
     "devDependencies": {
         "@taraxvoid/voidflow": "{{version}}",
-        "@biomejs/biome": "2.6.3",
+        "@biomejs/biome": "2.6.4",
         "@playwright/test": "1.64.1"
     }
 }
