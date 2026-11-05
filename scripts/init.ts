@@ -48,6 +48,7 @@ export const PRESETS: Record<
     full: { files: 'all', settings: true },
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
+    ci: { files: ['ci'], settings: false },
     // Opt-in only: rulesets block direct pushes to main, which surprises a
     // fresh repo before its first push.
     rulesets: { files: null, settings: false, rulesets: true },
@@ -58,8 +59,7 @@ const KINDS: Kind[] = ['tool', 'site']
 const OPTIONS = {
     kind: { type: 'string' },
     preset: { type: 'string', default: 'full' },
-    'skip-file': { type: 'string', multiple: true, default: [] as string[] },
-    'skip-setting': { type: 'string', multiple: true, default: [] as string[] },
+    skip: { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
     repo: { type: 'string' },
@@ -72,8 +72,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
 
   --kind tool|site        which starter files to write (not needed with --preset settings)
   --preset <name>         ${Object.keys(PRESETS).join('|')} (default full)
-  --skip-file <name>      leave this file out (repeatable)
-  --skip-setting <name>   leave this setting alone (repeatable)
+  --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests
   --repo owner/name       the GitHub repo (default: the origin remote)
@@ -166,20 +165,13 @@ export async function main(
     }
 
     const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
-    for (const n of values['skip-file']) {
-        if (!validFiles.includes(n))
+    const valid = [...validFiles, ...settingNames()]
+    for (const n of values.skip) {
+        if (!valid.includes(n))
             fail(
-                `unknown --skip-file "${n}", expected one of: ${validFiles.join(', ')}`,
+                `unknown --skip "${n}", expected one of: ${valid.join(', ')}`,
                 prog,
             )
-    }
-    for (const n of values['skip-setting']) {
-        if (!settingNames().includes(n)) {
-            fail(
-                `unknown --skip-setting "${n}", expected one of: ${settingNames().join(', ')}`,
-                prog,
-            )
-        }
     }
 
     const dir = resolve(positionals[0] ?? '.')
@@ -227,7 +219,7 @@ export async function main(
         }
         const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
-            ...values['skip-file'],
+            ...values.skip,
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
         fileActions = planFiles(
@@ -266,7 +258,7 @@ export async function main(
             if (!dryRun) exitCode = 1
         } else if (repo) {
             settingResults = await runSettings(gh, repo, {
-                skip: new Set(values['skip-setting']),
+                skip: new Set(values.skip),
                 enablePvr,
                 enableAiScan,
                 dryRun,
@@ -331,7 +323,7 @@ export async function main(
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
     out.push(
-        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': tool(),`,
+        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': ${kind === 'site' ? '{}' : 'tool()'},`,
         '    (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
     )
     console.log(out.join('\n'))

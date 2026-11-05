@@ -73,6 +73,12 @@ release PR proposes the same version again. A `Release-As:` footer in a PR
 body isn't reliable: CodeRabbit appends its summary to the body, so the footer
 is no longer the last paragraph of the squash commit and isn't parsed.
 
+A `Release-As` footer on `next` reaches `main` with the promotion, and
+release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
+start a prerelease line makes the stable release PR propose `1.0.0-next`. The
+newest footer wins, so the same fix applies: a squash-merged PR to `main`
+ending `Release-As: 1.0.0`.
+
 ## Approve the npm release
 
 npm packages are published with `npm stage publish`: the workflow uploads each
