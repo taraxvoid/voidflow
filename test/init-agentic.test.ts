@@ -293,17 +293,10 @@ describe('init --enable-agentic', () => {
         expect(r.code).toBe(2)
     })
 
-    test('--skip-file agentic also skips the deps-review install', async () => {
+    test('--skip agentic also skips the deps-review install', async () => {
         let ran = false
         const r = await run(
-            [
-                '--kind',
-                'tool',
-                '--enable-agentic',
-                '--skip-file',
-                'agentic',
-                repo(),
-            ],
+            ['--kind', 'tool', '--enable-agentic', '--skip', 'agentic', repo()],
             fakeGh().gh,
             async () => ((ran = true), { code: 0, err: '' }),
         )
