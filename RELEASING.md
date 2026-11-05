@@ -74,6 +74,8 @@ floating `v0` tag are created before approval; actions consumers pin git tags,
 so this is fine, but `npm install` of the new version works only after
 approval. JSR publishes directly. CI cannot approve: approval and
 `npm stage list` need a 2FA-capable npm session, not the workflow's OIDC token.
+The publish job's summary lists each staged id with its `npm stage approve <id>`
+command, so you don't need the npm email to find them.
 
 Rerunning the publish job is safe: a version that is already published is
 skipped, and one that is already staged makes the registry return a 409,

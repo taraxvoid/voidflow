@@ -161,6 +161,12 @@ jobs:
             exit 1
           fi
 
+      # The tag checkout below replaces the working tree, and a tag cut before
+      # this helper existed (a manual republish) does not have it. Keep the
+      # copy from the workflow branch.
+      - name: Keep the stage summary helper from the workflow branch
+        run: cp scripts/stage-summary.sh "$RUNNER_TEMP/stage-summary.sh"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
@@ -298,6 +304,7 @@ jobs:
           : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           log=$(mktemp)
           if npm stage publish "$TARBALL" --tag "$DIST_TAG" "${flags[@]}" 2>&1 | tee "$log"; then
+            bash "$RUNNER_TEMP/stage-summary.sh" "$log"
             exit 0
           fi
           # Staged versions share the published-version index, so restaging is
@@ -326,6 +333,7 @@ jobs:
           : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
           log=$(mktemp)
           if npm stage publish "$TARBALL" --tag "$DIST_TAG" --loglevel verbose "${flags[@]}" 2>&1 | tee "$log"; then
+            bash "$RUNNER_TEMP/stage-summary.sh" "$log"
             exit 0
           fi
           # See the scoped step: a 409 means this version is already staged.
