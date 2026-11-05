@@ -6,7 +6,9 @@ import {
     diffPins,
     parseSpec,
     parseUses,
+    pinRemote,
     registrySignals,
+    registryUrl,
     tagMatches,
 } from '../scripts/deps-signals.ts'
 
@@ -207,5 +209,44 @@ describe('action pins', () => {
         expect(tagMatches(out, 'v1.3.0', 'c'.repeat(40))).toBe(false)
         expect(tagMatches(`${SHA_B}\trefs/tags/v2\n`, 'v2', SHA_B)).toBe(true)
         expect(tagMatches('', 'v2', SHA_B)).toBe(false)
+    })
+
+    test('parseUses stays linear on a long run of blanks', () => {
+        const start = performance.now()
+        parseUses(`${' \t'.repeat(50_000)}x`)
+        expect(performance.now() - start).toBeLessThan(500)
+    })
+
+    test('pinRemote accepts GitHub repos and plain tags only', () => {
+        const pin = (action: string, tag: string | null) => ({
+            action,
+            sha: SHA_A,
+            tag,
+        })
+        expect(pinRemote(pin('actions/checkout', 'v4.2.2'))).toBe(
+            'https://github.com/actions/checkout',
+        )
+        expect(pinRemote(pin('github/codeql-action/upload-sarif', 'v4'))).toBe(
+            'https://github.com/github/codeql-action',
+        )
+        expect(pinRemote(pin('a/b', '--upload-pack=x'))).toBeNull()
+        expect(pinRemote(pin('-x/b', 'v1'))).toBeNull()
+        expect(pinRemote(pin('../b', 'v1'))).toBeNull()
+        expect(pinRemote(pin('a/..', 'v1'))).toBeNull()
+        expect(pinRemote(pin('a/b', null))).toBeNull()
+    })
+})
+
+describe('registryUrl', () => {
+    test('encodes the scope slash and rejects names npm would not accept', () => {
+        expect(registryUrl('left-pad')).toBe(
+            'https://registry.npmjs.org/left-pad',
+        )
+        expect(registryUrl('@types/node')).toBe(
+            'https://registry.npmjs.org/@types%2Fnode',
+        )
+        expect(registryUrl('@a/b/../c')).toBeNull()
+        expect(registryUrl('a/b')).toBeNull()
+        expect(registryUrl('../x')).toBeNull()
     })
 })

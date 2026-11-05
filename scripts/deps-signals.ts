@@ -169,7 +169,9 @@ export function parseUses(yaml: string): { pins: ActionPin[]; flags: Flag[] } {
     const pins: ActionPin[] = []
     const flags: Flag[] = []
     for (const m of yaml.matchAll(
-        /^[ \t]*-?[ \t]*uses:[ \t]*([^\s#]+)[ \t]*(?:#[ \t]*(\S+))?/gm,
+        // `(?:-[ \t]*)?`, not `-?[ \t]*`: two adjacent `[ \t]*` runs backtrack
+        // quadratically on a long run of blanks (ReDoS).
+        /^[ \t]*(?:-[ \t]*)?uses:[ \t]*([^\s#]+)[ \t]*(?:#[ \t]*(\S+))?/gm,
     )) {
         const [ref, tag] = [m[1].replace(/^['"]|['"]$/g, ''), m[2] ?? null]
         if (ref.startsWith('./')) continue
@@ -184,6 +186,27 @@ export function parseUses(yaml: string): { pins: ActionPin[]; flags: Flag[] } {
         } else pins.push({ action, sha, tag })
     }
     return { pins, flags }
+}
+
+// npm package names (legacy ones may have capitals); scoped names have one `/`.
+const NPM_NAME = /^(?:@[A-Za-z0-9][\w.~-]*\/)?[A-Za-z0-9][\w.~-]*$/
+
+/** Registry document URL for a package, or null for a name npm would reject. */
+export function registryUrl(name: string): string | null {
+    if (!NPM_NAME.test(name)) return null
+    return `https://registry.npmjs.org/${encodeURIComponent(name).replace(/^%40/, '@')}`
+}
+
+// GitHub owner/repo, optionally followed by a path to an action inside it.
+const ACTION = /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*(?:\/[\w./-]+)?$/
+const TAG = /^[A-Za-z0-9][\w.+/-]*$/
+
+/** The GitHub repo to ask about a pin, or null when the action or tag looks off. */
+export function pinRemote(p: ActionPin): string | null {
+    if (!p.tag || !ACTION.test(p.action) || !TAG.test(p.tag)) return null
+    const repo = p.action.split('/').slice(0, 2)
+    if (repo.some((seg) => /^\.+$/.test(seg))) return null
+    return `https://github.com/${repo.join('/')}`
 }
 
 const tagMajor = (tag: string | null) => tag?.match(/^v?(\d+)/)?.[1] ?? null
@@ -271,9 +294,12 @@ async function main(argv: string[]): Promise<number> {
             const typeFlags = classifyChange(c)
             flags.push(...typeFlags)
             if (typeFlags.length) continue
-            const res = await fetch(
-                `https://registry.npmjs.org/${c.name.replace('/', '%2F')}`,
-            )
+            const url = registryUrl(c.name)
+            if (url === null) {
+                flags.push({ subject: c.name, reason: 'invalid package name' })
+                continue
+            }
+            const res = await fetch(url)
             flags.push(
                 ...(res.ok
                     ? registrySignals(c, (await res.json()) as RegistryDocument)
@@ -300,10 +326,19 @@ async function main(argv: string[]): Promise<number> {
         const { verify, flags: pinFlags } = diffPins(was.pins, now.pins)
         flags.push(...pinFlags)
         for (const p of verify) {
-            const repo = p.action.split('/').slice(0, 2).join('/')
+            const remote = pinRemote(p)
+            if (remote === null) {
+                flags.push({
+                    subject: p.action,
+                    reason: 'unverifiable action or tag name',
+                })
+                continue
+            }
+            // `--` so no later argument can be read as an option (--upload-pack).
             const out = git([
                 'ls-remote',
-                `https://github.com/${repo}`,
+                '--',
+                remote,
                 `refs/tags/${p.tag}`,
                 `refs/tags/${p.tag}^{}`,
             ])
