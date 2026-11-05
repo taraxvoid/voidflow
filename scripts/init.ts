@@ -154,6 +154,8 @@ export async function main(
     if (wantFiles && kind === undefined)
         fail(`--preset ${values.preset} needs --kind tool|site`, prog)
 
+    if (values.config && !preset.rulesets)
+        fail('--config only applies with --preset rulesets', prog)
     if (preset.rulesets && !values.config && kind !== 'tool') {
         fail(
             kind === 'site'
@@ -275,8 +277,18 @@ export async function main(
         }
     }
 
-    // Rulesets half.
+    // Rulesets half. A bad --config is reported even when gh is unavailable.
     if (preset.rulesets) {
+        let fleet: Fleet | undefined
+        if (values.config) {
+            fleet = await loadOrExit(values.config, checkFleet)
+            if (repo && !fleet[repo]) {
+                console.error(
+                    `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
+                )
+                process.exit(2)
+            }
+        }
         out.push(dryRun ? 'rulesets (dry run):' : 'rulesets:')
         const gh = deps.gh ?? ghCli()
         const unavailable = repoError ?? (await ghAvailable(gh))
@@ -284,17 +296,12 @@ export async function main(
             out.push(row('unavailable', 'rulesets', unavailable))
             if (!dryRun) exitCode = 1
         } else if (repo) {
-            let fleet: Fleet = defaultFleet(repo)
-            if (values.config) {
-                fleet = await loadOrExit(values.config, checkFleet)
-                if (!fleet[repo]) {
-                    console.error(
-                        `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
-                    )
-                    process.exit(2)
-                }
-            }
-            const results = await runRulesets(gh, repo, fleet, dryRun)
+            const results = await runRulesets(
+                gh,
+                repo,
+                fleet ?? defaultFleet(repo),
+                dryRun,
+            )
             for (const r of results) out.push(row(r.status, r.name, r.detail))
             if (results.some((r) => r.status === 'failed')) exitCode = 1
         }

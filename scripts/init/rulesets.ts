@@ -62,8 +62,13 @@ const STATUS: Record<
         status: dryRun ? 'would-apply' : 'applied',
         detail: 'update',
     }),
-    // init never prunes, and unmanaged rulesets are not its business.
-    retire: () => null,
+    // init never prunes: point at the command that does.
+    retire: (o) => ({
+        name: `ruleset ${o.name}`,
+        status: 'unchanged',
+        detail: 'listed in retire, still active; run voidflow rulesets --prune',
+    }),
+    // Unmanaged rulesets are not init's business.
     unmanaged: () => null,
 }
 
@@ -73,7 +78,25 @@ export async function runRulesets(
     fleet: Fleet,
     dryRun: boolean,
 ): Promise<SettingResult[]> {
-    const api = ghRulesetApi(gh)
+    const inner = ghRulesetApi(gh)
+    // Writes that landed, so a later failure does not hide them.
+    const written: SettingResult[] = []
+    const api: RulesetApi = async <T>(
+        method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+        path: string,
+        body?: unknown,
+    ) => {
+        const r = await inner<T>(method, path, body)
+        if (method === 'POST' || method === 'PUT') {
+            const n = object(body)?.name
+            written.push({
+                name: `ruleset ${typeof n === 'string' ? n : path}`,
+                status: 'applied',
+                detail: method === 'POST' ? 'create' : 'update',
+            })
+        }
+        return r
+    }
     const name = 'rulesets'
     try {
         if (wantsMergeQueue(fleet[repo])) {
@@ -114,6 +137,7 @@ export async function runRulesets(
         })
     } catch (e) {
         return [
+            ...written,
             {
                 name,
                 status: 'failed',

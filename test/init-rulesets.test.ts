@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { build, tool } from '../rulesets/index.ts'
 import type { Gh, GhResult } from '../scripts/init/gh.ts'
+import { runRulesets } from '../scripts/init/rulesets.ts'
 import { main } from '../scripts/init.ts'
 
 class Exit extends Error {
@@ -184,5 +185,44 @@ describe('init --preset rulesets', () => {
         expect(r.out).not.toContain('rulesets:')
         expect(r.out).not.toContain('rulesets (dry run)')
         expect(f.writes).toEqual([])
+    })
+
+    test('a ruleset listed in retire is reported, not dropped', async () => {
+        const f = fakeRulesets({ existing: [{ name: 'legacy' }] })
+        const rows = await runRulesets(
+            f.gh,
+            'o/r',
+            { 'o/r': tool({ retire: ['legacy'] }) },
+            true,
+        )
+        const legacy = rows.find((x) => x.name === 'ruleset legacy')
+        expect(legacy?.detail).toContain('--prune')
+    })
+
+    test('a mid-run failure keeps the rulesets already written', async () => {
+        const f = fakeRulesets()
+        const rest = f.gh.rest
+        let posts = 0
+        f.gh.rest = async (method, path, body) => {
+            if (method === 'POST' && ++posts === 2)
+                return { status: 422, body: { message: 'nope' } }
+            return rest(method, path, body)
+        }
+        const rows = await runRulesets(
+            f.gh,
+            'o/r',
+            { 'o/r': tool({ tiers: ['main', 'next'] }) },
+            false,
+        )
+        expect(rows.map((x) => x.status)).toEqual(['applied', 'failed'])
+    })
+
+    test('--config without --preset rulesets exits 2', async () => {
+        const r = await run(
+            ['--kind', 'tool', '--config', './x.ts', repo()],
+            fakeRulesets().gh,
+        )
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('--config')
     })
 })
