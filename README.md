@@ -51,7 +51,7 @@ already as wanted, are reported `unchanged`.
 | Flag | Effect |
 |---|---|
 | `--kind tool\|site` | which starter files to write (not needed with `--preset settings`) |
-| `--preset full\|files\|settings` | both halves (default), only files, or only settings |
+| `--preset full\|files\|settings\|ci` | both halves (default), only files, only settings, or only the `ci.yml` workflow (needs `--kind`) |
 | `--skip-file <name>` | leave a file out (repeatable): `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security` |
 | `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
