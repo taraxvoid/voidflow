@@ -56,6 +56,7 @@ const OPTIONS = {
     'skip-setting': { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
+    'enable-agentic': { type: 'boolean', default: false },
     repo: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -69,6 +70,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --skip-setting <name>   leave this setting alone (repeatable)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests
+  --enable-agentic        opt in (experimental): repo settings and labels voidflow's agentic workflows rely on
   --repo owner/name       the GitHub repo (default: the origin remote)
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
@@ -170,6 +172,7 @@ export async function main(
     const dryRun = values['dry-run']
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
+    const enableAgentic = values['enable-agentic']
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -250,6 +253,7 @@ export async function main(
                 skip: new Set(values['skip-setting']),
                 enablePvr,
                 enableAiScan,
+                enableAgentic,
                 dryRun,
             })
             for (const r of settingResults)
@@ -271,9 +275,16 @@ export async function main(
         }
     }
 
+    if (enableAgentic && !settingResults.some((r) => r.name === 'auto-merge')) {
+        notes.push(
+            'agentic settings were not applied (the settings half did not run)',
+        )
+    }
+
     if (repo && preset.settings) {
         out.push('manual:')
-        for (const l of manualReminders(repo, enableAiScan)) out.push(`  ${l}`)
+        for (const l of manualReminders(repo, enableAiScan, enableAgentic))
+            out.push(`  ${l}`)
     }
     if (notes.length > 0) {
         out.push('notes:')
