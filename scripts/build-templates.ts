@@ -187,6 +187,14 @@ export function buildTemplates(root: string): Map<string, string> {
     )
     t.set('common/gitignore', 'node_modules/\ndist/\n.env*\n')
     t.set('common/SECURITY.md', securityMd)
+    // The gh-aw version agentic-locks.yml compiles with; init tells you to match it.
+    const ghAw = /default:\s*(v\d[\w.-]*)/.exec(
+        read(root, '.github/workflows/agentic-locks.yml'),
+    )?.[1]
+    t.set(
+        'common/gh-aw-version',
+        `${need(ghAw, 'agentic-locks.yml gh-aw-version default')}\n`,
+    )
     t.set('common/agentic-shadow.yml', agenticCaller(false))
     t.set('common/agentic-gate.yml', agenticCaller(true))
 

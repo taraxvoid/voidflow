@@ -112,6 +112,30 @@ export const FILE_ITEMS: FileItem[] = [
 ]
 
 /** Renovate preset that automerges low-risk updates once deps-review is required. */
+/**
+ * An existing `renovate.json` with the automerge preset added to `extends`,
+ * keeping everything else; null when it is not plain JSON with an array
+ * `extends` (the caller then reports the usual conflict).
+ */
+function mergeAutomerge(raw: string): string | null {
+    let parsed: { extends?: unknown }
+    try {
+        parsed = JSON.parse(raw)
+    } catch {
+        return null
+    }
+    if (typeof parsed !== 'object' || parsed === null) return null
+    if (!Array.isArray(parsed.extends)) return null
+    if (parsed.extends.includes(AUTOMERGE_PRESET)) return raw
+    const eol = raw.includes('\r\n') ? '\r\n' : '\n'
+    let text = json(
+        { ...parsed, extends: [...parsed.extends, AUTOMERGE_PRESET] },
+        detectIndent(raw),
+    )
+    if (!raw.endsWith('\n')) text = text.slice(0, -1)
+    return eol === '\r\n' ? text.replaceAll('\n', eol) : text
+}
+
 export const AUTOMERGE_PRESET =
     'github>taraxvoid/voidflow:deps-review-automerge'
 
@@ -340,6 +364,24 @@ export function planFiles(
             const shadow = withMarker(item.target, shadowTexts[0] ?? '', ctx)
             if (sameIgnoringMarkerVersion(existing, shadow)) {
                 actions.push({ ...base, status: 'merge', content })
+                continue
+            }
+        }
+        // A customised renovate.json keeps its settings: only the preset is
+        // added to its `extends`.
+        if (
+            item.name === 'renovate' &&
+            ctx.stage === 'gate' &&
+            sel.enableAgentic &&
+            !sameIgnoringMarkerVersion(existing, content)
+        ) {
+            const merged = mergeAutomerge(existing)
+            if (merged !== null) {
+                actions.push({
+                    ...base,
+                    status: merged === existing ? 'unchanged' : 'merge',
+                    content: merged,
+                })
                 continue
             }
         }

@@ -127,6 +127,19 @@ async function defaultGhAw(
     }
 }
 
+/** The gh-aw version the reusable agentic-locks workflow compiles with by default. */
+function agenticLocksGhAwVersion(): string | null {
+    try {
+        const text = readFileSync(
+            join(packageRoot(), 'templates/common/gh-aw-version'),
+            'utf8',
+        ).trim()
+        return /^v\d[\w.-]*$/.test(text) ? text : null
+    } catch {
+        return null
+    }
+}
+
 /** Install the deps-review workflow with `gh aw add`, pinned to this version. */
 async function installDepsReview(
     dir: string,
@@ -296,7 +309,14 @@ export async function main(
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
         }
-        if (values['enable-agentic'] && conflicts.length === 0) {
+        const agenticPlanned = fileActions.some((a) => a.name === 'agentic')
+        if (enableAgentic && (!agenticPlanned || conflicts.length > 0)) {
+            notes.push(
+                conflicts.length > 0
+                    ? 'deps-review was not installed (file conflicts, nothing written)'
+                    : 'deps-review was not installed (the files half did not include agentic)',
+            )
+        } else if (enableAgentic) {
             const r = await installDepsReview(
                 dir,
                 version,
@@ -345,10 +365,18 @@ export async function main(
         }
     }
 
-    if (enableAgentic && !settingResults.some((r) => r.name === 'auto-merge')) {
+    if (enableAgentic && !preset.settings) {
         notes.push(
             'agentic settings were not applied (the settings half did not run)',
         )
+    }
+    if (enableAgentic) {
+        const pin = agenticLocksGhAwVersion()
+        if (pin) {
+            notes.push(
+                `agentic-locks recompiles with gh-aw ${pin} and fails on a different lock; use the same version locally: gh extension install github/gh-aw --pin ${pin}`,
+            )
+        }
     }
 
     if (repo && preset.settings) {

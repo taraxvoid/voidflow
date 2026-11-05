@@ -292,4 +292,67 @@ describe('init --enable-agentic', () => {
         )
         expect(r.code).toBe(2)
     })
+
+    test('--skip-file agentic also skips the deps-review install', async () => {
+        let ran = false
+        const r = await run(
+            [
+                '--kind',
+                'tool',
+                '--enable-agentic',
+                '--skip-file',
+                'agentic',
+                repo(),
+            ],
+            fakeGh().gh,
+            async () => ((ran = true), { code: 0, err: '' }),
+        )
+        expect(ran).toBe(false)
+        expect(r.out).toContain('deps-review was not installed')
+    })
+
+    test('file conflicts say deps-review was not installed', async () => {
+        const dir = repo()
+        writeFileSync(join(dir, 'mise.toml'), '[tools]\n')
+        const r = await run(
+            ['--kind', 'tool', '--enable-agentic', dir],
+            fakeGh().gh,
+        )
+        expect(r.out).toContain('deps-review was not installed (file conflicts')
+    })
+
+    test('gate merges the preset into a customised renovate.json', async () => {
+        const dir = repo()
+        writeFileSync(
+            join(dir, 'renovate.json'),
+            '{\n  "extends": ["config:recommended"],\n  "labels": ["deps"]\n}\n',
+        )
+        const r = await run(
+            [
+                '--kind',
+                'tool',
+                '--enable-agentic',
+                '--agentic-stage',
+                'gate',
+                dir,
+            ],
+            fakeGh().gh,
+            async () => ({ code: 0, err: '' }),
+        )
+        expect(r.out).toMatch(/merge\s+renovate/)
+        const j = JSON.parse(readFileSync(join(dir, 'renovate.json'), 'utf8'))
+        expect(j.labels).toEqual(['deps'])
+        expect(j.extends).toEqual([
+            'config:recommended',
+            'github>taraxvoid/voidflow:deps-review-automerge',
+        ])
+    })
+
+    test('names the gh-aw version agentic-locks compiles with', async () => {
+        const r = await run(
+            ['--kind', 'tool', '--enable-agentic', '--dry-run', repo()],
+            fakeGh().gh,
+        )
+        expect(r.out).toMatch(/gh extension install github\/gh-aw --pin v\d/)
+    })
 })
