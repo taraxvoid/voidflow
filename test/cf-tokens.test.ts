@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
     checkRepos,
+    D1_WRITE,
     expiresOn,
     fromWrangler,
     type Policy,
@@ -84,6 +85,25 @@ describe('policies', () => {
         expect(fb.map((p) => p.permission_groups)).toEqual([
             [{ id: WORKERS_SCRIPTS_WRITE }],
         ])
+    })
+
+    test('no D1 grant unless the env asks for databases', () => {
+        const all = policies(example_project, prod, ids)
+        expect(all.flatMap((p) => p.permission_groups)).not.toContainEqual({
+            id: D1_WRITE,
+        })
+    })
+
+    test('D1 write is scoped to the named databases, never account-wide', () => {
+        const db = 'aaaaaaaa-0000-4000-8000-000000000001'
+        const d1 = policies(example_project, prod, { ...ids, d1: [db] }).filter(
+            (p) => p.permission_groups.some((g) => g.id === D1_WRITE),
+        )
+        expect(d1).toHaveLength(1)
+        expect(d1[0].permission_groups).toEqual([{ id: D1_WRITE }])
+        expect(d1[0].resources).toEqual({
+            [acct]: { [`com.cloudflare.edge.d1.database.${db}`]: '*' },
+        })
     })
 
     test('a zone without an id fails rather than widening', () => {
@@ -267,6 +287,7 @@ describe('checkRepos', () => {
                         env: 'prod',
                         worker: 3,
                         zones: 'example.com',
+                        d1: 'db',
                         account: 'x',
                         secret: 'org',
                         wranglr: 'wrangler.toml',
@@ -298,6 +319,7 @@ describe('checkRepos', () => {
             '"a/b".envs[0].wranglr: unknown field',
             '"a/b".envs[3].secret: a second \'repo\' env',
             '"a/b".envs[0].zones: not a list of zone names',
+            '"a/b".envs[0].d1: true or a list of database ids',
             '"a/b".envs[0].account: not a 32-hex account id',
             '"a/b".envs[1].env: duplicate "prod"',
             '"a/b".envs[1].fallback: needs reason and since',
@@ -362,6 +384,7 @@ describe('wrangler config', () => {
             worker: 'example_project',
             hosts: ['example_project.net'],
             zones: [],
+            d1: [],
         })
     })
 
@@ -382,6 +405,7 @@ describe('wrangler config', () => {
             worker: 'site-staging',
             hosts: ['old.example.com'],
             zones: [],
+            d1: [],
         })
     })
 
@@ -394,6 +418,7 @@ describe('wrangler config', () => {
         expect(resolveTarget({ env: 'prod' }, multi, zones)).toEqual({
             worker: 'site-prod',
             zones: ['example.com', 'example.net', 'other.biz'],
+            d1: [],
         })
     })
 
@@ -406,13 +431,57 @@ describe('wrangler config', () => {
     test("the env's own worker and zones win; zones: [] grants none", () => {
         expect(
             resolveTarget({ env: 'preview', zones: [] }, single, zones),
-        ).toEqual({ worker: 'example_project', zones: [] })
+        ).toEqual({ worker: 'example_project', zones: [], d1: [] })
         expect(
             resolveTarget(
                 { env: 'x', worker: 'w', zones: ['a.org'] },
                 undefined,
                 [],
             ),
-        ).toEqual({ worker: 'w', zones: ['a.org'] })
+        ).toEqual({ worker: 'w', zones: ['a.org'], d1: [] })
+    })
+
+    describe('d1', () => {
+        const A = 'aaaaaaaa-0000-4000-8000-000000000001'
+        const B = 'bbbbbbbb-0000-4000-8000-000000000002'
+        const withDb = {
+            name: 'site',
+            d1_databases: [
+                { binding: 'DB', database_name: 'site', database_id: A },
+                { binding: 'LOCAL', database_name: 'dev' },
+            ],
+            env: {
+                prod: { d1_databases: [{ binding: 'DB', database_id: B }] },
+                preview: {},
+            },
+        }
+
+        test('fromWrangler reads database ids, skipping bindings without one', () => {
+            expect(fromWrangler(withDb, 'other').d1).toEqual([A])
+        })
+
+        test("bindings are not inherited into an env block, like wrangler's", () => {
+            expect(fromWrangler(withDb, 'prod').d1).toEqual([B])
+            expect(fromWrangler(withDb, 'preview').d1).toEqual([])
+        })
+
+        test('an env only gets D1 when it asks: true reads wrangler', () => {
+            expect(resolveTarget({ env: 'other' }, withDb, []).d1).toEqual([])
+            expect(
+                resolveTarget({ env: 'other', d1: true }, withDb, []).d1,
+            ).toEqual([A])
+        })
+
+        test('an explicit list wins over wrangler', () => {
+            expect(
+                resolveTarget({ env: 'prod', d1: [A] }, withDb, []).d1,
+            ).toEqual([A])
+        })
+
+        test('d1: true with no database in wrangler fails instead of granting nothing', () => {
+            expect(() =>
+                resolveTarget({ env: 'preview', d1: true }, withDb, []),
+            ).toThrow('d1_databases')
+        })
     })
 })
