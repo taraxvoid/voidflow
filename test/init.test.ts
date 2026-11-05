@@ -182,6 +182,24 @@ describe('voidflow init', () => {
         expect(r.out).not.toContain('files:')
     })
 
+    test('--preset ci writes only ci.yml and touches no settings', async () => {
+        const dir = repo()
+        const f = fakeGh()
+        const r = await run(['--kind', 'tool', '--preset', 'ci', dir], f.gh)
+        expect(r.code).toBe(0)
+        expect(existsSync(join(dir, '.github/workflows/ci.yml'))).toBe(true)
+        expect(existsSync(join(dir, 'lefthook.yml'))).toBe(false)
+        expect(existsSync(join(dir, 'mise.toml'))).toBe(false)
+        expect(r.out).not.toContain('settings')
+        expect(f.writes.length).toBe(0)
+    })
+
+    test('--preset ci without --kind exits 2', async () => {
+        const r = await run(['--preset', 'ci', repo()])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('needs --kind')
+    })
+
     test('--preset files without --kind exits 2', async () => {
         const r = await run(['--preset', 'files', repo()])
         expect(r.code).toBe(2)

@@ -45,6 +45,7 @@ export const PRESETS: Record<
     full: { files: 'all', settings: true },
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
+    ci: { files: ['ci'], settings: false },
 }
 
 const KINDS: Kind[] = ['tool', 'site']
