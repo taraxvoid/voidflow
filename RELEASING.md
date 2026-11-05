@@ -63,6 +63,12 @@ patch bump. Fix it with a squash-merged PR to `main` whose body ends with a
 `Release-As: X.Y.Z` footer (the squash commit message is the PR body), then
 add the missed entries to the release PR's `CHANGELOG.md` by hand.
 
+A `Release-As` footer on `next` reaches `main` with the promotion, and
+release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
+start a prerelease line makes the stable release PR propose `1.0.0-next`. The
+newest footer wins, so the same fix applies: a squash-merged PR to `main`
+ending `Release-As: 1.0.0`.
+
 ## Approve the npm release
 
 npm packages are published with `npm stage publish`: the workflow uploads each
