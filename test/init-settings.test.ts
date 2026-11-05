@@ -113,8 +113,8 @@ describe('settings', () => {
             'update-branch',
             'delete-branch-on-merge',
             'actions-permissions',
-            'label deps:low-risk',
-            'label deps:needs-you',
+            'label-low-risk',
+            'label-needs-you',
         ])
     })
 

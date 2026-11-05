@@ -201,19 +201,37 @@ export const SETTINGS: Setting[] = [
     },
 ]
 
-/** Labels the deps-review agent applies; created up front with colours. */
+/**
+ * Labels the deps-review agent applies, created up front. Names follow
+ * rookery's convention: lowercase words joined by hyphens, so they never need
+ * quoting. `needs-you` is rookery's shared "blocked on a human" label, not a
+ * deps-only one. `was` is the old name: a repo that has it gets it renamed in
+ * place, so open PRs keep their label.
+ */
 const AGENTIC_LABELS = [
     {
-        name: 'deps:low-risk',
+        name: 'low-risk',
+        was: 'deps:low-risk',
         color: '0e8a16',
         description: 'Dependency update judged low risk by deps-review',
     },
     {
-        name: 'deps:needs-you',
+        name: 'needs-you',
+        was: 'deps:needs-you',
         color: 'd93f0b',
-        description: 'Dependency update that needs a human decision',
+        description: 'Blocked on a human decision',
     },
 ]
+
+async function labelExists(gh: Gh, repo: string, name: string) {
+    const r = await gh.rest(
+        'GET',
+        `repos/${repo}/labels/${encodeURIComponent(name)}`,
+    )
+    if (r.status === 404) return false
+    ok(r)
+    return true
+}
 
 function repoFlag(
     name: string,
@@ -267,19 +285,26 @@ function agenticSettings(): Setting[] {
         },
         ...AGENTIC_LABELS.map(
             (label): Setting => ({
-                name: `label ${label.name}`,
+                name: `label-${label.name}`,
                 optIn: 'agentic',
-                async read(gh, repo) {
-                    const r = await gh.rest(
-                        'GET',
-                        `repos/${repo}/labels/${encodeURIComponent(label.name)}`,
-                    )
-                    if (r.status === 404) return false
-                    ok(r)
-                    return true
+                read: (gh, repo) => labelExists(gh, repo, label.name),
+                async write(gh, repo) {
+                    const { name, color, description } = label
+                    if (await labelExists(gh, repo, label.was)) {
+                        await send(
+                            gh,
+                            'PATCH',
+                            `repos/${repo}/labels/${encodeURIComponent(label.was)}`,
+                            { new_name: name, color, description },
+                        )
+                    } else {
+                        await send(gh, 'POST', `repos/${repo}/labels`, {
+                            name,
+                            color,
+                            description,
+                        })
+                    }
                 },
-                write: (gh, repo) =>
-                    send(gh, 'POST', `repos/${repo}/labels`, label),
             }),
         ),
     ]
