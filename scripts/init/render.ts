@@ -14,6 +14,8 @@ export type RenderCtx = {
     kind: Kind
     repo: string | null
     cronMinute: number
+    /** Agentic rollout stage; shadow when unset. */
+    stage?: 'shadow' | 'gate'
 }
 
 /** Fill the init-time placeholders. A null sha pins the tag instead. */

@@ -56,7 +56,8 @@ already as wanted, are reported `unchanged`.
 | `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
 | `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
-| `--enable-agentic` | opt in, experimental: the repo settings and labels voidflow's agentic workflows rely on: allow auto-merge, always suggest updating PR branches, delete head branches on merge, workflow token read-only with Actions unable to approve PRs, and the `deps:low-risk` and `deps:needs-you` labels. The `COPILOT_GITHUB_TOKEN` secret is printed as a manual step. Each piece also works with `--skip-setting <name>` |
+| `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default) installs deps-review and the `agentic-locks` caller; `gate` also adds the `deps-review-gate` job and the Renovate `deps-review-automerge` preset (merged into `extends`). Moving a repo from shadow to gate merges both files, no `--force` needed |
+| `--enable-agentic` | opt in, experimental: installs deps-review with `gh aw add` (pinned to this version, needs the gh-aw extension), writes `.github/workflows/agentic.yml`, and applies the repo settings and labels the workflows rely on: allow auto-merge, always suggest updating PR branches, delete head branches on merge, workflow token read-only with Actions unable to approve PRs, and the `deps:low-risk` and `deps:needs-you` labels. The `COPILOT_GITHUB_TOKEN` secret is printed as a manual step. Each piece also works with `--skip-setting <name>` |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
 | `-f`, `--force` | overwrite files that differ |
 | `--dry-run` | plan both halves, change nothing |

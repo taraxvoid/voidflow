@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Gh, GhResult } from '../scripts/init/gh.ts'
@@ -77,7 +84,14 @@ function repo(): string {
     return dir
 }
 
-async function run(argv: string[], gh: Gh) {
+async function run(
+    argv: string[],
+    gh: Gh,
+    ghAw?: (
+        args: string[],
+        dir: string,
+    ) => Promise<{ code: number; err: string }>,
+) {
     const out: string[] = []
     const log = spyOn(console, 'log').mockImplementation(
         (...a) => void out.push(a.join(' ')),
@@ -87,7 +101,11 @@ async function run(argv: string[], gh: Gh) {
     }) as never)
     let code = -1
     try {
-        await main(argv, 'voidflow init', { gh, resolveSha: async () => 'sha' })
+        await main(argv, 'voidflow init', {
+            gh,
+            ghAw,
+            resolveSha: async () => 'sha',
+        })
     } catch (e) {
         if (!(e instanceof Exit)) throw e
         code = e.code
@@ -149,5 +167,129 @@ describe('init --enable-agentic', () => {
     test('prints the Copilot token secret as a manual step', async () => {
         const r = await run([...ARGV, '--dry-run', repo()], fakeGh().gh)
         expect(r.out).toContain('COPILOT_GITHUB_TOKEN')
+    })
+
+    test('shadow writes agentic.yml with the locks job only', async () => {
+        const dir = repo()
+        const calls: string[][] = []
+        const aw = async (args: string[]) => (
+            calls.push(args), { code: 0, err: '' }
+        )
+        await run(['--kind', 'tool', '--enable-agentic', dir], fakeGh().gh, aw)
+        const text = readFileSync(
+            join(dir, '.github/workflows/agentic.yml'),
+            'utf8',
+        )
+        expect(text).toContain('agentic-locks.yml@sha')
+        expect(text).not.toContain('deps-review-gate')
+        expect(readFileSync(join(dir, 'renovate.json'), 'utf8')).not.toContain(
+            'deps-review-automerge',
+        )
+        expect(calls).toEqual([
+            [
+                'add',
+                'taraxvoid/voidflow/agentic@v' + calls[0][1].split('@v')[1],
+            ],
+        ])
+    })
+
+    test('gate adds the gate job and the Renovate automerge preset', async () => {
+        const dir = repo()
+        const aw = async () => ({ code: 0, err: '' })
+        await run(
+            [
+                '--kind',
+                'tool',
+                '--enable-agentic',
+                '--agentic-stage',
+                'gate',
+                dir,
+            ],
+            fakeGh().gh,
+            aw,
+        )
+        expect(
+            readFileSync(join(dir, '.github/workflows/agentic.yml'), 'utf8'),
+        ).toContain('deps-review-gate.yml@sha')
+        expect(readFileSync(join(dir, 'renovate.json'), 'utf8')).toContain(
+            'github>taraxvoid/voidflow:deps-review-automerge',
+        )
+    })
+
+    test('moving a shadow repo to gate merges renovate.json, no --force', async () => {
+        const dir = repo()
+        // Like the real `gh aw add`, leave the workflow Markdown behind.
+        const aw = async (_args: string[], at: string) => {
+            mkdirSync(join(at, '.github/workflows'), { recursive: true })
+            writeFileSync(join(at, '.github/workflows/deps-review.md'), '')
+            return { code: 0, err: '' }
+        }
+        await run(['--kind', 'tool', '--enable-agentic', dir], fakeGh().gh, aw)
+        const r = await run(
+            [
+                '--kind',
+                'tool',
+                '--enable-agentic',
+                '--agentic-stage',
+                'gate',
+                dir,
+            ],
+            fakeGh().gh,
+            aw,
+        )
+        expect(r.out).toMatch(/merge\s+renovate/)
+        expect(r.out).not.toContain('conflict')
+        expect(readFileSync(join(dir, 'renovate.json'), 'utf8')).toContain(
+            'deps-review-automerge',
+        )
+        const again = await run(
+            [
+                '--kind',
+                'tool',
+                '--enable-agentic',
+                '--agentic-stage',
+                'gate',
+                dir,
+            ],
+            fakeGh().gh,
+            aw,
+        )
+        expect(again.out).toMatch(/unchanged\s+renovate/)
+        expect(again.out).toMatch(/unchanged\s+deps-review/)
+    })
+
+    test('a failing gh aw add is reported with the manual command', async () => {
+        const dir = repo()
+        const r = await run(
+            ['--kind', 'tool', '--enable-agentic', dir],
+            fakeGh().gh,
+            async () => ({ code: 1, err: 'unknown command "aw"\n' }),
+        )
+        expect(r.out).toMatch(/failed\s+deps-review/)
+        expect(r.out).toContain('gh aw add taraxvoid/voidflow/agentic@v')
+        expect(r.code).toBe(1)
+    })
+
+    test('--dry-run plans deps-review without running gh aw', async () => {
+        const dir = repo()
+        let ran = false
+        const r = await run(
+            ['--kind', 'tool', '--enable-agentic', '--dry-run', dir],
+            fakeGh().gh,
+            async () => ((ran = true), { code: 0, err: '' }),
+        )
+        expect(ran).toBe(false)
+        expect(r.out).toMatch(/would-apply\s+deps-review/)
+        expect(existsSync(join(dir, '.github/workflows/agentic.yml'))).toBe(
+            false,
+        )
+    })
+
+    test('an unknown --agentic-stage exits 2', async () => {
+        const r = await run(
+            ['--kind', 'tool', '--agentic-stage', 'nope', repo()],
+            fakeGh().gh,
+        )
+        expect(r.code).toBe(2)
     })
 })

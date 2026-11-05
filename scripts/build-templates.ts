@@ -89,6 +89,32 @@ jobs:
 
 ${sarifJob}`
 
+const agenticCaller = (gate: boolean) => `name: Agentic
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agentic-locks:
+    uses: taraxvoid/voidflow/.github/workflows/agentic-locks.yml@{{sha}} # v{{version}}
+${
+    gate
+        ? `
+  deps-review-gate:
+    permissions:
+      checks: write
+    uses: taraxvoid/voidflow/.github/workflows/deps-review-gate.yml@{{sha}} # v{{version}}
+`
+        : ''
+}`
+
 const lefthook = `remotes:
   - git_url: https://github.com/taraxvoid/voidflow
     ref: v{{version}} # a tag, not a SHA
@@ -161,6 +187,8 @@ export function buildTemplates(root: string): Map<string, string> {
     )
     t.set('common/gitignore', 'node_modules/\ndist/\n.env*\n')
     t.set('common/SECURITY.md', securityMd)
+    t.set('common/agentic-shadow.yml', agenticCaller(false))
+    t.set('common/agentic-gate.yml', agenticCaller(true))
 
     t.set('tool/ci.yml', toolCi)
     t.set(

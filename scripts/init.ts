@@ -57,6 +57,7 @@ const OPTIONS = {
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
     'enable-agentic': { type: 'boolean', default: false },
+    'agentic-stage': { type: 'string', default: 'shadow' },
     repo: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -70,7 +71,8 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --skip-setting <name>   leave this setting alone (repeatable)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests
-  --enable-agentic        opt in (experimental): repo settings and labels voidflow's agentic workflows rely on
+  --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
+  --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
@@ -83,6 +85,11 @@ Settings: ${settingNames().join(', ')}`
 
 type Deps = {
     gh?: Gh
+    /** Runs `gh aw` in dir; for tests. */
+    ghAw?: (
+        args: string[],
+        dir: string,
+    ) => Promise<{ code: number; err: string }>
     resolveSha?: (version: string) => Promise<string | null>
 }
 
@@ -103,6 +110,44 @@ function existingCronMinute(dir: string): number | null {
     const m = /cron:\s*'(\d{1,2}) 6 \* \* \*'/.exec(text)
     const n = m ? Number(m[1]) : Number.NaN
     return n >= 0 && n <= 59 ? n : null
+}
+
+async function defaultGhAw(
+    args: string[],
+    dir: string,
+): Promise<{ code: number; err: string }> {
+    try {
+        const r = await capture(['gh', 'aw', ...args], undefined, {
+            timeoutMs: 120_000,
+            cwd: dir,
+        })
+        return { code: r.code, err: r.err }
+    } catch (e) {
+        return { code: 127, err: (e as Error).message }
+    }
+}
+
+/** Install the deps-review workflow with `gh aw add`, pinned to this version. */
+async function installDepsReview(
+    dir: string,
+    version: string,
+    dryRun: boolean,
+    run: NonNullable<Deps['ghAw']>,
+): Promise<{ name: string; status: string; detail: string }> {
+    const name = 'deps-review'
+    const spec = `taraxvoid/voidflow/agentic@v${version}`
+    if (existsSync(join(dir, '.github/workflows/deps-review.md')))
+        return { name, status: 'unchanged', detail: '' }
+    if (dryRun)
+        return { name, status: 'would-apply', detail: `gh aw add ${spec}` }
+    const r = await run(['add', spec], dir)
+    return r.code === 0
+        ? { name, status: 'applied', detail: `gh aw add ${spec}` }
+        : {
+              name,
+              status: 'failed',
+              detail: `${r.err.trim().split('\n')[0] || `exit ${r.code}`}; install gh-aw and run: gh aw add ${spec}`,
+          }
 }
 
 async function isWorkTree(dir: string): Promise<boolean> {
@@ -169,6 +214,13 @@ export async function main(
     if (!(await isWorkTree(dir)))
         fail(`${dir} is not a git work tree (run git init first)`, prog)
 
+    const stage = values['agentic-stage']
+    if (stage !== 'shadow' && stage !== 'gate')
+        fail(
+            `unknown --agentic-stage "${stage}", expected shadow or gate`,
+            prog,
+        )
+
     const dryRun = values['dry-run']
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
@@ -208,6 +260,7 @@ export async function main(
             repo,
             cronMinute:
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
+            stage,
         }
         const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
@@ -216,7 +269,13 @@ export async function main(
         ])
         fileActions = planFiles(
             dir,
-            { kind, skip, force: values.force, enablePvr },
+            {
+                kind,
+                skip,
+                force: values.force,
+                enablePvr,
+                enableAgentic: values['enable-agentic'],
+            },
             ctx,
         )
         const conflicts = fileActions.filter((a) => a.status === 'conflict')
@@ -236,6 +295,17 @@ export async function main(
             )
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
+        }
+        if (values['enable-agentic'] && conflicts.length === 0) {
+            const r = await installDepsReview(
+                dir,
+                version,
+                dryRun,
+                deps.ghAw ?? defaultGhAw,
+            )
+            out.push('agentic:')
+            out.push(row(r.status, r.name, r.detail))
+            if (r.status === 'failed' && !dryRun) exitCode = 1
         }
     }
 
