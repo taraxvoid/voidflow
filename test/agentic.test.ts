@@ -67,10 +67,9 @@ describe('deps-review agent', () => {
     })
 
     // Renaming the labels breaks callers' filters.
-    test('applies only its two labels', () => {
-        const labels = ['low-risk', 'needs-you']
-        expect(outputs['add-labels'].allowed).toEqual(labels)
-        expect(outputs['remove-labels'].allowed).toEqual(labels)
+    test('adds its two labels but can only remove low-risk (humans clear needs-you)', () => {
+        expect(outputs['add-labels'].allowed).toEqual(['low-risk', 'needs-you'])
+        expect(outputs['remove-labels'].allowed).toEqual(['low-risk'])
     })
 
     describe('deps-gate job (owns the deps-review check)', () => {

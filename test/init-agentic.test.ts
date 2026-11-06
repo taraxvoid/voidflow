@@ -45,10 +45,9 @@ function fakeGh() {
             }
             const m = /^repos\/o\/r\/labels\/(.+)$/.exec(path)
             if (m) {
-                if (method === 'PATCH') {
+                if (method === 'DELETE') {
                     labels.delete(decodeURIComponent(m[1]))
-                    labels.add((body as { new_name: string }).new_name)
-                    return { status: 200, body: body }
+                    return { status: 204, body: {} }
                 }
                 return labels.has(decodeURIComponent(m[1]))
                     ? { status: 200, body: {} }
@@ -162,16 +161,14 @@ describe('init --enable-agentic', () => {
             expect(again.out).toMatch(new RegExp(`unchanged\\s+${n}`))
     })
 
-    test('renames the old deps: labels in place', async () => {
+    test('deletes the old deps: labels and creates the new ones', async () => {
         const f = fakeGh()
         f.labels.add('deps:low-risk')
         f.labels.add('deps:needs-you')
         const r = await run([...ARGV, repo()], f.gh)
         expect(r.out).toMatch(/applied\s+label-low-risk/)
         expect([...f.labels].sort()).toEqual(['low-risk', 'needs-you'])
-        expect(
-            f.writes.some((w) => w.startsWith('POST') && w.includes('labels')),
-        ).toBe(false)
+        expect(f.writes.filter((w) => w.startsWith('DELETE'))).toHaveLength(2)
     })
 
     test('prints the Copilot token secret as a manual step', async () => {
