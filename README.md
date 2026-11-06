@@ -428,15 +428,26 @@ Dependabot triggers only see Dependabot secrets.
 Roll it out in stages:
 
 1. **Shadow.** Install it and read its verdicts for a few weeks. Nothing merges.
-2. **Gate.** Make `deps-review` a required check, give human PRs a passing one
-   with the gate workflow, and let Renovate automerge low-risk updates:
+2. **Gate.** Make `deps-review` a required check, post it on everyone else's
+   PRs with the gate workflow, and let Renovate automerge low-risk updates:
 
    ```yaml
      deps-review-gate:
        uses: taraxvoid/voidflow/.github/workflows/deps-review-gate.yml@<sha> # vX.Y.Z
        permissions:
          checks: write
+         contents: read
+         pull-requests: read
    ```
+
+   The gate passes a PR that changes no lockfile and no dependency field of
+   any `package.json`. One that does (an agent's or a contributor's) fails as
+   "Needs you" with the files listed, since nothing reviewed those
+   dependencies: review them, then merge with an admin bypass. It fails
+   closed: a `package.json` it cannot read or parse is listed too, a PR near
+   GitHub's 3000-file listing limit fails, and if the file list itself cannot
+   be fetched the step errors and posts no check, so the required check stays
+   unmet.
 
    ```json
    { "extends": ["github>taraxvoid/voidflow", "github>taraxvoid/voidflow:deps-review-automerge"] }
