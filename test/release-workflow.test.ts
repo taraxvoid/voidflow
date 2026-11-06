@@ -83,10 +83,18 @@ describe('release-please.yml publish: npm tarballs are attested', () => {
         }
     })
 
+    test('the mirror README is the pointer blurb followed by the full README', () => {
+        const run: string = steps[index('Pack npm tarballs')].run
+        expect(run).toContain('cat scripts/mirror-readme.md; printf')
+        expect(run).toContain('tail -n +2 README.md')
+    })
+
     test('the mirror is packed from a restored tree, so JSR gets the real README', () => {
         const run: string = steps[index('Pack npm tarballs')].run
         expect(
             run.indexOf('git checkout -- package.json README.md'),
-        ).toBeGreaterThan(run.indexOf('cp scripts/mirror-readme.md README.md'))
+        ).toBeGreaterThan(
+            run.indexOf('cp "$PACK_DIR/mirror-README.md" README.md'),
+        )
     })
 })

@@ -231,6 +231,11 @@ Node 24+ (`bunx` or `npx`); the package ships it built to `dist/`. In this repo,
 the `rulesets-*` and `cf-tokens-*` recipes run the same entry point
 (`scripts/cli.ts`) from the checkout.
 
+If you run a canary (`@next`) with an npm release-age cooldown set, add
+`min-release-age-exclude[]=voidflow` and `min-release-age-exclude[]=@taraxvoid/*`
+to your `.npmrc`, or `@next` resolves to an older release. See
+[Trying a canary release](README.md#trying-a-canary-release).
+
 The config modules stay TypeScript under either runtime. Node 24 loads them by
 stripping types, which covers erasable syntax only: type annotations, `type` /
 `interface`, `as` and `satisfies`, but no `enum`, `namespace` or constructor

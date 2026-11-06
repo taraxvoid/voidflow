@@ -34,6 +34,25 @@ Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md).
 [`STABILITY.md`](STABILITY.md) says what minors, patches and majors may change
 and how deprecations reach you before a removal.
 
+### Trying a canary release
+
+Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init`
+(or the `bunx` form) runs the newest one. If your npm config has a release-age
+cooldown (`min-release-age` or `before`), a fresh canary is filtered
+out and `@next` silently resolves to an older version. For the unscoped mirror
+this fails with `could not determine executable to run`, because the old
+release has no `voidflow` bin. Exempt voidflow in `~/.npmrc`:
+
+```ini
+min-release-age=7
+min-release-age-exclude[]=voidflow
+min-release-age-exclude[]=@taraxvoid/*
+```
+
+Only the matching packages are exempt; their dependencies still follow the
+cooldown. To check what resolves, run `npm view @taraxvoid/voidflow@next version`.
+Bun has the same idea in `bunfig.toml` (`minimumReleaseAgeExcludes`).
+
 ### Starting a repo
 
 `voidflow init` writes the starter files for a tool or an Astro site and
