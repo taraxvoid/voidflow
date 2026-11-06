@@ -146,7 +146,8 @@ describe('voidflow init', () => {
         expect(r.out).toContain(
             'https://github.com/o/r/settings/security_analysis',
         )
-        expect(r.out).toContain("'o/r': tool()")
+        expect(r.out).toContain("'o/r': {},")
+        expect(r.out).toContain('--config')
     })
 
     test('a conflict exits 1, writes no files, and still applies settings', async () => {
@@ -355,5 +356,54 @@ describe('voidflow init', () => {
         expect(
             readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8'),
         ).toBe(ci)
+    })
+})
+
+describe('voidflow init --config', () => {
+    const SRC = `// fleet\nexport const REPOS = {\n    'a/b': {\n        retire: ['x'], // }\n    },\n    // trailing\n}\n`
+    const S = ['--preset', 'settings']
+
+    function cfg(text: string): string {
+        const dir = mkdtempSync(join(tmpdir(), 'voidflow-fleet-'))
+        roots.push(dir)
+        const p = join(dir, 'rulesets.ts')
+        writeFileSync(p, text)
+        return p
+    }
+
+    test('adds the repo to REPOS, once', async () => {
+        const p = cfg(SRC)
+        const r = await run([...S, '--config', p, repo()])
+        expect(r.code).toBe(0)
+        expect(r.out).toMatch(/added\s+rulesets\s+o\/r/)
+        const text = readFileSync(p, 'utf8')
+        expect(text).toContain("    // trailing\n    'o/r': {},\n}")
+        expect(r.out).not.toContain('by hand')
+        const again = await run([...S, '--config', p, repo()])
+        expect(again.out).toMatch(/unchanged\s+rulesets/)
+        expect(readFileSync(p, 'utf8')).toBe(text)
+    })
+
+    test('adds a missing comma and fills an empty object', async () => {
+        const a = cfg("export const REPOS = {\n    'a/b': {}\n}\n")
+        await run([...S, '--config', a, repo()])
+        expect(readFileSync(a, 'utf8')).toBe(
+            "export const REPOS = {\n    'a/b': {},\n    'o/r': {},\n}\n",
+        )
+        const b = cfg('export default {}\n')
+        await run([...S, '--config', b, repo()])
+        expect(readFileSync(b, 'utf8')).toBe(
+            "export default {\n    'o/r': {},\n}\n",
+        )
+    })
+
+    test('--dry-run writes nothing; an unparseable config fails', async () => {
+        const p = cfg(SRC)
+        const d = await run([...S, '--dry-run', '--config', p, repo()])
+        expect(d.out).toMatch(/added\s+rulesets/)
+        expect(readFileSync(p, 'utf8')).toBe(SRC)
+        const r = await run([...S, '--config', cfg('const x = 1\n'), repo()])
+        expect(r.code).toBe(1)
+        expect(r.out).toMatch(/failed\s+rulesets/)
     })
 })

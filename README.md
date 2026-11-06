@@ -54,6 +54,7 @@ already as wanted, are reported `unchanged`.
 | `--preset full\|files\|settings\|ci` | both halves (default), only files, only settings, or only the `ci.yml` workflow (needs `--kind`) |
 | `--skip-file <name>` | leave a file out (repeatable): `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security` |
 | `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
+| `--config <module>` | also add the repo (as `'owner/name': {},`) to the fleet rulesets config in your infra repo; comments and other entries are left as written. Review and commit that file, then run its rulesets plan and apply |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
 | `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
