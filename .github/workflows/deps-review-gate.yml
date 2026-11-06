@@ -45,49 +45,123 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          # The lockfiles deps-signals knows (plus npm-shrinkwrap.json), and
-          # the package.json fields that decide what gets installed.
-          lockfiles=' bun.lock bun.lockb pnpm-lock.yaml package-lock.json npm-shrinkwrap.json yarn.lock '
+          # The lockfiles deps-signals knows (plus npm-shrinkwrap.json and
+          # deno.lock), and the package.json fields that decide what gets
+          # installed.
+          lockfiles=' bun.lock bun.lockb deno.lock pnpm-lock.yaml package-lock.json npm-shrinkwrap.json yarn.lock '
           fields='["dependencies", "devDependencies", "optionalDependencies",
-            "peerDependencies", "bundleDependencies", "bundledDependencies",
+            "peerDependencies", "peerDependenciesMeta", "dependenciesMeta",
+            "bundleDependencies", "bundledDependencies",
             "overrides", "resolutions", "pnpm", "patchedDependencies",
             "trustedDependencies", "workspaces", "catalog", "catalogs"]'
+          # The pull request files API stops at 3000 files.
+          file_limit=3000
+          listed_max=100
 
-          # package.json's dependency fields at a commit; {} when the file is absent.
+          # A repo path as a URL path: each segment percent-encoded, slashes kept.
+          enc() { jq -rn --arg p "$1" '$p | split("/") | map(@uri) | join("/")'; }
+
+          # package.json's dependency fields at a commit. A file that is absent
+          # there (HTTP 404) has none: {}. Any other failure, or a body that is
+          # not a JSON object, is an error, so the caller can fail closed
+          # instead of comparing two empty results as equal.
           deps() {
-            { gh api -H 'Accept: application/vnd.github.raw+json' \
-                "repos/$REPO/contents/$1?ref=$2" 2>/dev/null || echo '{}'; } \
-              | jq -S --argjson f "$fields" '. as $p | [$f[] | select($p[.] != null) | {(.): $p[.]}] | add // {}'
+            local body err
+            err=$(mktemp)
+            if ! body=$(gh api -H 'Accept: application/vnd.github.raw+json' \
+                "repos/$REPO/contents/$(enc "$1")?ref=$2" 2>"$err"); then
+              if ! grep -q 'HTTP 404' "$err"; then
+                cat "$err" >&2
+                rm -f "$err"
+                return 1
+              fi
+              body='{}'
+            fi
+            rm -f "$err"
+            printf '%s' "$body" | jq -n -S --argjson f "$fields" '
+              input | if type == "object"
+                then . as $p | [$f[] | select($p[.] != null) | {(.): $p[.]}] | add // {}
+                else error("package.json is not an object") end'
           }
 
           # The PR's diff is against the merge base, not the base branch tip.
           base=$(gh api "repos/$REPO/compare/$BASE...$SHA" | jq -r .merge_base_commit.sha)
+
+          # The file list goes through a file, NUL-separated: a path can hold a
+          # tab, a newline or a backslash, which a TSV line does not round-trip,
+          # and a failed request must stop the step here, not read as "no files".
+          listing=$(mktemp)
+          gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" |
+            jq -j '.[] | .filename, "\u0000", (.previous_filename // ""), "\u0000"' >"$listing"
+
           changed=()
-          while IFS=$'\t' read -r file old; do
+          unchecked=()
+          listed=0
+          while IFS= read -r -d '' file && IFS= read -r -d '' old; do
+            listed=$((listed + 1))
             name=${file##*/}
             if [[ "$lockfiles" == *" $name "* ]]; then
               changed+=("$file")
-            elif [ "$name" = package.json ] &&
-              [ "$(deps "${old:-$file}" "$base")" != "$(deps "$file" "$SHA")" ]; then
-              changed+=("$file")
+            elif [ "$name" = package.json ]; then
+              if before=$(deps "${old:-$file}" "$base") && after=$(deps "$file" "$SHA"); then
+                [ "$before" = "$after" ] || changed+=("$file")
+              else
+                unchecked+=("$file")
+              fi
             fi
-          done < <(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" |
-            jq -r '.[] | [.filename, (.previous_filename // "")] | @tsv')
+          done <"$listing"
 
-          if [ "${#changed[@]}" -eq 0 ]; then
+          # The full lists go to the log, escaped; the check summary only gets
+          # the first few.
+          if [ "${#changed[@]}" -gt 0 ]; then
+            echo "Dependency changes:"
+            printf '  %q\n' "${changed[@]}"
+          fi
+          if [ "${#unchecked[@]}" -gt 0 ]; then
+            echo "Could not be checked:"
+            printf '  %q\n' "${unchecked[@]}"
+          fi
+          # shellcheck disable=SC2016 # literal backticks: Markdown code spans
+          bullets() { printf -- '- `%s`\n' "$@"; }
+
+          if [ "${#changed[@]}" -eq 0 ] && [ "${#unchecked[@]}" -eq 0 ] && [ "$listed" -lt "$file_limit" ]; then
             conclusion=success
             title='No dependency changes'
             summary='deps-review only reviews Renovate and Dependabot PRs, and this one changes no lockfile or package.json dependency field.'
           else
             conclusion=failure
             title='Needs you'
-            # shellcheck disable=SC2016 # literal backticks: Markdown code spans
-            list=$(printf -- '- `%s`\n' "${changed[@]}")
-            summary="This PR was not opened by Renovate or Dependabot, but it changes dependencies, so nothing has reviewed them:
+            summary='This PR was not opened by Renovate or Dependabot, so nothing has reviewed its dependencies.'
+            if [ "${#changed[@]}" -gt 0 ]; then
+              summary+="
 
-          ${list}
+          It changes dependencies:
+
+          $(bullets "${changed[@]:0:listed_max}")"
+              [ "${#changed[@]}" -le "$listed_max" ] ||
+                summary+="
+          - ... and $((${#changed[@]} - listed_max)) more (see the job log)"
+            fi
+            if [ "${#unchecked[@]}" -gt 0 ]; then
+              summary+="
+
+          It changes package.json files whose dependencies could not be compared (a failed request or an unparsable file):
+
+          $(bullets "${unchecked[@]:0:listed_max}")"
+              [ "${#unchecked[@]}" -le "$listed_max" ] ||
+                summary+="
+          - ... and $((${#unchecked[@]} - listed_max)) more (see the job log)"
+            fi
+            if [ "$listed" -ge "$file_limit" ]; then
+              summary+="
+
+          GitHub lists at most $file_limit files of a PR, so this one may change more than was checked."
+            fi
+            summary+="
 
           Review them yourself, then merge with an admin bypass, or run deps-review by hand for PR #${PR} to replace this check."
+            # A check run's summary is capped at 65535 characters.
+            [ "${#summary}" -le 60000 ] || summary="${summary:0:60000}..."
           fi
           jq -n --arg sha "$SHA" --arg c "$conclusion" --arg t "$title" --arg s "$summary" \
             '{name: "deps-review", head_sha: $sha, status: "completed", conclusion: $c, output: {title: $t, summary: $s}}' |

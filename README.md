@@ -443,7 +443,11 @@ Roll it out in stages:
    The gate passes a PR that changes no lockfile and no dependency field of
    any `package.json`. One that does (an agent's or a contributor's) fails as
    "Needs you" with the files listed, since nothing reviewed those
-   dependencies: review them, then merge with an admin bypass.
+   dependencies: review them, then merge with an admin bypass. It fails
+   closed: a `package.json` it cannot read or parse is listed too, a PR near
+   GitHub's 3000-file listing limit fails, and if the file list itself cannot
+   be fetched the step errors and posts no check, so the required check stays
+   unmet.
 
    ```json
    { "extends": ["github>taraxvoid/voidflow", "github>taraxvoid/voidflow:deps-review-automerge"] }
