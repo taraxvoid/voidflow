@@ -113,10 +113,12 @@ async function readEnv(
     const custom = p?.custom_branch_policies === true
     const ids = custom
         ? (
-              await gh<{ branch_policies: BranchPolicy[] }>([
+              await gh<Array<{ branch_policies: BranchPolicy[] }>>([
                   `${path}/deployment-branch-policies?per_page=100`,
+                  '--paginate',
+                  '--slurp',
               ])
-          ).branch_policies
+          ).flatMap((page) => page.branch_policies)
         : []
     return {
         raw,
@@ -165,10 +167,12 @@ async function writeEnv(
     })
     // Switching to custom policies may keep earlier ones; reread before diffing.
     const { ids } = await readEnv(repo, env)
-    for (const b of ids.filter(
-        (b) => b.type === 'tag' || !want.includes(b.name),
-    ))
-        await gh(['-X', 'DELETE', `${path}/deployment-branch-policies/${b.id}`])
+    // Add the missing policies before deleting the obsolete ones. An old
+    // pattern (say `*`) may be what lets a wanted branch deploy; if a POST
+    // fails, it should still be there. Until the first POST lands, a repo that
+    // had no custom policies deploys from nowhere (GitHub only takes policies
+    // on an environment already set to custom ones), so a failed run is
+    // finished by running again.
     const kept = ids.filter((b) => b.type !== 'tag').map((b) => b.name)
     for (const name of want.filter((b) => !kept.includes(b)))
         await gh(
@@ -184,6 +188,10 @@ async function writeEnv(
                 type: 'branch',
             },
         )
+    for (const b of ids.filter(
+        (b) => b.type === 'tag' || !want.includes(b.name),
+    ))
+        await gh(['-X', 'DELETE', `${path}/deployment-branch-policies/${b.id}`])
 }
 
 /** `prog` names the command in the --help usage. */
@@ -301,8 +309,9 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
         }
 
         const cfg = REPOS[repo]
-        const envs =
-            'environments' in cfg ? Object.entries(cfg.environments) : []
+        // Raw configs pass through checkFleet unvalidated beyond their rulesets,
+        // so an `environments` field on one is not ours to read.
+        const envs = 'rulesets' in cfg ? [] : Object.entries(cfg.environments)
         if (envs.length > 0) {
             const { default_branch } = await gh<{ default_branch: string }>([
                 `repos/${repo}`,

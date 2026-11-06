@@ -374,6 +374,7 @@ export function checkFleet(x: unknown): Fleet {
             isObj(full.environments) ? full.environments : {},
         )) {
             const ep = `${at}.environments.${JSON.stringify(env)}`
+            if (!isStr(env)) bad(ep, 'missing environment name')
             if (!Array.isArray(tiers) || tiers.length === 0) {
                 bad(ep, 'not a non-empty list of tiers')
                 continue

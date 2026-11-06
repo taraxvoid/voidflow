@@ -329,6 +329,7 @@ describe('raw rulesets (another fleet, --config)', () => {
                 'a/e': { linearhistory: false },
                 'a/f': { environments: { prod: [], npm: ['main', 'stable'] } },
                 'a/g': { environments: ['prod'] },
+                'a/h': { environments: { '': ['main'] } },
             })
         } catch (e) {
             msg = (e as Error).message
@@ -346,6 +347,7 @@ describe('raw rulesets (another fleet, --config)', () => {
             '"a/f".environments."prod": not a non-empty list of tiers',
             '"a/f".environments."npm"[1]: unknown tier "stable"',
             '"a/g".environments: not a object',
+            '"a/h".environments."": missing environment name',
         ]) {
             expect(msg).toContain(want)
         }
