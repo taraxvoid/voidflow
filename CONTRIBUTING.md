@@ -233,7 +233,10 @@ the `rulesets-*` and `cf-tokens-*` recipes run the same entry point
 
 If you run a canary (`@next`) with an npm release-age cooldown set, add
 `min-release-age-exclude[]=voidflow` and `min-release-age-exclude[]=@taraxvoid/*`
-to your `.npmrc`, or `@next` resolves to an older release. See
+to your `.npmrc`, or `@next` resolves to an older release. `npx` ignores the
+exclusion in current npm releases, and npm before 11.17 does not know it, so
+run `npx --min-release-age=0 @taraxvoid/voidflow@next ...` instead (this also
+lifts the cooldown for that run's dependencies). See
 [Trying a canary release](README.md#trying-a-canary-release).
 
 The config modules stay TypeScript under either runtime. Node 24 loads them by
