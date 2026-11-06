@@ -296,15 +296,31 @@ export async function main(
             out.push(row('failed', 'rulesets', `${file} does not exist`))
             exitCode = 1
         } else {
-            const edit = addToFleet(readFileSync(file, 'utf8'), repo)
-            if (edit.status === 'failed') {
-                out.push(row('failed', 'rulesets', `${file}: ${edit.detail}`))
+            // A path that is a directory, or a file that cannot be read or
+            // written, is a failed row like any other, not a crash that drops
+            // the results buffered in `out`.
+            try {
+                const edit = addToFleet(readFileSync(file, 'utf8'), repo)
+                if (edit.status === 'failed') {
+                    out.push(
+                        row('failed', 'rulesets', `${file}: ${edit.detail}`),
+                    )
+                    exitCode = 1
+                } else {
+                    if (edit.status === 'added' && !dryRun)
+                        writeFileSync(file, edit.text)
+                    fleetDone = true
+                    out.push(row(edit.status, 'rulesets', `${repo} in ${file}`))
+                }
+            } catch (e) {
+                out.push(
+                    row(
+                        'failed',
+                        'rulesets',
+                        `${file}: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                )
                 exitCode = 1
-            } else {
-                fleetDone = true
-                if (edit.status === 'added' && !dryRun)
-                    writeFileSync(file, edit.text)
-                out.push(row(edit.status, 'rulesets', `${repo} in ${file}`))
             }
         }
     }
