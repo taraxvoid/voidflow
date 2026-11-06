@@ -21,7 +21,7 @@ export type FileItem = {
     templates: string[]
     kinds: Kind[]
     merge?: 'package' | 'gitignore'
-    optIn?: 'pvr'
+    optIn?: 'pvr' | 'agentic'
     /** Existing files that already fill this item's role; the item is left alone when one is present. */
     altTargets?: string[]
 }
@@ -109,7 +109,50 @@ export const FILE_ITEMS: FileItem[] = [
         kinds: BOTH,
         optIn: 'pvr',
     },
+    {
+        name: 'agentic',
+        target: '.github/workflows/agentic.yml',
+        templates: ['common/agentic-{stage}.yml'],
+        kinds: BOTH,
+        optIn: 'agentic',
+    },
 ]
+
+/** Renovate preset that automerges low-risk updates once deps-review is required. */
+/**
+ * An existing `renovate.json` with the automerge preset added to `extends`,
+ * keeping everything else; null when it is not plain JSON with an array
+ * `extends` (the caller then reports the usual conflict).
+ */
+function mergeAutomerge(raw: string): string | null {
+    let parsed: { extends?: unknown }
+    try {
+        parsed = JSON.parse(raw)
+    } catch {
+        return null
+    }
+    if (typeof parsed !== 'object' || parsed === null) return null
+    if (!Array.isArray(parsed.extends)) return null
+    if (parsed.extends.includes(AUTOMERGE_PRESET)) return raw
+    const eol = raw.includes('\r\n') ? '\r\n' : '\n'
+    let text = json(
+        { ...parsed, extends: [...parsed.extends, AUTOMERGE_PRESET] },
+        detectIndent(raw),
+    )
+    if (!raw.endsWith('\n')) text = text.slice(0, -1)
+    return eol === '\r\n' ? text.replaceAll('\n', eol) : text
+}
+
+export const AUTOMERGE_PRESET =
+    'github>taraxvoid/voidflow:deps-review-automerge'
+
+/** `renovate.json` text with the automerge preset appended to `extends`. */
+function withAutomerge(text: string): string {
+    const parsed = JSON.parse(text) as { extends?: string[] }
+    const extend = parsed.extends ?? []
+    if (!extend.includes(AUTOMERGE_PRESET)) extend.push(AUTOMERGE_PRESET)
+    return json({ ...parsed, extends: extend })
+}
 
 export type FileStatus =
     | 'create'
@@ -131,6 +174,7 @@ type Selection = {
     skip: Set<string>
     force: boolean
     enablePvr: boolean
+    enableAgentic?: boolean
 }
 
 /** Names of the file items that apply to `kind`. */
@@ -144,7 +188,10 @@ function templateTexts(item: FileItem, ctx: RenderCtx): string[] {
         const optional = t.startsWith('?')
         const p = join(
             root,
-            t.replace(/^\?/, '').replaceAll('{kind}', ctx.kind),
+            t
+                .replace(/^\?/, '')
+                .replaceAll('{kind}', ctx.kind)
+                .replaceAll('{stage}', ctx.stage ?? 'shadow'),
         )
         if (!existsSync(p)) {
             if (optional) return []
@@ -286,6 +333,7 @@ export function planFiles(
     for (const item of FILE_ITEMS) {
         if (!item.kinds.includes(sel.kind) || sel.skip.has(item.name)) continue
         if (item.optIn === 'pvr' && !sel.enablePvr) continue
+        if (item.optIn === 'agentic' && !sel.enableAgentic) continue
         const path = join(dir, item.target)
         const alt = item.altTargets?.find((t) => existsSync(join(dir, t)))
         if (alt && !existsSync(path)) {
@@ -308,12 +356,53 @@ export function planFiles(
             actions.push({ ...base, ...planPackage(dir, path, texts, sel) })
             continue
         }
-        const content = withMarker(item.target, texts[0] ?? '', ctx)
+        const content = withMarker(
+            item.target,
+            item.name === 'renovate' &&
+                sel.enableAgentic &&
+                ctx.stage === 'gate'
+                ? withAutomerge(texts[0] ?? '')
+                : (texts[0] ?? ''),
+            ctx,
+        )
         if (!existsSync(path)) {
             actions.push({ ...base, status: 'create', content })
             continue
         }
         const existing = readFileSync(path, 'utf8')
+        // Moving a repo from the shadow to the gate stage merges the two
+        // stage-dependent files instead of reporting a conflict.
+        if (
+            ctx.stage === 'gate' &&
+            sel.enableAgentic &&
+            (item.name === 'renovate' || item.name === 'agentic') &&
+            !sameIgnoringMarkerVersion(existing, content)
+        ) {
+            const shadowTexts = templateTexts(item, { ...ctx, stage: 'shadow' })
+            const shadow = withMarker(item.target, shadowTexts[0] ?? '', ctx)
+            if (sameIgnoringMarkerVersion(existing, shadow)) {
+                actions.push({ ...base, status: 'merge', content })
+                continue
+            }
+        }
+        // A customised renovate.json keeps its settings: only the preset is
+        // added to its `extends`.
+        if (
+            item.name === 'renovate' &&
+            ctx.stage === 'gate' &&
+            sel.enableAgentic &&
+            !sameIgnoringMarkerVersion(existing, content)
+        ) {
+            const merged = mergeAutomerge(existing)
+            if (merged !== null) {
+                actions.push({
+                    ...base,
+                    status: merged === existing ? 'unchanged' : 'merge',
+                    content: merged,
+                })
+                continue
+            }
+        }
         const status: FileStatus = sameIgnoringMarkerVersion(existing, content)
             ? 'unchanged'
             : sel.force
