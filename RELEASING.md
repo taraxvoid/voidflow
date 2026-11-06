@@ -7,6 +7,9 @@ limit on who can publish, so it deploys from `main`, `next` and `release/*`
 only: the infra repo's rulesets config lists it under voidflow's
 `environments`, and `rulesets-plan` reports drift.
 
+The versions below are examples of the shape each channel takes, not the
+current ones; those are in `.release-please/*-manifest.json`.
+
 | Branch | Channel | Version | npm dist-tag | GitHub release |
 |---|---|---|---|---|
 | `main` | stable | `0.10.0` | `latest` | normal |
@@ -62,9 +65,19 @@ Check the stable release PR's version before merging it. release-please walks
 `main` newest-first by commit date and stops at the last release commit, so a
 `feat` on `next` dated before the latest stable release (e.g. a hotfix released
 while the feature waited on `next`) is never counted and the PR proposes a
-patch bump. Fix it with a squash-merged PR to `main` whose body ends with a
-`Release-As: X.Y.Z` footer (the squash commit message is the PR body), then
-add the missed entries to the release PR's `CHANGELOG.md` by hand.
+patch bump. Fix it by pinning the version (below), then add the missed entries
+to the release PR's `CHANGELOG.md` by hand.
+
+A `Release-As` footer on `next` reaches `main` with the promotion, and
+release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
+start a prerelease line makes the stable release PR propose `1.0.0-next`.
+
+To pin the version, set `"release-as": "X.Y.Z"` on the `.` package in
+`.release-please/main.json` with a squash-merged PR to `main`. It overrides any
+commit footer. Remove it in the first PR after that release, or every later
+release PR proposes the same version again. A `Release-As:` footer in a PR
+body isn't reliable: CodeRabbit appends its summary to the body, so the footer
+is no longer the last paragraph of the squash commit and isn't parsed.
 
 A `Release-As` footer on `next` reaches `main` with the promotion, and
 release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to

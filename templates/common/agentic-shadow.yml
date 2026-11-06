@@ -1,0 +1,15 @@
+name: Agentic
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agentic-locks:
+    uses: taraxvoid/voidflow/.github/workflows/agentic-locks.yml@{{sha}} # v{{version}}
