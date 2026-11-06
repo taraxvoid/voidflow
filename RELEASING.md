@@ -4,6 +4,9 @@ voidflow uses release channels mapped to branches, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
 Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`.
 
+The versions below are examples of the shape each channel takes, not the
+current ones; those are in `.release-please/*-manifest.json`.
+
 | Branch | Channel | Version | npm dist-tag | GitHub release |
 |---|---|---|---|---|
 | `main` | stable | `0.10.0` | `latest` | normal |
