@@ -19,12 +19,21 @@
  * and reported, never counted as drift, so --check stays green for them.
  * A repo asking for a merge queue it can't have (not org-owned) fails the run
  * up front, before anything is written.
+ *
+ * A tiered repo's `environments` get an explicit deployment branch list built
+ * from their tiers. Applying one creates a missing environment and keeps its
+ * wait timer, reviewers and admin bypass as they are; policies for branches or
+ * tags outside the list are deleted. Environments not in the config are never
+ * read or changed.
  */
 
 import {
     checkFleet,
     desired,
     diff,
+    type EnvPolicy,
+    envBranches,
+    envDiff,
     isPlanGated,
     mergeQueueIneligible,
     normalise,
@@ -58,6 +67,123 @@ async function gh<T = unknown>(args: string[], body?: unknown): Promise<T> {
     )
     if (code !== 0) throw new Error(`gh api ${args.join(' ')}: ${err || out}`)
     return (out ? JSON.parse(out) : null) as T
+}
+
+type EnvResponse = {
+    can_admins_bypass?: boolean
+    deployment_branch_policy: {
+        protected_branches: boolean
+        custom_branch_policies: boolean
+    } | null
+    protection_rules?: Array<{
+        type: string
+        wait_timer?: number
+        prevent_self_review?: boolean
+        reviewers?: Array<{ type: string; reviewer: { id: number } }>
+    }>
+}
+type BranchPolicy = { id: number; name: string; type?: 'branch' | 'tag' }
+
+const is404 = (e: unknown) => /\(HTTP 404\)/.test(String(e))
+
+async function readEnv(
+    repo: string,
+    env: string,
+): Promise<{
+    raw: EnvResponse | null
+    policy: EnvPolicy
+    ids: BranchPolicy[]
+}> {
+    const path = `repos/${repo}/environments/${encodeURIComponent(env)}`
+    let raw: EnvResponse
+    try {
+        raw = await gh<EnvResponse>([path])
+    } catch (e) {
+        if (!is404(e)) throw e
+        const none = {
+            exists: false,
+            protectedBranches: false,
+            customBranchPolicies: false,
+            branches: [],
+            tags: [],
+        }
+        return { raw: null, policy: none, ids: [] }
+    }
+    const p = raw.deployment_branch_policy
+    const custom = p?.custom_branch_policies === true
+    const ids = custom
+        ? (
+              await gh<{ branch_policies: BranchPolicy[] }>([
+                  `${path}/deployment-branch-policies?per_page=100`,
+              ])
+          ).branch_policies
+        : []
+    return {
+        raw,
+        policy: {
+            exists: true,
+            protectedBranches: p?.protected_branches === true,
+            customBranchPolicies: custom,
+            branches: ids.filter((b) => b.type !== 'tag').map((b) => b.name),
+            tags: ids.filter((b) => b.type === 'tag').map((b) => b.name),
+        },
+        ids,
+    }
+}
+
+/** Set an explicit branch list, keeping the environment's other protection. */
+async function writeEnv(
+    repo: string,
+    env: string,
+    have: { raw: EnvResponse | null; policy: EnvPolicy; ids: BranchPolicy[] },
+    want: string[],
+) {
+    const path = `repos/${repo}/environments/${encodeURIComponent(env)}`
+    const rules = have.raw?.protection_rules ?? []
+    const wait = rules.find((r) => r.type === 'wait_timer')
+    const review = rules.find((r) => r.type === 'required_reviewers')
+    await gh(['-X', 'PUT', path, '--input', '-'], {
+        ...(wait?.wait_timer !== undefined
+            ? { wait_timer: wait.wait_timer }
+            : {}),
+        ...(review
+            ? {
+                  prevent_self_review: review.prevent_self_review === true,
+                  reviewers: (review.reviewers ?? []).map((r) => ({
+                      type: r.type,
+                      id: r.reviewer.id,
+                  })),
+              }
+            : {}),
+        ...(have.raw?.can_admins_bypass !== undefined
+            ? { can_admins_bypass: have.raw.can_admins_bypass }
+            : {}),
+        deployment_branch_policy: {
+            protected_branches: false,
+            custom_branch_policies: true,
+        },
+    })
+    // Switching to custom policies may keep earlier ones; reread before diffing.
+    const { ids } = await readEnv(repo, env)
+    for (const b of ids.filter(
+        (b) => b.type === 'tag' || !want.includes(b.name),
+    ))
+        await gh(['-X', 'DELETE', `${path}/deployment-branch-policies/${b.id}`])
+    const kept = ids.filter((b) => b.type !== 'tag').map((b) => b.name)
+    for (const name of want.filter((b) => !kept.includes(b)))
+        await gh(
+            [
+                '-X',
+                'POST',
+                `${path}/deployment-branch-policies`,
+                '--input',
+                '-',
+            ],
+            {
+                name,
+                type: 'branch',
+            },
+        )
 }
 
 /** `prog` names the command in the --help usage. */
@@ -174,6 +300,35 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
             }
         }
 
+        const cfg = REPOS[repo]
+        const envs =
+            'environments' in cfg ? Object.entries(cfg.environments) : []
+        if (envs.length > 0) {
+            const { default_branch } = await gh<{ default_branch: string }>([
+                `repos/${repo}`,
+            ])
+            for (const [env, tiers] of envs) {
+                const want = envBranches(tiers, default_branch)
+                const have = await readEnv(repo, env)
+                const lines = envDiff(have.policy, want)
+                if (lines.length === 0) {
+                    console.log(
+                        `  ok environment "${env}" (${want.join(', ')})`,
+                    )
+                    continue
+                }
+                drift++
+                console.log(
+                    `~ environment "${env}" deploys from ${want.join(', ')} only`,
+                )
+                for (const l of lines) console.log(`    ${l}`)
+                if (values.apply) {
+                    await writeEnv(repo, env, have, want)
+                    console.log('  updated')
+                }
+            }
+        }
+
         const retire = new Set(REPOS[repo].retire)
         for (const r of listed.filter((r) => !matched.has(r.id))) {
             if (!retire.has(r.name)) {
@@ -199,7 +354,7 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
         )
     }
     console.log(
-        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
+        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
     )
     if (values.check && drift > 0) process.exit(1)
 }
