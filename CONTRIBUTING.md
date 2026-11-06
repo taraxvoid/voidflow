@@ -112,6 +112,26 @@ and a host in none of the account's zones fails the plan. An env can still
 spell out `worker` and `zones` instead; `zones: []` grants none, e.g. for a
 Worker Preview token, which deploys no routes.
 
+### D1 migrations
+
+A deploy that runs `wrangler d1 migrations apply` (the deploy action's
+`migrate-d1: "true"`) needs D1 Write, which the Workers Editor role does not
+include: without it the migration fails with error 7403. Set `d1: true` on
+that env only:
+
+```ts
+envs: [
+    { env: 'prod', d1: true },          // prod migrates
+    { env: 'preview', zones: [] },      // no D1: a PR job never gets it
+],
+```
+
+Cloudflare scopes D1 Write to the account, not to a database, so the token can
+write every D1 database in its env's account. It is off by default because a
+preview env usually shares the prod wrangler config, and its token would
+otherwise write the production database. A repo that needs the narrower grant
+should keep its databases in a separate account and set that env's `account`.
+
 ### Where the secret goes
 
 By default each env's token goes into an environment secret,

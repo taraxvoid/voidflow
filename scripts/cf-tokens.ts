@@ -29,6 +29,7 @@
 import {
     type Action,
     checkRepos,
+    D1_WRITE,
     type EnvConfig,
     envAccount,
     expiresOn,
@@ -177,6 +178,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             used.set(id, [...(used.get(id) ?? []), where])
         for (const id of WORKER_EDITOR) note(id, 'WORKER_EDITOR')
         note(WORKERS_ROUTES_WRITE, 'WORKERS_ROUTES_WRITE')
+        note(D1_WRITE, 'D1_WRITE')
         note(WORKERS_SCRIPTS_WRITE, 'WORKERS_SCRIPTS_WRITE')
         for (const acct of accounts) {
             const live = await cf<
@@ -424,7 +426,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const want = policies(cfg, env, ids, target.zones)
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
         console.log(
-            `  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`,
+            `  ${env.env}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, secret in ${scopeLabel(repo, env)}`,
         )
         // The list endpoint omits policies; fetch each match in full.
         const have = await Promise.all(
@@ -493,7 +495,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         )
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
         console.log(
-            `try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`,
+            `try ${t.id}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, until ${expires.toISOString()}`,
         )
         let code = 1
         try {

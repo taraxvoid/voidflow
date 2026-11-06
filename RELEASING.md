@@ -4,6 +4,9 @@ voidflow uses release channels mapped to branches, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
 Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`.
 
+The versions below are examples of the shape each channel takes, not the
+current ones; those are in `.release-please/*-manifest.json`.
+
 | Branch | Channel | Version | npm dist-tag | GitHub release |
 |---|---|---|---|---|
 | `main` | stable | `0.10.0` | `latest` | normal |
@@ -72,6 +75,12 @@ commit footer. Remove it in the first PR after that release, or every later
 release PR proposes the same version again. A `Release-As:` footer in a PR
 body isn't reliable: CodeRabbit appends its summary to the body, so the footer
 is no longer the last paragraph of the squash commit and isn't parsed.
+
+A `Release-As` footer on `next` reaches `main` with the promotion, and
+release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
+start a prerelease line makes the stable release PR propose `1.0.0-next`. The
+newest footer wins, so the same fix applies: a squash-merged PR to `main`
+ending `Release-As: 1.0.0`.
 
 ## Approve the npm release
 

@@ -14,6 +14,8 @@ export type RenderCtx = {
     kind: Kind
     repo: string | null
     cronMinute: number
+    /** Agentic rollout stage; shadow when unset. */
+    stage?: 'shadow' | 'gate'
 }
 
 /** Fill the init-time placeholders. A null sha pins the tag instead. */
@@ -55,8 +57,8 @@ export function withMarker(
         const parsed = JSON.parse(content)
         return json({ ...parsed, description: lines })
     }
-    if (name === 'biome.json' || name === 'tsconfig.json')
-        return prefixed('// ')
+    // biome.json takes no comments: Biome 2.5 rejects them in a .json file.
+    if (name === 'tsconfig.json') return prefixed('// ')
     if (ext === '.json') return content
     if (HASH.has(ext) || name === '.gitignore' || name === 'gitignore')
         return prefixed('# ')
