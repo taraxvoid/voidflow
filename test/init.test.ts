@@ -221,39 +221,20 @@ describe('voidflow init', () => {
         expect(r.out).toContain(Object.keys(PRESETS).join('|'))
     })
 
-    test('--skip-file nope exits 2 listing the valid names', async () => {
-        const r = await run(['--kind', 'tool', '--skip-file', 'nope', repo()])
+    test('--skip nope exits 2 listing the valid names', async () => {
+        const r = await run(['--kind', 'tool', '--skip', 'nope', repo()])
         expect(r.code).toBe(2)
-        expect(r.err).toContain('unknown --skip-file "nope"')
+        expect(r.err).toContain('unknown --skip "nope"')
         expect(r.err).toContain('lefthook, mise')
+        expect(r.err).toContain('pr-policy, issue-policy')
         expect(r.err).not.toMatch(/expected one of:[^\n]*playwright/)
     })
 
-    test('--skip-setting nope exits 2 listing the valid names', async () => {
-        const r = await run([
-            '--preset',
-            'settings',
-            '--skip-setting',
-            'nope',
-            repo(),
-        ])
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('pr-policy, issue-policy')
-    })
-
-    test('--skip-file and --skip-setting leave items out', async () => {
+    test('--skip leaves files and settings out', async () => {
         const dir = repo()
         const f = fakeGh()
         const r = await run(
-            [
-                '--kind',
-                'tool',
-                '--skip-file',
-                'ci',
-                '--skip-setting',
-                'codeql',
-                dir,
-            ],
+            ['--kind', 'tool', '--skip', 'ci', '--skip', 'codeql', dir],
             f.gh,
         )
         expect(r.code).toBe(0)
