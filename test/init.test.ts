@@ -19,7 +19,13 @@ class Exit extends Error {
 }
 
 /** A stateful fake: everything starts off, writes turn it on. */
-function fakeGh(opts: { unavailable?: string; planGated?: boolean } = {}) {
+function fakeGh(
+    opts: {
+        unavailable?: string
+        planGated?: boolean
+        ownerType?: string
+    } = {},
+) {
     let on = false
     const writes: string[] = []
     const gh: Gh = {
@@ -52,6 +58,11 @@ function fakeGh(opts: { unavailable?: string; planGated?: boolean } = {}) {
                     return {
                         status: 200,
                         body: { state: on ? 'configured' : 'not-configured' },
+                    }
+                case 'users/o':
+                    return {
+                        status: 200,
+                        body: { type: opts.ownerType ?? 'User' },
                     }
                 case '/rulesets':
                     return opts.planGated
@@ -220,6 +231,61 @@ describe('voidflow init', () => {
         expect(r.out).not.toContain('not enforced')
         expect(r.out).not.toContain('placeholder')
         expect(f.writes.length).toBe(0)
+    })
+
+    test('an organization repo owner is not used as a code owner', async () => {
+        const dir = repo()
+        const r = await run(
+            ['--kind', 'tool', '--preset', 'codeowners', dir],
+            fakeGh({ ownerType: 'Organization' }).gh,
+        )
+        expect(r.code).toBe(0)
+        expect(readFileSync(join(dir, '.github/CODEOWNERS'), 'utf8')).toContain(
+            '/.github/ @OWNER\n',
+        )
+        expect(r.out).toContain('o is an organization')
+        const ok = repo()
+        const o = await run(
+            [
+                '--kind',
+                'tool',
+                '--preset',
+                'codeowners',
+                '--owner',
+                '@o/sec',
+                ok,
+            ],
+            fakeGh({ ownerType: 'Organization' }).gh,
+        )
+        expect(o.out).not.toContain('is an organization')
+        expect(readFileSync(join(ok, '.github/CODEOWNERS'), 'utf8')).toContain(
+            '/.github/ @o/sec\n',
+        )
+    })
+
+    test('an unknown owner type keeps @owner with a note', async () => {
+        const dir = repo()
+        const r = await run(
+            ['--kind', 'tool', '--preset', 'codeowners', dir],
+            fakeGh({ unavailable: 'no gh' }).gh,
+        )
+        expect(readFileSync(join(dir, '.github/CODEOWNERS'), 'utf8')).toContain(
+            '/.github/ @o\n',
+        )
+        expect(r.out).toContain('could not tell whether o is a user')
+    })
+
+    test('--owner rejects consecutive periods and bare orgs with dots', async () => {
+        const r = await run([
+            '--kind',
+            'tool',
+            '--preset',
+            'codeowners',
+            '--owner',
+            '@a..b',
+            repo(),
+        ])
+        expect(r.code).toBe(2)
     })
 
     test('--owner overrides the repo owner and is validated', async () => {

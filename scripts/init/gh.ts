@@ -189,3 +189,19 @@ export async function rulesetsPlanGated(
         return false
     }
 }
+
+/** `User`, `Organization`, or null when GitHub did not say (offline, no access). */
+export async function ownerType(
+    gh: Gh,
+    login: string,
+): Promise<'User' | 'Organization' | null> {
+    try {
+        const r = await gh.rest('GET', `users/${login}`)
+        const type = object(r.body)?.type
+        return r.status === 200 && (type === 'User' || type === 'Organization')
+            ? type
+            : null
+    } catch {
+        return null
+    }
+}
