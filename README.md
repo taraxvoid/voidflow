@@ -113,6 +113,38 @@ uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
 Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md) and 
 [`STABILITY.md`](STABILITY.md) for semver contract and deprecation policy.
 
+### Trying a canary release
+
+Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init`
+(or the `bunx` form) runs the newest one. If your npm config has a release-age
+cooldown (`min-release-age` or `before`), a fresh canary is filtered
+out and `@next` silently resolves to an older version. For the unscoped mirror
+this fails with `could not determine executable to run`, because the old
+release has no `voidflow` bin. Exempt voidflow in `~/.npmrc`, next to the
+cooldown you already have:
+
+```ini
+min-release-age-exclude[]=voidflow
+min-release-age-exclude[]=@taraxvoid/*
+```
+
+Only the matching packages are exempt; their dependencies still follow the
+cooldown. To check what resolves, run `npm view @taraxvoid/voidflow@next version`.
+Bun has the same idea in `bunfig.toml` (`minimumReleaseAgeExcludes`).
+
+`npx` does not honor the exclusion in current npm releases
+([npm/cli#9765](https://github.com/npm/cli/issues/9765)), and npm before 11.17
+does not know the setting at all, so `npx` can still pick an older release.
+Until that is fixed, turn the cutoff off for that one command:
+
+```sh
+npx --min-release-age=0 @taraxvoid/voidflow@next init
+```
+
+This also lifts the cooldown for the dependencies `npx` installs for that run.
+If your cooldown is `before`, pass a `--before` date later than the canary's
+publish date instead. `npm install` honors the exclusion.
+
 ### Site CI
 
 ```yaml

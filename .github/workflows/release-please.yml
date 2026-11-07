@@ -219,7 +219,7 @@ jobs:
           fi
 
       # Pack each package that isn't on npm yet. The mirror is the same code
-      # under the bare `voidflow` name with a pointer README; the working tree
+      # under the bare `voidflow` name with a pointer blurb above the README; the working tree
       # is restored afterwards so JSR publishes the real README. npm still runs
       # `prepare` despite --ignore-scripts (it only installs git hooks here) and
       # prints it on stdout, so the tarball path is derived, not parsed.
@@ -262,7 +262,9 @@ jobs:
             echo "voidflow@${VERSION} is already on npm, skipping."
           else
             npm pkg set name=voidflow
-            cp scripts/mirror-readme.md README.md
+            # Pointer blurb on top, then the full README minus its own H1.
+            { cat scripts/mirror-readme.md; printf '\n---\n'; tail -n +2 README.md; } > "$PACK_DIR/mirror-README.md"
+            cp "$PACK_DIR/mirror-README.md" README.md
             file=$(pack)
             echo "mirror=${file}" >> "$GITHUB_OUTPUT"
             git checkout -- package.json README.md
@@ -318,8 +320,8 @@ jobs:
           exit 1
 
       # Unscoped mirror with the same code and version. It mainly reserves the
-      # bare `voidflow` name; the README is swapped for a short pointer to the
-      # scoped package so the npm page reads as intentional.
+      # bare `voidflow` name; the README gets a short pointer to the scoped
+      # package on top, followed by the full README.
       - name: Publish voidflow (unscoped mirror)
         if: steps.pack.outputs.mirror != ''
         env:

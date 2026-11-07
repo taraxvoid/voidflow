@@ -90,7 +90,10 @@ ending `Release-As: 1.0.0`.
 npm packages are published with `npm stage publish`: the workflow uploads each
 version to npm's staging area and it is not live until a human approves it
 with 2FA. Each release stages two packages (`@taraxvoid/voidflow` and the
-unscoped `voidflow` mirror), so approve both, via the Staged Packages tab on
+unscoped `voidflow` mirror), so approve both, `@taraxvoid/voidflow` first
+(`voidflow init` run from the mirror writes a dependency on the scoped
+package at the same version, which would not install until that is live),
+via the Staged Packages tab on
 npmjs.com or `npm stage approve <id>`. The GitHub release, `vX.Y.Z` tag and
 floating `v0` tag are created before approval; actions consumers pin git tags,
 so this is fine, but `npm install` of the new version works only after
