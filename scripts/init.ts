@@ -9,7 +9,7 @@
  *
  * node: APIs only, so it runs under Node 24+ as well as Bun.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
@@ -19,6 +19,7 @@ import {
     fileNames,
     planFiles,
 } from './init/files.ts'
+import { addToFleet } from './init/fleet.ts'
 import { type Gh, ghAvailable, ghCli, resolveRepo } from './init/gh.ts'
 import {
     resolveSha as defaultResolveSha,
@@ -73,14 +74,14 @@ const OPTIONS = {
 const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
 
   --kind tool|site        which starter files to write (not needed with --preset settings)
-  --preset <name>         ${Object.keys(PRESETS).join('|')} (default full)
+  --preset <name>         ${Object.keys(PRESETS).join('|')}(default full)
   --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests
   --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
-  --config <module>       with --preset rulesets: take this repo's entry from the fleet map
+  --config <module>       the fleet rulesets config (in your infra repo): add the repo to it, or with --preset rulesets take this repo's entry from it
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
 
@@ -213,8 +214,6 @@ export async function main(
     if (wantFiles && kind === undefined)
         fail(`--preset ${values.preset} needs --kind tool|site`, prog)
 
-    if (values.config && !preset.rulesets)
-        fail('--config only applies with --preset rulesets', prog)
     if (preset.rulesets && !values.config && kind !== 'tool') {
         fail(
             kind === 'site'
@@ -429,12 +428,62 @@ export async function main(
         out.push('notes:')
         for (const n of notes) out.push(`  ${n}`)
     }
+    // Fleet half: add the repo to the infra repo's rulesets config. With
+    // --preset rulesets, --config is read above instead (the entry must exist).
+    let fleetDone = false
+    if (values.config !== undefined && !preset.rulesets) {
+        const base = process.env.VOIDFLOW_CONFIG_BASE || process.cwd()
+        const file = resolve(base, values.config)
+        out.push(dryRun ? 'fleet (dry run):' : 'fleet:')
+        if (!repo) {
+            out.push(row('unavailable', 'rulesets', repoError ?? ''))
+            exitCode = 1
+        } else if (!existsSync(file)) {
+            out.push(row('failed', 'rulesets', `${file} does not exist`))
+            exitCode = 1
+        } else {
+            // A path that is a directory, or a file that cannot be read or
+            // written, is a failed row like any other, not a crash that drops
+            // the results buffered in `out`.
+            try {
+                const edit = addToFleet(readFileSync(file, 'utf8'), repo)
+                if (edit.status === 'failed') {
+                    out.push(
+                        row('failed', 'rulesets', `${file}: ${edit.detail}`),
+                    )
+                    exitCode = 1
+                } else {
+                    if (edit.status === 'added' && !dryRun)
+                        writeFileSync(file, edit.text)
+                    fleetDone = true
+                    out.push(row(edit.status, 'rulesets', `${repo} in ${file}`))
+                }
+            } catch (e) {
+                out.push(
+                    row(
+                        'failed',
+                        'rulesets',
+                        `${file}: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                )
+                exitCode = 1
+            }
+        }
+    }
+
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
-    out.push(
-        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': ${kind === 'site' ? '{}' : 'tool()'},`,
-        '    (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
-    )
+    if (fleetDone) {
+        out.push(
+            '  review and commit the rulesets config, then run its rulesets-plan and rulesets-apply',
+        )
+    } else if (!(preset.rulesets && values.config)) {
+        out.push(
+            '  add the repo to your fleet rulesets config: rerun with --config <path to it>, e.g. ../infra/rulesets.ts',
+            `  or add this entry by hand: '${repo ?? 'OWNER/REPO'}': {},`,
+            '  (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
+        )
+    }
     console.log(out.join('\n'))
     process.exit(exitCode)
 }
