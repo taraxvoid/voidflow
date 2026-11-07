@@ -550,7 +550,7 @@ export async function main(
     if (wantFiles) out.push('  mise install', '  bun install')
     if (fleetDone) {
         out.push(
-            '  review and commit the rulesets config, then run its rulesets-plan and rulesets-apply',
+            `  review and commit the rulesets config, then run voidflow plan rulesets and voidflow apply rulesets --repo ${repo}`,
         )
     } else if (!(preset.rulesets && values.config)) {
         out.push(
