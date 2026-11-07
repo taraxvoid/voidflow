@@ -68,6 +68,18 @@ describe('splitVerbArgs', () => {
             '--config',
         )
     })
+
+    test('--repo needs a value, and a flag is not one', () => {
+        expect(() => splitVerbArgs(['rulesets', '--repo'])).toThrow(
+            '--repo needs a value',
+        )
+        expect(() =>
+            splitVerbArgs(['rulesets', '--repo', '--entire-fleet']),
+        ).toThrow('--repo needs a value')
+        expect(() => splitVerbArgs(['rulesets', '--repo='])).toThrow(
+            '--repo needs a value',
+        )
+    })
 })
 
 describe('applyTargetError', () => {

@@ -78,9 +78,19 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
             out.entireFleet = true
         } else if (a.startsWith('-')) {
             out.rest.push(a)
-            if (VALUED.has(flag) && inline === undefined && i + 1 < argv.length)
+            if (flag === '--repo') {
+                const v = inline ?? argv[i + 1]
+                if (!v || (inline === undefined && v.startsWith('-')))
+                    throw new Error('--repo needs a value')
+                if (inline === undefined) out.rest.push(argv[++i])
+                out.repo = v
+            } else if (
+                VALUED.has(flag) &&
+                inline === undefined &&
+                i + 1 < argv.length
+            ) {
                 out.rest.push(argv[++i])
-            if (flag === '--repo') out.repo = inline ?? out.rest.at(-1)
+            }
         } else if (out.tool !== undefined) {
             throw new Error(
                 `one tool at a time, got ${JSON.stringify(a)} after ${out.tool}`,
