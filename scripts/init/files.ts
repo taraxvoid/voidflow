@@ -73,6 +73,12 @@ export const FILE_ITEMS: FileItem[] = [
         kinds: BOTH,
     },
     {
+        name: 'codeowners',
+        target: '.github/CODEOWNERS',
+        templates: ['common/CODEOWNERS'],
+        kinds: BOTH,
+    },
+    {
         name: 'tsconfig',
         target: 'tsconfig.json',
         templates: ['tool/tsconfig.json'],

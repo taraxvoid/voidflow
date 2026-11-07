@@ -41,6 +41,7 @@ const TOOL_TARGETS = [
     'biome.json',
     '.gitignore',
     '.github/workflows/ci.yml',
+    '.github/CODEOWNERS',
     'tsconfig.json',
     'package.json',
 ]
@@ -55,6 +56,27 @@ describe('planFiles', () => {
         const withPvr = planFiles(dir, sel('tool', { enablePvr: true }), ctx)
         expect(withPvr.map((a) => a.name)).toContain('security')
         expect(plan.map((a) => a.name)).not.toContain('security')
+    })
+    test('codeowners renders the owner into every rule', () => {
+        const [a] = planFiles(dir, sel('tool'), {
+            ...ctx,
+            owner: '@acme/sec',
+        }).filter((x) => x.name === 'codeowners')
+        const rules = (a?.content ?? '')
+            .split('\n')
+            .filter((l) => l.startsWith('/'))
+        expect(rules.length).toBeGreaterThan(10)
+        for (const l of rules) expect(l.endsWith(' @acme/sec')).toBe(true)
+        expect(a?.content).toContain('/.github/ @acme/sec')
+        expect(a?.content).toContain('/CLAUDE.md @acme/sec')
+        expect(a?.content.startsWith('# Written by voidflow v1.2.3')).toBe(true)
+        expect(a?.content).not.toContain('{{')
+    })
+    test('codeowners falls back to a placeholder owner', () => {
+        const a = planFiles(dir, sel('tool'), ctx).find(
+            (x) => x.name === 'codeowners',
+        )
+        expect(a?.content).toContain('/.github/ @OWNER')
     })
     test('kind site', () => {
         const c = { ...ctx, kind: 'site' as const }

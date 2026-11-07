@@ -465,18 +465,7 @@ export function diff(have: unknown, want: unknown): string[] {
 
 // ---- plan gating ------------------------------------------------------------
 
-/**
- * True when a `gh api` error is GitHub refusing rulesets because the repo is
- * private on a plan without them (free personal accounts). That is a property
- * of the plan, not drift, so the script skips the repo instead of failing.
- * Other errors, including other 403s, still abort the run.
- */
-export function isPlanGated(message: string): boolean {
-    return (
-        /\(HTTP 403\)/.test(message) &&
-        /Upgrade to GitHub Pro|make this repository public/.test(message)
-    )
-}
+export { isPlanGated } from './plan-gate.ts'
 
 // ---- merge queue eligibility ------------------------------------------------
 

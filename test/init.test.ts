@@ -19,7 +19,7 @@ class Exit extends Error {
 }
 
 /** A stateful fake: everything starts off, writes turn it on. */
-function fakeGh(opts: { unavailable?: string } = {}) {
+function fakeGh(opts: { unavailable?: string; planGated?: boolean } = {}) {
     let on = false
     const writes: string[] = []
     const gh: Gh = {
@@ -53,6 +53,16 @@ function fakeGh(opts: { unavailable?: string } = {}) {
                         status: 200,
                         body: { state: on ? 'configured' : 'not-configured' },
                     }
+                case '/rulesets':
+                    return opts.planGated
+                        ? {
+                              status: 403,
+                              body: {
+                                  message:
+                                      'Upgrade to GitHub Pro or make this repository public to enable this feature.',
+                              },
+                          }
+                        : { status: 200, body: [] }
                 case '/private-vulnerability-reporting':
                     return { status: 200, body: { enabled: on } }
             }
@@ -194,6 +204,71 @@ describe('voidflow init', () => {
         expect(existsSync(join(dir, 'mise.toml'))).toBe(false)
         expect(r.out).not.toContain('settings')
         expect(f.writes.length).toBe(0)
+    })
+
+    test('--preset codeowners writes only CODEOWNERS owned by the repo owner', async () => {
+        const dir = repo()
+        const f = fakeGh()
+        const r = await run(
+            ['--kind', 'tool', '--preset', 'codeowners', dir],
+            f.gh,
+        )
+        expect(r.code).toBe(0)
+        const text = readFileSync(join(dir, '.github/CODEOWNERS'), 'utf8')
+        expect(text).toContain('/.github/ @o\n')
+        expect(existsSync(join(dir, '.github/workflows/ci.yml'))).toBe(false)
+        expect(r.out).not.toContain('not enforced')
+        expect(r.out).not.toContain('placeholder')
+        expect(f.writes.length).toBe(0)
+    })
+
+    test('--owner overrides the repo owner and is validated', async () => {
+        const dir = repo()
+        const r = await run([
+            '--kind',
+            'tool',
+            '--preset',
+            'codeowners',
+            '--owner',
+            '@o/sec',
+            dir,
+        ])
+        expect(r.code).toBe(0)
+        expect(readFileSync(join(dir, '.github/CODEOWNERS'), 'utf8')).toContain(
+            '/.github/ @o/sec\n',
+        )
+        const bad = await run([
+            '--kind',
+            'tool',
+            '--preset',
+            'codeowners',
+            '--owner',
+            'o',
+            repo(),
+        ])
+        expect(bad.code).toBe(2)
+        expect(bad.err).toContain('invalid --owner')
+    })
+
+    test('CODEOWNERS uses a placeholder and says so without a repo', async () => {
+        const dir = repo(null)
+        const r = await run(['--kind', 'tool', '--preset', 'codeowners', dir])
+        expect(r.code).toBe(0)
+        expect(readFileSync(join(dir, '.github/CODEOWNERS'), 'utf8')).toContain(
+            '@OWNER',
+        )
+        expect(r.out).toContain('pass --owner @handle')
+    })
+
+    test('CODEOWNERS notes when the plan cannot enforce it', async () => {
+        const dir = repo()
+        const r = await run(
+            ['--kind', 'tool', '--preset', 'codeowners', dir],
+            fakeGh({ planGated: true }).gh,
+        )
+        expect(r.code).toBe(0)
+        expect(existsSync(join(dir, '.github/CODEOWNERS'))).toBe(true)
+        expect(r.out).toContain('CODEOWNERS is written but not enforced')
     })
 
     test('--preset ci without --kind exits 2', async () => {
