@@ -122,6 +122,41 @@ const lefthook = `remotes:
       - lefthook/base.yml
 `
 
+const codeowners = `# Paths a misbehaving bot or a malicious pull request would edit to change how
+# the repo, CI or an agent behaves. Require review from Code Owners (the
+# branch ruleset's require_code_owner_review) makes a change here need an
+# approval from the owner below, who must not be the account the bot pushes as.
+# Last match wins; add narrower rules below to hand a path to someone else.
+
+# CI, workflows, actions.lock and this file
+/.github/ {{owner}}
+
+# Agent and editor directives
+/CLAUDE.md {{owner}}
+/AGENTS.md {{owner}}
+/GEMINI.md {{owner}}
+/.claude/ {{owner}}
+/.cursor/ {{owner}}
+/.cursorrules {{owner}}
+/.mcp.json {{owner}}
+
+# Tooling and hooks
+/renovate.json {{owner}}
+/lefthook.yml {{owner}}
+/mise.toml {{owner}}
+/biome.json {{owner}}
+/bunfig.toml {{owner}}
+
+# Scripts, dependencies and lockfiles
+/package.json {{owner}}
+/bun.lock {{owner}}
+/package-lock.json {{owner}}
+/pnpm-lock.yaml {{owner}}
+/yarn.lock {{owner}}
+
+/SECURITY.md {{owner}}
+`
+
 const securityMd = `# Security policy
 
 ## Reporting a vulnerability
@@ -187,6 +222,7 @@ export function buildTemplates(root: string): Map<string, string> {
     )
     t.set('common/gitignore', 'node_modules/\ndist/\n.env*\n')
     t.set('common/SECURITY.md', securityMd)
+    t.set('common/CODEOWNERS', codeowners)
     // The gh-aw version agentic-locks.yml compiles with; init tells you to match it.
     const ghAw = /default:\s*(v\d[\w.-]*)/.exec(
         read(root, '.github/workflows/agentic-locks.yml'),

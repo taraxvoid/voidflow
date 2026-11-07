@@ -57,8 +57,8 @@ npx @taraxvoid/voidflow init --kind site --dry-run
 | Flag | Effect |
 |---|---|
 | `--kind tool\|site` | which starter files to write (not needed with `--preset settings` or `rulesets --config`) |
-| `--preset full\|ci\|files\|settings\|rulesets` | full setup (default), only the `ci.yml` workflow, only files, only settings, or only branch rulesets (opt-in, never part of `full`) |
-| `--skip <name>` | leave one file or setting out (repeatable). Files: `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security`. Settings: `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
+| `--preset full\|ci\|codeowners\|files\|settings\|rulesets` | full setup (default), only the `ci.yml` workflow, only `.github/CODEOWNERS`, only files, only settings, or only branch rulesets (opt-in, never part of `full`) |
+| `--skip <name>` | leave one file or setting out (repeatable). Files: `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `codeowners`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security`. Settings: `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
 | `--config <module>` | with `--preset rulesets`: apply this repo's entry from your fleet map instead of the default `tool()` (required for `--kind site`) |
 | `--config <module>` | also add the repo (as `'owner/name': {},`) to the fleet rulesets config in your infra repo; comments and other entries are left as written. Review and commit that file, then run its rulesets plan and apply |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
@@ -66,12 +66,13 @@ npx @taraxvoid/voidflow init --kind site --dry-run
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default) installs deps-review and the `agentic-locks` caller; `gate` also adds the `deps-review-gate` job and the Renovate `deps-review-automerge` preset (merged into `extends`). Moving a repo from shadow to gate merges both files, no `--force` needed. Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to the repo's `checks` in your fleet rulesets config, or an update can merge before the review has run |
 | `--enable-agentic` | opt in, experimental: installs deps-review with `gh aw add` (pinned to this version, needs the gh-aw extension), writes `.github/workflows/agentic.yml`, and applies the repo settings and labels the workflows rely on: allow auto-merge, always suggest updating PR branches, delete head branches on merge, workflow token read-only with Actions unable to approve PRs, and the `low-risk` and `needs-you` labels. The `COPILOT_GITHUB_TOKEN` secret is printed as a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets. Each piece also works with `--skip <name>` |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
+| `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos `init` writes `@OWNER` and asks for `--owner`) |
 | `-f`, `--force` | overwrite files that differ |
 | `--dry-run` | plan both halves, change nothing |
 
 **Files.** `lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`,
 `biome.json`, `.github/workflows/ci.yml` (the CI caller for the kind, pinned to
-the release SHA), and `tsconfig.json` (tool) or `playwright.config.js` and
+the release SHA), `.github/CODEOWNERS`, and `tsconfig.json` (tool) or `playwright.config.js` and
 `unlighthouse.config.ts` (site). `.gitignore` and `package.json` are merged:
 missing lines, scripts and devDependencies are added and the rest kept. If any
 other file exists with different content, or `package.json` has a script with
@@ -79,6 +80,16 @@ a different value, `init` lists them, writes no files and exits 1; `--force`
 overwrites. Each written file starts with a comment naming the voidflow
 version that wrote it (`renovate.json` carries it in `description`). No
 `dependabot.yml`: Renovate does version updates.
+
+**CODEOWNERS.** Puts the paths a misbehaving bot or a malicious pull request
+would edit to change how the repo behaves (`.github/`, agent directives such as
+`CLAUDE.md`, `AGENTS.md` and `.claude/`, tooling config, `package.json` and
+lockfiles, `SECURITY.md`) under one owner. It only gates anything where the
+branch ruleset requires code owner review (the `codeowners` flag, on for
+`tool()`), and the owner should be someone other than the account the bot
+pushes as. GitHub does not apply rulesets to a private repo on a plan without
+them (free personal accounts): `init` probes for that and prints a note when
+the file would not be enforced.
 
 **Settings** need `gh`, authenticated with admin on the repo. Always applied:
 pull requests and issues limited to collaborators (bots with write access
