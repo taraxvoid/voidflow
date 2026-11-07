@@ -20,7 +20,14 @@ import {
     planFiles,
 } from './init/files.ts'
 import { addToFleet } from './init/fleet.ts'
-import { type Gh, ghAvailable, ghCli, resolveRepo } from './init/gh.ts'
+import {
+    type Gh,
+    ghAvailable,
+    ghCli,
+    ownerType,
+    resolveRepo,
+    rulesetsPlanGated,
+} from './init/gh.ts'
 import {
     resolveSha as defaultResolveSha,
     type Kind,
@@ -50,6 +57,7 @@ export const PRESETS: Record<
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
     ci: { files: ['ci'], settings: false },
+    codeowners: { files: ['codeowners'], settings: false },
     // Opt-in only: rulesets block direct pushes to main, which surprises a
     // fresh repo before its first push.
     rulesets: { files: null, settings: false, rulesets: true },
@@ -66,6 +74,7 @@ const OPTIONS = {
     'enable-agentic': { type: 'boolean', default: false },
     'agentic-stage': { type: 'string', default: 'shadow' },
     repo: { type: 'string' },
+    owner: { type: 'string' },
     config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -81,6 +90,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
+  --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
   --config <module>       the fleet rulesets config (in your infra repo): add the repo to it, or with --preset rulesets take this repo's entry from it
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
@@ -237,6 +247,13 @@ export async function main(
     if (!(await isWorkTree(dir)))
         fail(`${dir} is not a git work tree (run git init first)`, prog)
 
+    const owner = values.owner
+    if (
+        owner !== undefined &&
+        !/^@[A-Za-z0-9][\w-]*(?:\/[A-Za-z0-9][\w-]*)?$/.test(owner)
+    )
+        fail(`invalid --owner "${owner}", expected @user or @org/team`, prog)
+
     const stage = values['agentic-stage']
     if (stage !== 'shadow' && stage !== 'gate')
         fail(
@@ -276,6 +293,33 @@ export async function main(
                 `could not resolve the v${version} tag (offline?); ci.yml pins @v${version}, Renovate pins the digest later`,
             )
         }
+        const picked = preset.files === 'all' ? null : new Set(preset.files)
+        // An organization cannot be a code owner, only its users and teams.
+        let ownerHandle = owner ?? null
+        if (
+            owner === undefined &&
+            repo &&
+            (picked === null || picked.has('codeowners')) &&
+            !values.skip.includes('codeowners')
+        ) {
+            const login = repo.split('/')[0] as string
+            const gh = deps.gh ?? ghCli()
+            const type =
+                (await ghAvailable(gh)) === null
+                    ? await ownerType(gh, login)
+                    : null
+            if (type === 'Organization') {
+                notes.push(
+                    `${login} is an organization, which cannot be a code owner: CODEOWNERS uses the placeholder @OWNER; pass --owner @${login}/team or @user (needs write access)`,
+                )
+            } else {
+                ownerHandle = `@${login}`
+                if (type === null)
+                    notes.push(
+                        `could not tell whether ${login} is a user; if it is an organization, pass --owner @${login}/team or @user for CODEOWNERS`,
+                    )
+            }
+        }
         const ctx: RenderCtx = {
             version,
             sha,
@@ -284,8 +328,8 @@ export async function main(
             cronMinute:
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
             stage,
+            owner: ownerHandle,
         }
-        const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
             ...values.skip,
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
@@ -318,6 +362,21 @@ export async function main(
             )
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
+        }
+        if (fileActions.some((a) => a.name === 'codeowners')) {
+            if (ctx.owner == null && !repo)
+                notes.push(
+                    'CODEOWNERS uses the placeholder @OWNER (no repo to take the owner from); pass --owner @handle',
+                )
+            const gh = deps.gh ?? ghCli()
+            if (
+                repo &&
+                (await ghAvailable(gh)) === null &&
+                (await rulesetsPlanGated(gh, repo))
+            )
+                notes.push(
+                    `CODEOWNERS is written but not enforced: ${repo} is private on a plan without rulesets (upgrade to GitHub Pro or make it public)`,
+                )
         }
         const agenticPlanned = fileActions.some((a) => a.name === 'agentic')
         if (enableAgentic && (!agenticPlanned || conflicts.length > 0)) {
