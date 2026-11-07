@@ -2,7 +2,13 @@
 
 voidflow uses release channels mapped to branches, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
-Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`.
+Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`. That environment is the only server-side
+limit on who can publish, so it deploys from `main`, `next` and `release/*`
+only: the infra repo's rulesets config lists it under voidflow's
+`environments`, and `rulesets-plan` reports drift.
+
+The versions below are examples of the shape each channel takes, not the
+current ones; those are in `.release-please/*-manifest.json`.
 
 | Branch | Channel | Version | npm dist-tag | GitHub release |
 |---|---|---|---|---|
@@ -84,7 +90,10 @@ ending `Release-As: 1.0.0`.
 npm packages are published with `npm stage publish`: the workflow uploads each
 version to npm's staging area and it is not live until a human approves it
 with 2FA. Each release stages two packages (`@taraxvoid/voidflow` and the
-unscoped `voidflow` mirror), so approve both, via the Staged Packages tab on
+unscoped `voidflow` mirror), so approve both, `@taraxvoid/voidflow` first
+(`voidflow init` run from the mirror writes a dependency on the scoped
+package at the same version, which would not install until that is live),
+via the Staged Packages tab on
 npmjs.com or `npm stage approve <id>`. The GitHub release, `vX.Y.Z` tag and
 floating `v0` tag are created before approval; actions consumers pin git tags,
 so this is fine, but `npm install` of the new version works only after

@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url'
 
 const NAME = '@taraxvoid/voidflow'
 
+/** The unscoped mirror ships the same code under the bare name (see release-please.yml). */
+const NAMES = new Set([NAME, 'voidflow'])
+
 /** Absolute path of the nearest ancestor directory whose package.json is voidflow's. */
 export function packageRoot(): string {
     let dir = dirname(fileURLToPath(import.meta.url))
@@ -15,7 +18,7 @@ export function packageRoot(): string {
         const pkg = join(dir, 'package.json')
         if (existsSync(pkg)) {
             try {
-                if (JSON.parse(readFileSync(pkg, 'utf8')).name === NAME)
+                if (NAMES.has(JSON.parse(readFileSync(pkg, 'utf8')).name))
                     return dir
             } catch {
                 // unreadable package.json: keep walking

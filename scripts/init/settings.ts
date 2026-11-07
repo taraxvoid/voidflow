@@ -88,7 +88,7 @@ async function get(gh: Gh, path: string): Promise<GhResult> {
 
 async function send(
     gh: Gh,
-    method: 'POST' | 'PUT' | 'PATCH',
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
 ): Promise<void> {
@@ -205,8 +205,8 @@ export const SETTINGS: Setting[] = [
  * Labels the deps-review agent applies, created up front. Names follow
  * rookery's convention: lowercase words joined by hyphens, so they never need
  * quoting. `needs-you` is rookery's shared "blocked on a human" label, not a
- * deps-only one. `was` is the old name: a repo that has it gets it renamed in
- * place, so open PRs keep their label.
+ * deps-only one. `was` is the old name: a repo that has it gets it deleted
+ * (nothing legacy is preserved).
  */
 const AGENTIC_LABELS = [
     {
@@ -293,17 +293,15 @@ function agenticSettings(): Setting[] {
                     if (await labelExists(gh, repo, label.was)) {
                         await send(
                             gh,
-                            'PATCH',
+                            'DELETE',
                             `repos/${repo}/labels/${encodeURIComponent(label.was)}`,
-                            { new_name: name, color, description },
                         )
-                    } else {
-                        await send(gh, 'POST', `repos/${repo}/labels`, {
-                            name,
-                            color,
-                            description,
-                        })
                     }
+                    await send(gh, 'POST', `repos/${repo}/labels`, {
+                        name,
+                        color,
+                        description,
+                    })
                 },
             }),
         ),

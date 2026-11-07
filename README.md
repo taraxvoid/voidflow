@@ -92,13 +92,13 @@ version and `--force` to overwrite the ones that differ.
 
 | Flag | Effect |
 |---|---|
-| `--kind tool\|site` | which starter files to write |
+| `--kind tool\|site` | which starter files to write (not needed with `--preset settings` or `rulesets --config`) |
 | `--skip <name>` | leave one file or setting out (repeatable, [names below](#skip-names)) |
+| `--config <module>` | the fleet rulesets config in your infra repo. With `--preset rulesets`, apply this repo's entry from it instead of the default `tool()` (required for `--kind site`). Otherwise, add the repo (as `'owner/name': {},`) to it; comments and other entries are left as written. Review and commit that file, then run its rulesets plan and apply |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
 | `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
-| `--enable-agentic` | opt in, experimental: [deps-review](#deps-review) and the repo settings and labels it relies on |
-| `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge) |
-| `--config <module>` | with `--preset rulesets`: take this repo's entry from your fleet map |
+| `--enable-agentic` | opt in, experimental: [deps-review](#deps-review) and the repo settings and labels it relies on. The `COPILOT_GITHUB_TOKEN` secret is a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets |
+| `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to the repo's `checks` in your fleet rulesets config |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
 | `-f`, `--force` | overwrite files that differ |
 | `--dry-run` | plan everything, change nothing |
@@ -113,8 +113,7 @@ version and `--force` to overwrite the ones that differ.
 - **Settings:** `pr-policy`, `issue-policy`, `dependabot-alerts`,
   `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan`,
   and with `--enable-agentic`: `auto-merge`, `update-branch`,
-  `delete-branch-on-merge`, `actions-permissions`, `label-low-risk`,
-  `label-needs-you`
+  `delete-branch-on-merge`, `actions-permissions`
 
 ### Files
 
@@ -147,9 +146,8 @@ with push protection, and CodeQL default setup. Opt-ins are never turned off.
   re-run `init --preset settings` after it.
 - `--enable-agentic` adds: allow auto-merge, always suggest updating PR
   branches, delete head branches on merge, a read-only workflow token with
-  Actions unable to approve PRs, and the `low-risk` and `needs-you`
-  labels (renamed in place from the old `deps:low-risk` and
-  `deps:needs-you`, so open PRs keep them).
+  Actions unable to approve PRs, and the `deps:low-risk` and `deps:needs-you`
+  labels.
 - Settings with no API (Dependabot malware alerts, the AI previews, the
   `COPILOT_GITHUB_TOKEN` secret) are printed as manual steps with a link.
 
@@ -182,6 +180,38 @@ for the release flow and [`STABILITY.md`](STABILITY.md) for what minors,
 patches and majors may change and how deprecations reach you.
 
 ## CI workflows
+
+### Trying a canary release
+
+Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init`
+(or the `bunx` form) runs the newest one. If your npm config has a release-age
+cooldown (`min-release-age` or `before`), a fresh canary is filtered
+out and `@next` silently resolves to an older version. For the unscoped mirror
+this fails with `could not determine executable to run`, because the old
+release has no `voidflow` bin. Exempt voidflow in `~/.npmrc`, next to the
+cooldown you already have:
+
+```ini
+min-release-age-exclude[]=voidflow
+min-release-age-exclude[]=@taraxvoid/*
+```
+
+Only the matching packages are exempt; their dependencies still follow the
+cooldown. To check what resolves, run `npm view @taraxvoid/voidflow@next version`.
+Bun has the same idea in `bunfig.toml` (`minimumReleaseAgeExcludes`).
+
+`npx` does not honor the exclusion in current npm releases
+([npm/cli#9765](https://github.com/npm/cli/issues/9765)), and npm before 11.17
+does not know the setting at all, so `npx` can still pick an older release.
+Until that is fixed, turn the cutoff off for that one command:
+
+```sh
+npx --min-release-age=0 @taraxvoid/voidflow@next init
+```
+
+This also lifts the cooldown for the dependencies `npx` installs for that run.
+If your cooldown is `before`, pass a `--before` date later than the canary's
+publish date instead. `npm install` honors the exclusion.
 
 ### Site CI
 
@@ -501,7 +531,7 @@ compromised package can't talk its way to a merge:
 
 - **The agent** reads the release notes between the two versions, checks them
   against what your code actually uses, and leaves a comment with the evidence
-  and a `low-risk` or `needs-you` label. It treats every upstream
+  and a `deps:low-risk` or `deps:needs-you` label. It treats every upstream
   string as untrusted and proposes a verdict; it never approves, merges,
   pushes or posts the check.
 - **The gate job** (deterministic, runs after the agent) recomputes the hard
@@ -523,15 +553,26 @@ Dependabot triggers only see Dependabot secrets.
 Roll it out in stages:
 
 1. **Shadow.** Install it and read its verdicts for a few weeks. Nothing merges.
-2. **Gate.** Make `deps-review` a required check, give human PRs a passing one
-   with the gate workflow, and let Renovate automerge low-risk updates:
+2. **Gate.** Make `deps-review` a required check, post it on everyone else's
+   PRs with the gate workflow, and let Renovate automerge low-risk updates:
 
    ```yaml
      deps-review-gate:
        uses: taraxvoid/voidflow/.github/workflows/deps-review-gate.yml@<sha> # vX.Y.Z
        permissions:
          checks: write
+         contents: read
+         pull-requests: read
    ```
+
+   The gate passes a PR that changes no lockfile and no dependency field of
+   any `package.json`. One that does (an agent's or a contributor's) fails as
+   "Needs you" with the files listed, since nothing reviewed those
+   dependencies: review them, then merge with an admin bypass. It fails
+   closed: a `package.json` it cannot read or parse is listed too, a PR near
+   GitHub's 3000-file listing limit fails, and if the file list itself cannot
+   be fetched the step errors and posts no check, so the required check stays
+   unmet.
 
    ```json
    { "extends": ["github>taraxvoid/voidflow", "github>taraxvoid/voidflow:deps-review-automerge"] }

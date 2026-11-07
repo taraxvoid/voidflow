@@ -85,6 +85,26 @@ required checks never report and the queue stalls. `rulesets` refuses, before
 writing anything, a repo that asks for a queue but isn't org-owned; a private org
 repo without Enterprise Cloud is left to GitHub's API to reject.
 
+To limit which branches can deploy to a GitHub environment, list it under
+`environments` with the tiers whose branches may use it:
+
+```ts
+'taraxvoid/transbot': tool({ environments: { prod: ['main'] } }),
+'taraxvoid/voidflow': {
+    // ...
+    environments: { npm: ['main', 'prerelease', 'maintenance'] },
+},
+```
+
+The plan compares each one against an explicit branch list (`main` resolves
+to the repo's default branch, `maintenance` to `release/*`); apply creates a
+missing environment, sets "selected branches", adds and deletes branch
+policies to match, and keeps the environment's wait timer, reviewers and
+admin bypass. It never uses "protected branches only": GitHub decides that
+from classic branch protection, not rulesets, and lets every branch deploy
+when a repo has none, which is the case for every repo whose protection
+comes from here. Environments not listed are left alone.
+
 Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.
 
@@ -138,7 +158,9 @@ By default each env's token goes into an environment secret,
 `CLOUDFLARE_API_TOKEN` in the GitHub environment named like the env. Only
 jobs with `environment: <env>` read it, so the environment's deployment
 branch policy (`main` only for `prod`) is what keeps a pull request job from
-reading the prod token. That is the recommended shape: one deploy job for
+reading the prod token. cf-tokens does not set that policy; list the env under
+the repo's `environments` in the rulesets config (see
+[Branch rulesets](#branch-rulesets)) so `rulesets-plan` reports it. That is the recommended shape: one deploy job for
 `main` with `environment: prod`, one for pull requests with
 `environment: preview`.
 
@@ -250,6 +272,14 @@ Each command takes its script's flags (`scripts/apply-rulesets.ts`,
 Node 24+ (`bunx` or `npx`); the package ships it built to `dist/`. In this repo,
 the `rulesets-*` and `cf-tokens-*` recipes run the same entry point
 (`scripts/cli.ts`) from the checkout.
+
+If you run a canary (`@next`) with an npm release-age cooldown set, add
+`min-release-age-exclude[]=voidflow` and `min-release-age-exclude[]=@taraxvoid/*`
+to your `.npmrc`, or `@next` resolves to an older release. `npx` ignores the
+exclusion in current npm releases, and npm before 11.17 does not know it, so
+run `npx --min-release-age=0 @taraxvoid/voidflow@next ...` instead (this also
+lifts the cooldown for that run's dependencies). See
+[Trying a canary release](README.md#trying-a-canary-release).
 
 The config modules stay TypeScript under either runtime. Node 24 loads them by
 stripping types, which covers erasable syntax only: type annotations, `type` /

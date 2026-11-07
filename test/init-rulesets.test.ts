@@ -217,12 +217,13 @@ describe('init --preset rulesets', () => {
         expect(rows.map((x) => x.status)).toEqual(['applied', 'failed'])
     })
 
-    test('--config without --preset rulesets exits 2', async () => {
+    test('--config without --preset rulesets adds the repo to the fleet instead', async () => {
+        // Covered in init.test.ts; here only that it is no longer a usage error.
         const r = await run(
-            ['--kind', 'tool', '--config', './x.ts', repo()],
+            ['--kind', 'tool', '--config', './no-such-file.ts', repo()],
             fakeRulesets().gh,
         )
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('--config')
+        expect(r.code).toBe(1)
+        expect(r.out).toMatch(/failed\s+rulesets/)
     })
 })

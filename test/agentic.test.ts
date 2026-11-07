@@ -67,10 +67,9 @@ describe('deps-review agent', () => {
     })
 
     // Renaming the labels breaks callers' filters.
-    test('applies only its two labels', () => {
-        const labels = ['low-risk', 'needs-you']
-        expect(outputs['add-labels'].allowed).toEqual(labels)
-        expect(outputs['remove-labels'].allowed).toEqual(labels)
+    test('adds its two labels but can only remove low-risk (humans clear needs-you)', () => {
+        expect(outputs['add-labels'].allowed).toEqual(['low-risk', 'needs-you'])
+        expect(outputs['remove-labels'].allowed).toEqual(['low-risk'])
     })
 
     describe('deps-gate job (owns the deps-review check)', () => {
@@ -136,15 +135,20 @@ describe('deps-review-gate.yml', () => {
         }
     })
 
-    test('posts the pass-through only on PRs the bots did not open', () => {
+    test('posts the check only on PRs the bots did not open', () => {
         const [, job] = jobs[0]
         expect(jobs).toHaveLength(1)
         for (const bot of BOTS)
             expect(job.if).toContain(
                 `github.event.pull_request.user.login != '${bot}'`,
             )
-        expect(job.steps[0].run).toContain('-f name=deps-review')
-        expect(wf.permissions).toEqual({ checks: 'write' })
+        expect(job.steps[0].run).toContain('name: "deps-review"')
+        // Reads the PR's files and package.json to tell dependency changes apart.
+        expect(wf.permissions).toEqual({
+            checks: 'write',
+            contents: 'read',
+            'pull-requests': 'read',
+        })
     })
 })
 
