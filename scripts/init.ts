@@ -9,7 +9,7 @@
  *
  * node: APIs only, so it runs under Node 24+ as well as Bun.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
@@ -91,7 +91,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
   --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
-  --config <module>       the fleet rulesets config (in your infra repo): add the repo to it, or with --preset rulesets take this repo's entry from it
+  --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
 
@@ -194,6 +194,23 @@ async function isWorkTree(dir: string): Promise<boolean> {
     } catch {
         return false
     }
+}
+
+/**
+ * The rulesets config file `--config` names, resolved against
+ * VOIDFLOW_CONFIG_BASE else cwd: a directory means its rulesets.ts.
+ */
+function rulesetsFile(config: string): string {
+    const file = resolve(
+        process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
+        config,
+    )
+    try {
+        if (statSync(file).isDirectory()) return join(file, 'rulesets.ts')
+    } catch {
+        // missing: reported where it is read
+    }
+    return file
 }
 
 /** `prog` names the command in the --help usage; `deps` are for tests. */
@@ -425,7 +442,7 @@ export async function main(
     if (preset.rulesets) {
         let fleet: Fleet | undefined
         if (values.config) {
-            fleet = await loadOrExit(values.config, checkFleet)
+            fleet = await loadOrExit(rulesetsFile(values.config), checkFleet)
             if (repo && !fleet[repo]) {
                 console.error(
                     `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
@@ -491,8 +508,7 @@ export async function main(
     // --preset rulesets, --config is read above instead (the entry must exist).
     let fleetDone = false
     if (values.config !== undefined && !preset.rulesets) {
-        const base = process.env.VOIDFLOW_CONFIG_BASE || process.cwd()
-        const file = resolve(base, values.config)
+        const file = rulesetsFile(values.config)
         out.push(dryRun ? 'fleet (dry run):' : 'fleet:')
         if (!repo) {
             out.push(row('unavailable', 'rulesets', repoError ?? ''))
