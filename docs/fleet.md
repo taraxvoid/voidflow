@@ -104,7 +104,9 @@ once, e.g. `orgs.taraxvoid.repos."a/b": name has a slash`.
 
 `voidflow init --config <file|dir>` adds the repo it sets up to the rulesets
 config: as `'owner/name': {},` in a flat file, or under `orgs.<owner>.repos`
-(adding the owner block if needed) in a grouped one.
+(adding the owner block if needed) in a grouped one. Owner and repo names
+match case-insensitively, as on GitHub. `orgs` must be written inline in the
+export; a shorthand `{ orgs }` is refused, so add the repo by hand there.
 
 ## Verbs and targets
 
@@ -117,7 +119,9 @@ voidflow apply  rulesets|cf-tokens  (--repo <name> | --entire-fleet)
 - `plan` and `check` cover every repo by default; `--repo` narrows to one
   (an `owner/name`, or a bare name, which matches it under every owner).
   With no tool named they run each configured tool, rulesets first, and a
-  failing tool does not stop the next one.
+  failing tool does not stop the next one. There, `--repo` runs only the
+  tools whose config lists the repo (the others are skipped with a note),
+  and exits 2 if none does.
 - `apply` writes, so it takes exactly one tool and exactly one target:
   `--repo <name>`, which must name a single repo (a bare name in two orgs is
   refused with both listed), or `--entire-fleet`. With neither, it lists the
