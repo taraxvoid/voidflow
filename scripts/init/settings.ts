@@ -219,7 +219,8 @@ const AGENTIC_LABELS = [
         name: 'needs-you',
         was: 'deps:needs-you',
         color: 'd93f0b',
-        description: 'Blocked on a human decision',
+        description:
+            'Blocked on a human decision, whoever or whatever was working on it.',
     },
 ]
 
