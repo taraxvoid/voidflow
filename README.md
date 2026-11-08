@@ -159,7 +159,7 @@ with push protection, and CodeQL default setup. Opt-ins are never turned off.
   re-run `init --preset settings` after it.
 - `--enable-agentic` adds: allow auto-merge, always suggest updating PR
   branches, delete head branches on merge, a read-only workflow token with
-  Actions unable to approve PRs, and the `deps:low-risk` and `deps:needs-you`
+  Actions unable to approve PRs, and the `low-risk` and `needs-you`
   labels.
 - Settings with no API (Dependabot malware alerts, the AI previews, the
   `COPILOT_GITHUB_TOKEN` secret) are printed as manual steps with a link.
@@ -549,7 +549,7 @@ compromised package can't talk its way to a merge:
 
 - **The agent** reads the release notes between the two versions, checks them
   against what your code actually uses, and leaves a comment with the evidence
-  and a `deps:low-risk` or `deps:needs-you` label. It treats every upstream
+  and a `low-risk` or `needs-you` label. It treats every upstream
   string as untrusted and proposes a verdict; it never approves, merges,
   pushes or posts the check.
 - **The gate job** (deterministic, runs after the agent) recomputes the hard
