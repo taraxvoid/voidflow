@@ -23,7 +23,7 @@ Built for Astro sites, bun tools and Cloudflare deploys. Works with `bun`,
 - **Branch rulesets** that protect `main` from pwn requests and agent
   misbehavior (opt-in)
 - **Renovate** with a release-age delay and grouped weekly updates
-- **A license check** that fails on copyleft dependencies
+- **A license check** that fails on copyleft and source-available dependencies
 - **lefthook git hooks** that run the same checks before you push
 - **Biome, Playwright and Lighthouse budgets**, preconfigured
 - **(experimental) deps-review**, a [GitHub Agentic Workflow](https://github.github.com/gh-aw/)
@@ -455,7 +455,11 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 "test:e2e:lighthouse": "bun run build && unlighthouse-runner --dir dist"
 ```
 
-**License check** - fails on GPL, AGPL, SSPL and similar. LGPL is allowed.
+**License check** - fails on copyleft (GPL, AGPL, EUPL and similar) and
+source-available licenses (SSPL, BUSL, Elastic, Commons Clause, PolyForm).
+LGPL is allowed. Compound SPDX expressions count: an `AND` or `WITH` fails if
+any part is blocked, an `OR` only if every choice is. A package whose license
+is only `SEE LICENSE IN <file>` isn't read.
 
 ```json
 "check:licenses": "check-licenses"
