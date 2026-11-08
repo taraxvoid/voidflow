@@ -69,6 +69,26 @@ describe('addToFleet with orgs', () => {
         )
     })
 
+    test('owner and repo names match case-insensitively', () => {
+        expect(addToFleet(ORGS, 'TaraXVoid/VoidFlow').status).toBe('unchanged')
+        expect(added(ORGS, 'TaraXVoid/new')).toBe(
+            ORGS.replace(
+                "                'txv.sh': {},\n",
+                "                'txv.sh': {},\n                'new': {},\n",
+            ),
+        )
+    })
+
+    test('orgs written as a shorthand fails, not a legacy append', () => {
+        const r = addToFleet(
+            'const orgs = { o: { repos: {} } }\nexport default { orgs }\n',
+            'o/n',
+        )
+        expect(r.status).toBe('failed')
+        if (r.status === 'failed')
+            expect(r.detail).toContain('not written as an object literal')
+    })
+
     test('an owner with no repos object fails', () => {
         const r = addToFleet(
             'export default { orgs: { o: { other: 1 } } }\n',
@@ -84,6 +104,15 @@ describe('addToFleet with orgs', () => {
         )
         expect(added("export default {\n    'o/orgs': {},\n}\n", 'o/r')).toBe(
             "export default {\n    'o/orgs': {},\n    'o/r': {},\n}\n",
+        )
+        expect(addToFleet("export default { 'A/B': {} }\n", 'a/b').status).toBe(
+            'unchanged',
+        )
+    })
+
+    test('a legacy file keeps its own indent', () => {
+        expect(added("export default {\n  'a/b': {},\n}\n", 'o/r')).toBe(
+            "export default {\n  'a/b': {},\n  'o/r': {},\n}\n",
         )
     })
 })

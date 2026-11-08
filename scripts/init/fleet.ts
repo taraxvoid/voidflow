@@ -51,34 +51,7 @@ function closeBrace(code: string, open: number): number {
     return -1
 }
 
-/** The quoted keys of the object whose body is `body` (comments blanked), nested ones left out. */
-function topLevelKeys(body: string): string[] {
-    const keys: string[] = []
-    let depth = 0
-    let atKey = true
-    for (let i = 0; i < body.length; i++) {
-        const c = body[i]
-        if (c === "'" || c === '"' || c === '`') {
-            let j = i + 1
-            for (; j < body.length && body[j] !== c; j++)
-                if (body[j] === '\\') j++
-            if (depth === 0 && atKey && /^\s*:/.test(body.slice(j + 1)))
-                keys.push(body.slice(i + 1, j))
-            atKey = false
-            i = j
-        } else if ('{[('.includes(c)) {
-            depth++
-        } else if ('}])'.includes(c)) {
-            depth--
-        } else if (c === ',' && depth === 0) {
-            atKey = true
-        } else if (depth === 0 && !/\s/.test(c)) {
-            atKey = false
-        }
-    }
-    return keys
-}
-
+/** Where a property's value starts; -1 for a shorthand `{ key }`. */
 type Prop = { key: string; at: number; value: number }
 
 /**
@@ -105,8 +78,10 @@ function props(text: string, open: number, end: number): Prop[] {
                 while (j < end && /[\w$]/.test(text[j])) j++
                 key = text.slice(i, j)
             }
-            const colon = /^\s*:\s*/.exec(text.slice(j, end))
+            const rest = text.slice(j, end - 1)
+            const colon = /^\s*:\s*/.exec(rest)
             if (colon) out.push({ key, at: i, value: j + colon[0].length })
+            else if (/^\s*(,|$)/.test(rest)) out.push({ key, at: i, value: -1 })
             atKey = false
             i = j - 1
         } else if (c === "'" || c === '"' || c === '`') {
@@ -156,16 +131,23 @@ function append(
     return `${text.slice(0, lastCode)}${comma}${tail}\n${indent}${entry}\n${closeIndent}${text.slice(close)}`
 }
 
-/** The `{` of `key`'s object value among `ps`, with the key's indent; null if not an object. */
+/** GitHub owner and repo names compare case-insensitively. */
+const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+
+/**
+ * The `{` of `key`'s object value among `ps` (`key` compared with `eq`), with
+ * the key's indent; null if not an object literal, undefined if absent.
+ */
 function child(
     text: string,
     code: string,
     ps: Prop[],
     key: string,
+    eq: (a: string, b: string) => boolean = (a, b) => a === b,
 ): { open: number; end: number; indent: string } | null | undefined {
-    const p = ps.find((x) => x.key === key)
+    const p = ps.find((x) => eq(x.key, key))
     if (!p) return undefined
-    if (code[p.value] !== '{') return null
+    if (p.value === -1 || code[p.value] !== '{') return null
     const end = closeBrace(code, p.value)
     if (end === -1) return null
     return { open: p.value, end, indent: lineIndent(text, p.at) ?? '' }
@@ -183,7 +165,13 @@ function addToOrgs(
     const owner = repo.slice(0, slash)
     const name = repo.slice(slash + 1)
     const ownerKey = /^[A-Za-z_$][\w$]*$/.test(owner) ? owner : `'${owner}'`
-    const org = child(text, code, props(noComments, orgs.open, orgs.end), owner)
+    const org = child(
+        text,
+        code,
+        props(noComments, orgs.open, orgs.end),
+        owner,
+        sameName,
+    )
     if (org === undefined) {
         return {
             status: 'added',
@@ -205,7 +193,11 @@ function addToOrgs(
             detail: `orgs.${ownerKey} has no repos object to add ${name} to`,
         }
     }
-    if (props(noComments, repos.open, repos.end).some((p) => p.key === name))
+    if (
+        props(noComments, repos.open, repos.end).some((p) =>
+            sameName(p.key, name),
+        )
+    )
         return { status: 'unchanged' }
     return {
         status: 'added',
@@ -248,20 +240,16 @@ export function addToFleet(text: string, repo: string): FleetEdit {
     const top = props(noComments, open, end)
     if (top.some((p) => p.key === 'orgs')) {
         const orgs = child(text, code, top, 'orgs')
-        if (!orgs) return { status: 'failed', detail: 'orgs is not an object' }
+        if (!orgs)
+            return {
+                status: 'failed',
+                detail: 'orgs is not written as an object literal in the export (shorthand or a variable); add the repo under orgs.<owner>.repos by hand',
+            }
         return addToOrgs(text, code, noComments, orgs, repo)
     }
-    if (topLevelKeys(noComments.slice(open + 1, end - 1)).includes(repo))
-        return { status: 'unchanged' }
-
-    // Append after the last entry (or the opening brace). If that entry lacks
-    // a comma, it goes right after the entry, before any comment on its line.
-    const close = end - 1
-    const lastCode = noComments.slice(0, close).trimEnd().length
-    const comma = /[,{]$/.test(noComments.slice(0, lastCode)) ? '' : ','
-    const tail = text.slice(lastCode, close).trimEnd()
+    if (top.some((p) => sameName(p.key, repo))) return { status: 'unchanged' }
     return {
         status: 'added',
-        text: `${text.slice(0, lastCode)}${comma}${tail}\n    '${repo}': {},\n${text.slice(close)}`,
+        text: append(text, noComments, open, end, `'${repo}': {},`, '    '),
     }
 }

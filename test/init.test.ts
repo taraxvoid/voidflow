@@ -502,6 +502,14 @@ describe('voidflow init --config', () => {
         const text = readFileSync(p, 'utf8')
         expect(text).toContain("    // trailing\n    'o/r': {},\n}")
         expect(r.out).not.toContain('by hand')
+        // Discovery from the new repo would not find the infra config, so
+        // the next steps name it.
+        expect(r.out).toContain(
+            `voidflow plan rulesets --config ${p} --repo o/r`,
+        )
+        expect(r.out).toContain(
+            `voidflow apply rulesets --config ${p} --repo o/r`,
+        )
         const again = await run([...S, '--config', p, repo()])
         expect(again.out).toMatch(/unchanged\s+rulesets/)
         expect(readFileSync(p, 'utf8')).toBe(text)
