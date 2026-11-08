@@ -8,7 +8,12 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { applyTargetError, splitVerbArgs, worstExit } from '../scripts/verbs.ts'
+import {
+    applyTargetError,
+    splitVerbArgs,
+    toolArgs,
+    worstExit,
+} from '../scripts/verbs.ts'
 
 describe('splitVerbArgs', () => {
     test('the first positional is the tool', () => {
@@ -67,6 +72,20 @@ describe('splitVerbArgs', () => {
         expect(() => splitVerbArgs(['rulesets', '--config'])).toThrow(
             '--config',
         )
+    })
+
+    test('--entire-fleet takes no inline value', () => {
+        for (const a of ['--entire-fleet=false', '--entire-fleet=true'])
+            expect(() => splitVerbArgs(['rulesets', a])).toThrow(
+                '--entire-fleet takes no value',
+            )
+    })
+
+    test('flags after -- are forwarded as given', () => {
+        expect(
+            splitVerbArgs(['cf-tokens', '--repo', 'a', '--', 'x', '--check'])
+                .rest,
+        ).toEqual(['--repo', 'a', '--', 'x', '--check'])
     })
 
     test('--repo needs a value, and a flag is not one', () => {
@@ -130,6 +149,32 @@ describe('applyTargetError', () => {
                 repo: 'site',
             }),
         ).toContain('no repo matches')
+    })
+})
+
+describe('toolArgs', () => {
+    test('the verb flag goes before the forwarded flags and any --', () => {
+        const args = toolArgs('check', 'cf-tokens', '/c.ts', [
+            '--repo',
+            'a',
+            '--',
+            'x',
+        ])
+        expect(args).toEqual([
+            'cf-tokens',
+            '--config',
+            '/c.ts',
+            '--check',
+            '--repo',
+            'a',
+            '--',
+            'x',
+        ])
+        expect(toolArgs('plan', 'rulesets', '/r.ts', [])).toEqual([
+            'rulesets',
+            '--config',
+            '/r.ts',
+        ])
     })
 })
 
@@ -254,8 +299,50 @@ describe('voidflow plan|check|apply', () => {
         )
         expect(r.err).toContain('cf-tokens: no cf-tokens.ts')
         expect(r.err).toContain('skipped')
-        expect(r.err).toContain('plan rulesets')
+        expect(r.err).toContain('no repo matches --repo nope')
         expect(r.code).toBe(2)
+    })
+
+    test('without a tool, --repo skips a tool whose config lacks the repo', async () => {
+        // cf-tokens runs (and stops on the missing CF_TOKEN_ADMIN, before
+        // any network call); rulesets has no o/zz, so it is skipped rather
+        // than reporting "no repo matches" as a config error.
+        const f = fixture({
+            'rulesets.ts': RULESETS,
+            'cf-tokens.ts': `export default { 'o/zz': { account: '${'c'.repeat(32)}', envs: [{ env: 'prod' }], retire: [] } }`,
+        })
+        const r = await voidflow(
+            ['check', '--config', f.cfg, '--repo', 'zz'],
+            f,
+        )
+        expect(r.err).toContain(
+            `rulesets: no repo matches --repo zz in ${join(f.cfg, 'rulesets.ts')}, skipped`,
+        )
+        expect(r.err).not.toContain('check rulesets |')
+        expect(r.err).toContain('check cf-tokens |')
+        expect(r.err).toContain('CF_TOKEN_ADMIN is not set')
+    })
+
+    test('without a tool, --repo in no config exits 2', async () => {
+        const f = fixture({
+            'rulesets.ts': RULESETS,
+            'cf-tokens.ts': 'export default {}',
+        })
+        const r = await voidflow(['plan', '--config', f.cfg, '--repo', 'zz'], f)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('no repo matches --repo zz in ')
+        expect(r.err).not.toContain('plan rulesets |')
+    })
+
+    test('an xdg dir without the file says cwd was not searched', async () => {
+        const f = fixture()
+        mkdirSync(join(f.xdg, 'voidflow'))
+        writeFileSync(join(f.xdg, 'voidflow', 'rulesets.ts'), RULESETS)
+        writeFileSync(join(f.work, 'cf-tokens.ts'), 'export default {}')
+        const r = await voidflow(['plan', 'cf-tokens'], f)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('it exists, so')
+        expect(r.err).toContain('were not searched')
     })
 
     test('a --config file with no tool named exits 2', async () => {

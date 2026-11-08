@@ -10,7 +10,7 @@
  * as a child process with the remaining flags. See docs/fleet.md.
  */
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { checkRepos } from '../cloudflare/tokens.ts'
@@ -19,7 +19,6 @@ import { loadConfig } from './lib/config.ts'
 import {
     discover,
     type Found,
-    isDangling,
     TOOL_FILE,
     type Tool,
     xdgDir,
@@ -40,9 +39,6 @@ const REFUSED: Record<string, string> = {
     '--try': 'use `voidflow cf-tokens --try`',
     '--groups': 'use `voidflow cf-tokens --groups`',
 }
-
-/** Per-tool flags that take a separate value, so the value is not a positional. */
-const VALUED = new Set(['--repo', '--try'])
 
 export type VerbArgs = {
     tool?: Tool
@@ -75,6 +71,8 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
                 throw new Error('--config needs a value')
             out.config = v
         } else if (flag === '--entire-fleet') {
+            if (inline !== undefined)
+                throw new Error('--entire-fleet takes no value')
             out.entireFleet = true
         } else if (a.startsWith('-')) {
             out.rest.push(a)
@@ -84,12 +82,6 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
                     throw new Error('--repo needs a value')
                 if (inline === undefined) out.rest.push(argv[++i])
                 out.repo = v
-            } else if (
-                VALUED.has(flag) &&
-                inline === undefined &&
-                i + 1 < argv.length
-            ) {
-                out.rest.push(argv[++i])
             }
         } else if (out.tool !== undefined) {
             throw new Error(
@@ -173,13 +165,42 @@ const VERB_FLAG: Record<Verb, string[]> = {
     apply: ['--apply'],
 }
 
+/**
+ * The per-tool command line for one verb run. The verb's flag goes before the
+ * forwarded flags: after a `--` in them it would be a positional, and check
+ * or apply would silently plan.
+ */
+export function toolArgs(
+    verb: Verb,
+    tool: Tool,
+    file: string,
+    rest: string[],
+): string[] {
+    return [tool, '--config', file, ...VERB_FLAG[verb], ...rest]
+}
+
 /** Where discovery looked, for a "not found" message. */
 function lookedIn(tool: Tool, v: VerbArgs, xdg: string): string {
     const file = TOOL_FILE[tool]
     if (v.config !== undefined) return `--config ${v.config}`
     if (process.env.VOIDFLOW_CONFIG)
         return `VOIDFLOW_CONFIG ${process.env.VOIDFLOW_CONFIG}`
+    if (isDir(xdg))
+        return `${xdg} (it exists, so ${process.cwd()} and the directories above it were not searched; add ${file} there, or set --config or VOIDFLOW_CONFIG to point elsewhere)`
     return `${xdg}, then ${file} in ${process.cwd()} and each directory above it (set --config or VOIDFLOW_CONFIG to point elsewhere)`
+}
+
+function isDir(path: string): boolean {
+    try {
+        return statSync(path).isDirectory()
+    } catch {
+        return false
+    }
+}
+
+/** The repo keys of a tool's config file; throws on a bad config. */
+async function reposIn(tool: Tool, file: string): Promise<string[]> {
+    return Object.keys(await loadConfig(file, '/', CHECKS[tool]))
 }
 
 function version(): string {
@@ -235,12 +256,8 @@ export function verbMain(verb: Verb) {
         const env = process.env
         const home = homedir()
         const xdg = xdgDir({ env, home })
-        if (v.config === undefined && !env.VOIDFLOW_CONFIG && isDangling(xdg))
-            fail(
-                `${prog}: ${xdg} is a symlink to a missing path; fix or remove it, or pass --config`,
-            )
 
-        const found: [Tool, Found][] = []
+        let found: [Tool, Found][] = []
         try {
             for (const tool of v.tool ? [v.tool] : TOOLS) {
                 const hit = discover(tool, {
@@ -277,14 +294,37 @@ export function verbMain(verb: Verb) {
                 `${prog}: --config ${v.config} is a file, so name the tool it is for: voidflow ${verb} rulesets|cf-tokens --config ${v.config}`,
             )
 
+        // Without a tool, --repo runs only the tools whose config lists it, so
+        // a repo in one config is not a "no repo matches" error from the other.
+        if (!v.tool && v.repo !== undefined) {
+            const repo = v.repo
+            const listed: [Tool, Found][] = []
+            for (const [tool, hit] of found) {
+                let repos: string[]
+                try {
+                    repos = await reposIn(tool, hit.file)
+                } catch (e) {
+                    fail((e as Error).message)
+                }
+                if (matches(repos, repo).length > 0) listed.push([tool, hit])
+                else
+                    console.error(
+                        `${prog}: ${tool}: no repo matches --repo ${repo} in ${hit.file}, skipped`,
+                    )
+            }
+            if (listed.length === 0)
+                fail(
+                    `${prog}: no repo matches --repo ${repo} in ${found.map(([, f]) => f.file).join(' or ')}`,
+                )
+            found = listed
+        }
+
         let scope: string
         if (verb === 'apply') {
             const [tool, hit] = found[0]
             let repos: string[]
             try {
-                repos = Object.keys(
-                    await loadConfig(hit.file, '/', CHECKS[tool]),
-                )
+                repos = await reposIn(tool, hit.file)
             } catch (e) {
                 fail((e as Error).message)
             }
@@ -309,14 +349,7 @@ export function verbMain(verb: Verb) {
             )
             const r = spawnSync(
                 process.execPath,
-                [
-                    cli,
-                    tool,
-                    '--config',
-                    hit.file,
-                    ...v.rest,
-                    ...VERB_FLAG[verb],
-                ],
+                [cli, ...toolArgs(verb, tool, hit.file, v.rest)],
                 { stdio: 'inherit' },
             )
             if (r.error) console.error(`${prog}: ${tool}: ${r.error.message}`)

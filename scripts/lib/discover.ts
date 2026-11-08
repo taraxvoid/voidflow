@@ -39,7 +39,7 @@ function kind(path: string): 'file' | 'dir' | 'missing' {
 }
 
 /** True when `path` is a symlink whose target does not exist. */
-export function isDangling(path: string): boolean {
+function isDangling(path: string): boolean {
     try {
         return lstatSync(path).isSymbolicLink() && kind(path) === 'missing'
     } catch {
@@ -48,9 +48,23 @@ export function isDangling(path: string): boolean {
 }
 
 /**
- * An explicit value (--config or VOIDFLOW_CONFIG): `~/` expands to home, a
- * relative one resolves against VOIDFLOW_CONFIG_BASE else cwd. A directory
- * means the tool's file in it (null when absent); a missing path throws.
+ * An explicit config value (--config or VOIDFLOW_CONFIG) as an absolute
+ * path: `~/` expands to home, a relative one resolves against
+ * VOIDFLOW_CONFIG_BASE else cwd.
+ */
+export function configPath(
+    value: string,
+    o: Pick<DiscoverOptions, 'env' | 'cwd' | 'home'>,
+): string {
+    const expanded = value.startsWith('~/')
+        ? join(o.home, value.slice(2))
+        : value
+    return resolve(o.env.VOIDFLOW_CONFIG_BASE || o.cwd, expanded)
+}
+
+/**
+ * An explicit value at configPath(). A directory means the tool's file in it
+ * (null when absent); a missing path throws.
  */
 function explicit(
     value: string,
@@ -58,10 +72,7 @@ function explicit(
     file: string,
     o: DiscoverOptions,
 ): string | null {
-    const expanded = value.startsWith('~/')
-        ? join(o.home, value.slice(2))
-        : value
-    const path = resolve(o.env.VOIDFLOW_CONFIG_BASE || o.cwd, expanded)
+    const path = configPath(value, o)
     const k = kind(path)
     if (k === 'missing') throw new Error(`${label} ${path} does not exist`)
     if (k === 'file') return path
@@ -72,9 +83,10 @@ function explicit(
 /**
  * The config file for `tool`, first hit wins: `o.flag`; VOIDFLOW_CONFIG; the
  * xdg voidflow dir; the nearest ancestor of `cwd` holding the tool's file.
- * An explicit source, or an xdg dir that exists (or is a dangling symlink),
- * decides alone: without the tool's file it is null, not a fall-through.
- * Throws when an explicit path does not exist.
+ * An explicit source, or an xdg dir that exists, decides alone: without the
+ * tool's file it is null, not a fall-through. Throws when an explicit path
+ * does not exist, or when the xdg dir is a dangling symlink (so a broken link
+ * does not silently fall through to cwd).
  */
 export function discover(tool: Tool, o: DiscoverOptions): Found | null {
     const file = TOOL_FILE[tool]
@@ -91,7 +103,10 @@ export function discover(tool: Tool, o: DiscoverOptions): Found | null {
         const hit = join(xdg, file)
         return kind(hit) === 'file' ? { file: hit, via: 'xdg' } : null
     }
-    if (isDangling(xdg)) return null
+    if (isDangling(xdg))
+        throw new Error(
+            `${xdg} is a symlink to a missing path; fix or remove it, or pass --config`,
+        )
     for (let dir = resolve(o.cwd); ; dir = dirname(dir)) {
         const hit = join(dir, file)
         if (kind(hit) === 'file') return { file: hit, via: 'cwd' }

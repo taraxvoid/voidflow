@@ -2,7 +2,24 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { discover, TOOL_FILE } from '../scripts/lib/discover.ts'
+import { configPath, discover, TOOL_FILE } from '../scripts/lib/discover.ts'
+
+// init --config resolves through configPath too, so it reads a value the way
+// the verbs' --config does.
+describe('configPath', () => {
+    const o = { env: {}, cwd: '/work', home: '/home/t' }
+    test('~/ is home, relative is cwd, VOIDFLOW_CONFIG_BASE wins over cwd', () => {
+        expect(configPath('~/infra', o)).toBe('/home/t/infra')
+        expect(configPath('../infra', o)).toBe('/infra')
+        expect(configPath('/abs', o)).toBe('/abs')
+        expect(
+            configPath('infra', {
+                ...o,
+                env: { VOIDFLOW_CONFIG_BASE: '/base' },
+            }),
+        ).toBe('/base/infra')
+    })
+})
 
 /** A fresh temp tree: home (empty), and a config dir holding the given files. */
 function tree(files: string[] = ['rulesets.ts', 'cf-tokens.ts']) {
@@ -89,14 +106,16 @@ describe('discover', () => {
         })
     })
 
-    test('a dangling xdg symlink is null, not a throw, and does not fall through', () => {
+    test('a dangling xdg symlink throws naming it, and does not fall through', () => {
         const t = tree([])
         mkdirSync(join(t.home, '.config'))
         symlinkSync(join(t.root, 'gone'), join(t.home, '.config', 'voidflow'))
         writeFileSync(join(t.cwd, 'rulesets.ts'), '')
-        expect(
+        expect(() =>
             discover('rulesets', { env: {}, cwd: t.cwd, home: t.home }),
-        ).toBeNull()
+        ).toThrow(
+            `${join(t.home, '.config', 'voidflow')} is a symlink to a missing path`,
+        )
     })
 
     test('ancestors of cwd, nearest first', () => {
