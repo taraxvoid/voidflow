@@ -7,7 +7,7 @@ import {
     writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { addToFleet } from '../scripts/init/fleet.ts'
 import type { Gh } from '../scripts/init/gh.ts'
 import { main, PRESETS } from '../scripts/init.ts'
@@ -502,6 +502,14 @@ describe('voidflow init --config', () => {
         const text = readFileSync(p, 'utf8')
         expect(text).toContain("    // trailing\n    'o/r': {},\n}")
         expect(r.out).not.toContain('by hand')
+        // Discovery from the new repo would not find the infra config, so
+        // the next steps name it.
+        expect(r.out).toContain(
+            `voidflow plan rulesets --config ${p} --repo o/r`,
+        )
+        expect(r.out).toContain(
+            `voidflow apply rulesets --config ${p} --repo o/r`,
+        )
         const again = await run([...S, '--config', p, repo()])
         expect(again.out).toMatch(/unchanged\s+rulesets/)
         expect(readFileSync(p, 'utf8')).toBe(text)
@@ -528,6 +536,25 @@ describe('voidflow init --config', () => {
         const r = await run([...S, '--config', cfg('const x = 1\n'), repo()])
         expect(r.code).toBe(1)
         expect(r.out).toMatch(/failed\s+rulesets/)
+    })
+
+    test('a directory means its rulesets.ts', async () => {
+        const p = cfg(SRC)
+        const r = await run([...S, '--config', dirname(p), repo()])
+        expect(r.code).toBe(0)
+        expect(r.out).toMatch(/added\s+rulesets\s+o\/r/)
+        expect(r.out).toContain(p)
+        expect(readFileSync(p, 'utf8')).toContain("    'o/r': {},\n}")
+    })
+
+    test('an org-grouped config gets the repo under its owner', async () => {
+        const p = cfg(
+            'export default {\n    orgs: {\n        o: { repos: {} },\n    },\n}\n',
+        )
+        const r = await run([...S, '--config', p, repo()])
+        expect(r.code).toBe(0)
+        expect(readFileSync(p, 'utf8')).toContain('repos: {\n')
+        expect(readFileSync(p, 'utf8')).toContain("'r': {},")
     })
 
     test('a config path that cannot be read is a failed row, and the rest still prints', async () => {

@@ -9,7 +9,8 @@
  *
  * node: APIs only, so it runs under Node 24+ as well as Bun.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
@@ -42,6 +43,7 @@ import {
 } from './init/settings.ts'
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
+import { configPath } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import { capture } from './lib/proc.ts'
 
@@ -91,7 +93,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
   --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
-  --config <module>       the fleet rulesets config (in your infra repo): add the repo to it, or with --preset rulesets take this repo's entry from it
+  --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
 
@@ -194,6 +196,25 @@ async function isWorkTree(dir: string): Promise<boolean> {
     } catch {
         return false
     }
+}
+
+/**
+ * The rulesets config file `--config` names, read the way the fleet verbs
+ * read it (configPath: `~/` is home, relative is against VOIDFLOW_CONFIG_BASE
+ * else cwd): a directory means its rulesets.ts.
+ */
+function rulesetsFile(config: string): string {
+    const file = configPath(config, {
+        env: process.env,
+        cwd: process.cwd(),
+        home: homedir(),
+    })
+    try {
+        if (statSync(file).isDirectory()) return join(file, 'rulesets.ts')
+    } catch {
+        // missing: reported where it is read
+    }
+    return file
 }
 
 /** `prog` names the command in the --help usage; `deps` are for tests. */
@@ -425,7 +446,7 @@ export async function main(
     if (preset.rulesets) {
         let fleet: Fleet | undefined
         if (values.config) {
-            fleet = await loadOrExit(values.config, checkFleet)
+            fleet = await loadOrExit(rulesetsFile(values.config), checkFleet)
             if (repo && !fleet[repo]) {
                 console.error(
                     `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
@@ -490,9 +511,10 @@ export async function main(
     // Fleet half: add the repo to the infra repo's rulesets config. With
     // --preset rulesets, --config is read above instead (the entry must exist).
     let fleetDone = false
+    let fleetFile = ''
     if (values.config !== undefined && !preset.rulesets) {
-        const base = process.env.VOIDFLOW_CONFIG_BASE || process.cwd()
-        const file = resolve(base, values.config)
+        const file = rulesetsFile(values.config)
+        fleetFile = file
         out.push(dryRun ? 'fleet (dry run):' : 'fleet:')
         if (!repo) {
             out.push(row('unavailable', 'rulesets', repoError ?? ''))
@@ -533,8 +555,12 @@ export async function main(
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
     if (fleetDone) {
+        // Discovery from this repo would not find the infra repo's config,
+        // so the commands name it.
         out.push(
-            '  review and commit the rulesets config, then run its rulesets-plan and rulesets-apply',
+            '  review and commit the rulesets config, then run:',
+            `    voidflow plan rulesets --config ${fleetFile} --repo ${repo}`,
+            `    voidflow apply rulesets --config ${fleetFile} --repo ${repo}`,
         )
     } else if (!(preset.rulesets && values.config)) {
         out.push(

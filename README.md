@@ -95,7 +95,7 @@ version and `--force` to overwrite the ones that differ.
 |---|---|
 | `--kind tool\|site` | which starter files to write (not needed with `--preset settings` or `rulesets --config`) |
 | `--skip <name>` | leave one file or setting out (repeatable, [names below](#skip-names)) |
-| `--config <module>` | the fleet rulesets config in your infra repo. With `--preset rulesets`, apply this repo's entry from it instead of the default `tool()` (required for `--kind site`). Otherwise, add the repo (as `'owner/name': {},`) to it; comments and other entries are left as written. Review and commit that file, then run its rulesets plan and apply |
+| `--config <file\|dir>` | the fleet rulesets config in your infra repo (a directory means its `rulesets.ts`). With `--preset rulesets`, apply this repo's entry from it instead of the default `tool()` (required for `--kind site`). Otherwise, add the repo to it (as `'owner/name': {},`, or under `orgs.<owner>.repos` in an [org-grouped](docs/fleet.md#config-shapes) config); comments and other entries are left as written. Review and commit that file, then run `voidflow plan rulesets` and `voidflow apply rulesets --repo <name>` |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
 | `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
 | `--enable-agentic` | opt in, experimental: [deps-review](#deps-review) and the repo settings and labels it relies on. The `COPILOT_GITHUB_TOKEN` secret is a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets |
@@ -465,13 +465,18 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 Cloudflare deploy tokens as code (and [`init`](#init-reference)). Run it with `bunx` or `npx` (Node 24+) from
 an org's infra repo that holds the fleet map (`--config`) and pins the version;
 no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
-also needs `CF_TOKEN_ADMIN`. Config shapes and flags are in
+also needs `CF_TOKEN_ADMIN`. [`docs/fleet.md`](docs/fleet.md) covers the
+infra repo, how the verbs find its config (including `~/.config/voidflow`) and
+their targets; config shapes and flags are in
 [`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental while
 they settle: the CLI's commands and flags and the `./cloudflare` and
 `./rulesets` exports may change in a minor
 ([`STABILITY.md`](STABILITY.md#experimental)). Pin an exact version.
 
 ```sh
+bunx @taraxvoid/voidflow@<version> plan                             # both tools, config found from ~/.config/voidflow
+bunx @taraxvoid/voidflow@<version> check rulesets                   # exit 1 on drift
+bunx @taraxvoid/voidflow@<version> apply rulesets --repo transbot   # or --entire-fleet; no default target
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
 bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
 npx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts     # the same, under Node 24+
