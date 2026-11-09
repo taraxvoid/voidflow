@@ -444,7 +444,7 @@ jobs:
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.test_unit == 'true'
         run: '"$PM" run test:unit'
 
-      - name: Check Licenses for GPL kudzu
+      - name: Check Licenses
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.check_licenses == 'true' && (steps.changes.outputs.lockfile == 'true' || steps.changes.outputs.scripts == 'true'))
         run: '"$PM" run check:licenses'
 

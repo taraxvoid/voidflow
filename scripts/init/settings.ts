@@ -421,7 +421,7 @@ export function manualReminders(
     const lines = [`Turn on Dependabot malware alerts (no API): ${url}`]
     if (enableAgentic) {
         lines.push(
-            `Add the COPILOT_GITHUB_TOKEN secret for the deps-review engine (cannot be created from nothing): https://github.com/${repo}/settings/secrets/actions`,
+            `Add the COPILOT_GITHUB_TOKEN secret for the deps-review engine (cannot be created from nothing), as an Actions secret (https://github.com/${repo}/settings/secrets/actions) and again as a Dependabot secret (https://github.com/${repo}/settings/secrets/dependabot)`,
         )
     }
     if (enableAiScan) {

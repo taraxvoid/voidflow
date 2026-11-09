@@ -66,15 +66,14 @@ Check the stable release PR's version before merging it. release-please walks
 `feat` on `next` dated before the latest stable release (e.g. a hotfix released
 while the feature waited on `next`) is never counted and the PR proposes a
 patch bump. Fix it by pinning the version (below), then add the missed entries
-to the release PR's `CHANGELOG.md` by hand.
-
-A `Release-As` footer on `next` reaches `main` with the promotion, and
-release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
-start a prerelease line makes the stable release PR propose `1.0.0-next`.
+to both the release PR's body and its `CHANGELOG.md` by hand: release-please
+builds the GitHub release notes from the PR body, not from the file.
 
 To pin the version, set `"release-as": "X.Y.Z"` on the `.` package in
 `.release-please/main.json` with a squash-merged PR to `main`. It overrides any
-commit footer. Remove it in the first PR after that release, or every later
+commit footer, so if the file already pins a different version (check it
+first), update or remove that pin before relying on a footer for another
+version. Remove it in the first PR after that release, or every later
 release PR proposes the same version again. A `Release-As:` footer in a PR
 body isn't reliable: CodeRabbit appends its summary to the body, so the footer
 is no longer the last paragraph of the squash commit and isn't parsed.

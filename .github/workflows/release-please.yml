@@ -263,7 +263,9 @@ jobs:
           else
             npm pkg set name=voidflow
             # Pointer blurb on top, then the full README minus its own H1.
-            { cat scripts/mirror-readme.md; printf '\n---\n'; tail -n +2 README.md; } > "$PACK_DIR/mirror-README.md"
+            # Relative links point at files outside the package, so make them
+            # GitHub URLs.
+            { cat scripts/mirror-readme.md; printf '\n---\n'; tail -n +2 README.md | sed -E 's#\]\(([A-Za-z0-9_.][^):]*)\)#](https://github.com/taraxvoid/voidflow/blob/main/\1)#g'; } > "$PACK_DIR/mirror-README.md"
             cp "$PACK_DIR/mirror-README.md" README.md
             file=$(pack)
             echo "mirror=${file}" >> "$GITHUB_OUTPUT"
