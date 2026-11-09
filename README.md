@@ -33,7 +33,8 @@ Built for Astro sites, bun tools and Cloudflare deploys. Works with `bun`,
 
 `init` needs Node 24+ (or Bun), a git work tree, and the
 [`gh` CLI](https://cli.github.com/) logged in with admin on the repo for the
-settings half. `bunx @taraxvoid/voidflow init` works the same as `npx`.
+settings half. `bunx @taraxvoid/voidflow init --kind tool` works the same as
+`npx`.
 
 **New Astro site:**
 
