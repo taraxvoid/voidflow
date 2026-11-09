@@ -527,6 +527,17 @@ Badge:
 </a>
 ```
 
+Optional second badge for immutable releases (links to how to verify them):
+
+```html
+<a href="https://github.com/taraxvoid/voidflow/blob/main/RELEASING.md#verify-a-release">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/releases-immutable-8b8fd9?labelColor=2b2d3a&style=flat">
+    <img alt="releases: immutable" src="https://img.shields.io/badge/releases-immutable-5a5fb8?labelColor=3a3d4d&style=flat">
+  </picture>
+</a>
+```
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). MIT licensed.
