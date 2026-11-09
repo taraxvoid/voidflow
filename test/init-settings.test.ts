@@ -113,6 +113,7 @@ describe('settings', () => {
             'update-branch',
             'delete-branch-on-merge',
             'actions-permissions',
+            'fork-pr-approval',
             'label-low-risk',
             'label-needs-you',
         ])
