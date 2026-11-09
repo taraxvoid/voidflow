@@ -63,8 +63,9 @@ const blockedIds = new Set(BLOCKED.map((id) => id.toLowerCase()))
 
 /** One SPDX license id or exception, as license-checker reports it. */
 function blockedId(id: string) {
-    // license-checker marks a license it guessed from a file with a trailing *.
-    const bare = id.replace(/\*$/, '').toLowerCase()
+    // license-checker marks a license it guessed from a file with a trailing *;
+    // a trailing + is the deprecated SPDX "or later" form (GPL-3.0+).
+    const bare = id.replace(/[+*]+$/, '').toLowerCase()
     // Every PolyForm license (Noncommercial, Small-Business, Strict, Shield,
     // Perimeter, Internal-Use, Free-Trial) restricts use.
     return blockedIds.has(bare) || bare.startsWith('polyform-')

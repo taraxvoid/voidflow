@@ -174,6 +174,7 @@ describe('init --enable-agentic', () => {
     test('prints the Copilot token secret as a manual step', async () => {
         const r = await run([...ARGV, '--dry-run', repo()], fakeGh().gh)
         expect(r.out).toContain('COPILOT_GITHUB_TOKEN')
+        expect(r.out).toContain('settings/secrets/dependabot')
     })
 
     test('shadow writes agentic.yml with the locks job only', async () => {

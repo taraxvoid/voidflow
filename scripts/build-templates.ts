@@ -110,6 +110,8 @@ ${
   deps-review-gate:
     permissions:
       checks: write
+      contents: read
+      pull-requests: read
     uses: taraxvoid/voidflow/.github/workflows/deps-review-gate.yml@{{sha}} # v{{version}}
 `
         : ''

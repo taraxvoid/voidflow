@@ -100,6 +100,8 @@ describe('isBlocked', () => {
         'GPL-3.0',
         'gpl-3.0-only',
         'GPL-2.0*',
+        'GPL-3.0+',
+        'AGPL-3.0+',
         'BUSL-1.1',
         'Elastic-2.0',
         'SSPL-1.0',

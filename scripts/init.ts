@@ -447,7 +447,13 @@ export async function main(
         let fleet: Fleet | undefined
         if (values.config) {
             fleet = await loadOrExit(rulesetsFile(values.config), checkFleet)
-            if (repo && !fleet[repo]) {
+            const key = repo
+                ? Object.keys(fleet).find(
+                      (k) => k.toLowerCase() === repo?.toLowerCase(),
+                  )
+                : undefined
+            if (repo && key) repo = key
+            if (repo && !key) {
                 console.error(
                     `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
                 )

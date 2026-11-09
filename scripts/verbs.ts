@@ -283,15 +283,15 @@ export function verbMain(verb: Verb) {
             fail(
                 `${prog}: no fleet config found; looked in ${lookedIn('rulesets', v, xdg)} (for rulesets.ts or cf-tokens.ts)`,
             )
-        // A --config file (not a directory) is the same file for every tool.
+        // A --config or VOIDFLOW_CONFIG file (not a directory) is the same
+        // file for every tool.
         if (
             !v.tool &&
-            v.config !== undefined &&
             found.length === TOOLS.length &&
             found.every(([, f]) => f.file === found[0][1].file)
         )
             fail(
-                `${prog}: --config ${v.config} is a file, so name the tool it is for: voidflow ${verb} rulesets|cf-tokens --config ${v.config}`,
+                `${prog}: ${v.config !== undefined ? `--config ${v.config}` : `VOIDFLOW_CONFIG ${process.env.VOIDFLOW_CONFIG}`} is a file, so name the tool it is for: voidflow ${verb} rulesets|cf-tokens`,
             )
 
         // Without a tool, --repo runs only the tools whose config lists it, so
