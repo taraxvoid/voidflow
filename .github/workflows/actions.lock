@@ -38,7 +38,7 @@ workflows:
         - 'pnpm/action-setup@v6.1.0'
     '.github/workflows/tool-ci.yml':
         - 'actions/cache@v6.1.0'
-        - 'actions/checkout@v7.0.1'
+        - 'actions/checkout@v4.2.2'
         - 'actions/upload-artifact@v7.0.2'
         - 'astral-sh/setup-uv@v10.0.1'
         - 'dorny/paths-filter@v4.0.3'
