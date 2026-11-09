@@ -77,7 +77,10 @@ async function main(argv: string[]) {
         if (!list.ok) throw new Error(`gh release list failed: ${list.err}`)
         tags = selectAuditTags(JSON.parse(list.out) as Release[], since)
         attempts = 1
-    } else if (argv.length > 0 && !argv[0].startsWith('-')) {
+    } else if (
+        argv.length > 0 &&
+        argv.every((t) => t !== '' && !t.startsWith('-'))
+    ) {
         tags = argv
     } else {
         console.error('usage: verify-releases.ts <tag>... | --audit')

@@ -4,11 +4,11 @@ voidflow uses release channels mapped to branches, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
 Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`.
 
-| Branch | Channel | Version | npm dist-tag | GitHub release |
-|---|---|---|---|---|
-| `main` | stable | `0.10.0` | `latest` | normal |
-| `next` | prerelease | `0.10.0-next`, then `-next.1`, `-next.2` | `next` | prerelease |
-| `release/N.x` | maintenance (patch-only) | `0.9.4` | `release-N.x` | normal |
+| Branch        | Channel                  | Version                                  | npm dist-tag  | GitHub release |
+| ------------- | ------------------------ | ---------------------------------------- | ------------- | -------------- |
+| `main`        | stable                   | `0.10.0`                                 | `latest`      | normal         |
+| `next`        | prerelease               | `0.10.0-next`, then `-next.1`, `-next.2` | `next`        | prerelease     |
+| `release/N.x` | maintenance (patch-only) | `0.9.4`                                  | `release-N.x` | normal         |
 
 ```mermaid
 gitGraph
@@ -184,8 +184,9 @@ What this does and does not tell you:
 - The attestation is made when the release is published, so it is a point in
   time record. A release published while the setting was on stays immutable,
   and one published while it was off never gets an attestation, so a failing
-  `gh release verify` means that release was not immutable when it was
-  published. Immutability applies to future releases only: v0.5.0 and earlier
+  `gh release verify` leaves that release unverified: investigate the error
+  before concluding it was mutable when published (it may be a transient or
+  auth failure). Immutability applies to future releases only: v0.5.0 and earlier
   predate it and fail the check. `.github/immutable-since` names the first
   release that is covered (v0.5.1).
 - The floating major tag (`v1` once 1.0.0 is out) is moved on every stable
@@ -194,8 +195,9 @@ What this does and does not tell you:
 - The release workflow runs `gh release verify` on every release it creates and
   fails the run if it does not pass. A weekly workflow
   (`.github/workflows/verify-releases.yml`) re-checks every release since the
-  baseline and opens an issue on a failure, so the setting being switched off
-  does not go unnoticed. These are checks on our side; the attestation itself
+  baseline and opens an issue on a failure, so a release published without
+  immutability does not go unnoticed (it detects the release, not a change to
+  the repo setting). These are checks on our side; the attestation itself
   is what you verify.
 - release-please creates the release with no uploaded assets, so there is no
   draft-then-attach step that immutability could break. The npm tarballs are

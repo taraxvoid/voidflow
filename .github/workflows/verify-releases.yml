@@ -30,6 +30,7 @@ jobs:
           no-cache: true
 
       - name: Verify every release since the baseline
+        id: audit
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -37,7 +38,7 @@ jobs:
 
       # A red scheduled run is easy to miss; an issue is not.
       - name: Open an issue when a release is not immutable
-        if: failure()
+        if: failure() && steps.audit.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

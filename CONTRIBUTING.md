@@ -233,7 +233,9 @@ the `rulesets-*` and `cf-tokens-*` recipes run the same entry point
 
 If you run a canary (`@next`) with an npm release-age cooldown set, add
 `min-release-age-exclude[]=voidflow` and `min-release-age-exclude[]=@taraxvoid/*`
-to your `.npmrc`, or `@next` resolves to an older release. See
+to your `.npmrc`, or `@next` resolves to an older release. On npm 11.19.0 and
+12.2.0, `npx --min-release-age=0 @taraxvoid/voidflow@next init` works around it
+but disables the age check for every package in that run. See
 [Trying a canary release](README.md#trying-a-canary-release).
 
 The config modules stay TypeScript under either runtime. Node 24 loads them by
@@ -248,22 +250,22 @@ need nothing at run time; value imports resolve from the infra repo's
 `node_modules`:
 
 ```ts
-import type { RepoConfig } from '@taraxvoid/voidflow/cloudflare'
-import { tool, type Fleet } from '@taraxvoid/voidflow/rulesets'
+import type { RepoConfig } from "@taraxvoid/voidflow/cloudflare";
+import { tool, type Fleet } from "@taraxvoid/voidflow/rulesets";
 ```
 
 ```ts
 // cf-tokens.ts in the org's infra repo
 export const REPOS = {
-    'example-org/site': {
-        account: '<account id>',
-        envs: [
-            { env: 'prod' }, // env.prod in its wrangler.jsonc, else the top level
-            { env: 'preview', zones: [] },
-        ],
-        retire: [],
-    },
-}
+  "example-org/site": {
+    account: "<account id>",
+    envs: [
+      { env: "prod" }, // env.prod in its wrangler.jsonc, else the top level
+      { env: "preview", zones: [] },
+    ],
+    retire: [],
+  },
+};
 ```
 
 ```just

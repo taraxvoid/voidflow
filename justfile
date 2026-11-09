@@ -178,7 +178,7 @@ cut-maintenance tag branch:
     # A branch cut from an older tag still runs that tag's workflows, so bring
     # the current release tooling with it or releases from it would publish
     # without dist-tags (or not run at all).
-    for f in .github/workflows/release-please.yml .github/workflows/ci.yml scripts/release-channel.ts .release-please/maintenance.json; do
+    for f in .github/workflows/release-please.yml .github/workflows/ci.yml scripts/release-channel.ts scripts/verify-releases.ts .release-please/maintenance.json; do
         mkdir -p "$dir/$(dirname "$f")"
         git show "origin/main:$f" > "$dir/$f"
     done
