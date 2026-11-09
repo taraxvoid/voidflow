@@ -42,7 +42,7 @@ jobs:
     if: github.event.pull_request.draft == false
 
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0 # sharp edge: gitleaks requires full commit history
           persist-credentials: false
