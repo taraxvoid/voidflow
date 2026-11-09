@@ -28,7 +28,14 @@ typecheck), and the recipes wrap them.
 lefthook runs Biome (fixing staged files), the typecheck and the workflow and
 action linters on `pre-commit`, and zizmor and the tests on `pre-push`.
 
-Pin every third-party action to a full commit SHA with a version comment.
+Third-party actions are pinned by `.github/workflows/actions.lock`, not inline
+SHAs: reference a full version tag (`@v1.2.3`) and run `gh actions-lock` after
+adding or changing any `uses:`, then commit `actions.lock` with the workflow.
+`verify-lockfile.yml` runs `gh actions-lock --verify` on pull requests and
+weekly. Use `--relock` to advance moved refs, and never run `--accept-moved`
+from automation. zizmor requires a ref pin (`.github/zizmor.yml`) and Renovate
+bumps the tags; digest pinning is off in the preset because the lockfile holds
+the commits.
 
 ### Running CI locally
 
