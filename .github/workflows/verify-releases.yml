@@ -1,0 +1,52 @@
+name: Verify releases
+
+# Weekly audit that every release since .github/immutable-since still carries
+# GitHub's immutable-release attestation (`gh release verify`). The release
+# workflow checks each new release as it is cut; this catches anything that
+# slipped past (a release published by hand, the setting flipped off between
+# runs) and leaves a dated record. A failure opens an issue.
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  audit:
+    name: Audit release attestations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      - name: Verify every release since the baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: bun scripts/verify-releases.ts --audit
+
+      # A red scheduled run is easy to miss; an issue is not.
+      - name: Open an issue when a release is not immutable
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="A release is not verified immutable"
+          if [ -n "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[].number')" ]; then
+            echo "Issue already open: ${TITLE}"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+            --body "The release audit failed: ${RUN_URL}. Check that immutable releases is enabled in the repo settings, then see RELEASING.md (\"Verify a release\")."
