@@ -19,7 +19,9 @@ fnox.local.toml
 .vscode/
 .idea
 .superpowers
-docs/
+# agent plans and specs land in docs/; only the published docs are tracked
+docs/*
+!docs/fleet.md
 
 # mise state from runs with HOME at the repo root
 /.cache/

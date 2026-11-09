@@ -9,8 +9,10 @@
  *
  * node: APIs only, so it runs under Node 24+ as well as Bun.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
     applyFiles,
     FILE_ITEMS,
@@ -18,12 +20,21 @@ import {
     fileNames,
     planFiles,
 } from './init/files.ts'
-import { type Gh, ghAvailable, ghCli, resolveRepo } from './init/gh.ts'
+import { addToFleet } from './init/fleet.ts'
+import {
+    type Gh,
+    ghAvailable,
+    ghCli,
+    ownerType,
+    resolveRepo,
+    rulesetsPlanGated,
+} from './init/gh.ts'
 import {
     resolveSha as defaultResolveSha,
     type Kind,
     type RenderCtx,
 } from './init/render.ts'
+import { defaultFleet, runRulesets } from './init/rulesets.ts'
 import {
     manualReminders,
     runSettings,
@@ -31,6 +42,8 @@ import {
     settingNames,
 } from './init/settings.ts'
 import { parseOrExit } from './lib/args.ts'
+import { loadOrExit } from './lib/config.ts'
+import { configPath } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import { capture } from './lib/proc.ts'
 
@@ -40,11 +53,16 @@ import { capture } from './lib/proc.ts'
  */
 export const PRESETS: Record<
     string,
-    { files: 'all' | string[] | null; settings: boolean }
+    { files: 'all' | string[] | null; settings: boolean; rulesets?: boolean }
 > = {
     full: { files: 'all', settings: true },
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
+    ci: { files: ['ci'], settings: false },
+    codeowners: { files: ['codeowners'], settings: false },
+    // Opt-in only: rulesets block direct pushes to main, which surprises a
+    // fresh repo before its first push.
+    rulesets: { files: null, settings: false, rulesets: true },
 }
 
 const KINDS: Kind[] = ['tool', 'site']
@@ -52,11 +70,14 @@ const KINDS: Kind[] = ['tool', 'site']
 const OPTIONS = {
     kind: { type: 'string' },
     preset: { type: 'string', default: 'full' },
-    'skip-file': { type: 'string', multiple: true, default: [] as string[] },
-    'skip-setting': { type: 'string', multiple: true, default: [] as string[] },
+    skip: { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
+    'enable-agentic': { type: 'boolean', default: false },
+    'agentic-stage': { type: 'string', default: 'shadow' },
     repo: { type: 'string' },
+    owner: { type: 'string' },
+    config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
     'dry-run': { type: 'boolean', default: false },
 } as const
@@ -64,12 +85,15 @@ const OPTIONS = {
 const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
 
   --kind tool|site        which starter files to write (not needed with --preset settings)
-  --preset <name>         ${Object.keys(PRESETS).join('|')} (default full)
-  --skip-file <name>      leave this file out (repeatable)
-  --skip-setting <name>   leave this setting alone (repeatable)
+  --preset <name>         ${Object.keys(PRESETS).join('|')}(default full)
+  --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests
+  --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
+  --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --repo owner/name       the GitHub repo (default: the origin remote)
+  --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
+  --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
   -f, --force             overwrite files that differ
   --dry-run               plan both halves, write and change nothing
 
@@ -81,6 +105,11 @@ Settings: ${settingNames().join(', ')}`
 
 type Deps = {
     gh?: Gh
+    /** Runs `gh aw` in dir; for tests. */
+    ghAw?: (
+        args: string[],
+        dir: string,
+    ) => Promise<{ code: number; err: string }>
     resolveSha?: (version: string) => Promise<string | null>
 }
 
@@ -103,6 +132,57 @@ function existingCronMinute(dir: string): number | null {
     return n >= 0 && n <= 59 ? n : null
 }
 
+async function defaultGhAw(
+    args: string[],
+    dir: string,
+): Promise<{ code: number; err: string }> {
+    try {
+        const r = await capture(['gh', 'aw', ...args], undefined, {
+            timeoutMs: 120_000,
+            cwd: dir,
+        })
+        return { code: r.code, err: r.err }
+    } catch (e) {
+        return { code: 127, err: (e as Error).message }
+    }
+}
+
+/** The gh-aw version the reusable agentic-locks workflow compiles with by default. */
+function agenticLocksGhAwVersion(): string | null {
+    try {
+        const text = readFileSync(
+            join(packageRoot(), 'templates/common/gh-aw-version'),
+            'utf8',
+        ).trim()
+        return /^v\d[\w.-]*$/.test(text) ? text : null
+    } catch {
+        return null
+    }
+}
+
+/** Install the deps-review workflow with `gh aw add`, pinned to this version. */
+async function installDepsReview(
+    dir: string,
+    version: string,
+    dryRun: boolean,
+    run: NonNullable<Deps['ghAw']>,
+): Promise<{ name: string; status: string; detail: string }> {
+    const name = 'deps-review'
+    const spec = `taraxvoid/voidflow/agentic@v${version}`
+    if (existsSync(join(dir, '.github/workflows/deps-review.md')))
+        return { name, status: 'unchanged', detail: '' }
+    if (dryRun)
+        return { name, status: 'would-apply', detail: `gh aw add ${spec}` }
+    const r = await run(['add', spec], dir)
+    return r.code === 0
+        ? { name, status: 'applied', detail: `gh aw add ${spec}` }
+        : {
+              name,
+              status: 'failed',
+              detail: `${r.err.trim().split('\n')[0] || `exit ${r.code}`}; install gh-aw and run: gh aw add ${spec}`,
+          }
+}
+
 async function isWorkTree(dir: string): Promise<boolean> {
     try {
         const r = await capture(
@@ -116,6 +196,25 @@ async function isWorkTree(dir: string): Promise<boolean> {
     } catch {
         return false
     }
+}
+
+/**
+ * The rulesets config file `--config` names, read the way the fleet verbs
+ * read it (configPath: `~/` is home, relative is against VOIDFLOW_CONFIG_BASE
+ * else cwd): a directory means its rulesets.ts.
+ */
+function rulesetsFile(config: string): string {
+    const file = configPath(config, {
+        env: process.env,
+        cwd: process.cwd(),
+        home: homedir(),
+    })
+    try {
+        if (statSync(file).isDirectory()) return join(file, 'rulesets.ts')
+    } catch {
+        // missing: reported where it is read
+    }
+    return file
 }
 
 /** `prog` names the command in the --help usage; `deps` are for tests. */
@@ -146,30 +245,47 @@ export async function main(
     if (wantFiles && kind === undefined)
         fail(`--preset ${values.preset} needs --kind tool|site`, prog)
 
-    const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
-    for (const n of values['skip-file']) {
-        if (!validFiles.includes(n))
-            fail(
-                `unknown --skip-file "${n}", expected one of: ${validFiles.join(', ')}`,
-                prog,
-            )
+    if (preset.rulesets && !values.config && kind !== 'tool') {
+        fail(
+            kind === 'site'
+                ? '--preset rulesets for a site needs --config <module> (no default site rulesets yet)'
+                : '--preset rulesets needs --kind tool or --config <module>',
+            prog,
+        )
     }
-    for (const n of values['skip-setting']) {
-        if (!settingNames().includes(n)) {
+
+    const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
+    const valid = [...validFiles, ...settingNames()]
+    for (const n of values.skip) {
+        if (!valid.includes(n))
             fail(
-                `unknown --skip-setting "${n}", expected one of: ${settingNames().join(', ')}`,
+                `unknown --skip "${n}", expected one of: ${valid.join(', ')}`,
                 prog,
             )
-        }
     }
 
     const dir = resolve(positionals[0] ?? '.')
     if (!(await isWorkTree(dir)))
         fail(`${dir} is not a git work tree (run git init first)`, prog)
 
+    const owner = values.owner
+    if (
+        owner !== undefined &&
+        !/^@[A-Za-z0-9][\w-]*(?:\/[A-Za-z0-9][\w-]*)?$/.test(owner)
+    )
+        fail(`invalid --owner "${owner}", expected @user or @org/team`, prog)
+
+    const stage = values['agentic-stage']
+    if (stage !== 'shadow' && stage !== 'gate')
+        fail(
+            `unknown --agentic-stage "${stage}", expected shadow or gate`,
+            prog,
+        )
+
     const dryRun = values['dry-run']
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
+    const enableAgentic = values['enable-agentic']
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -198,6 +314,33 @@ export async function main(
                 `could not resolve the v${version} tag (offline?); ci.yml pins @v${version}, Renovate pins the digest later`,
             )
         }
+        const picked = preset.files === 'all' ? null : new Set(preset.files)
+        // An organization cannot be a code owner, only its users and teams.
+        let ownerHandle = owner ?? null
+        if (
+            owner === undefined &&
+            repo &&
+            (picked === null || picked.has('codeowners')) &&
+            !values.skip.includes('codeowners')
+        ) {
+            const login = repo.split('/')[0] as string
+            const gh = deps.gh ?? ghCli()
+            const type =
+                (await ghAvailable(gh)) === null
+                    ? await ownerType(gh, login)
+                    : null
+            if (type === 'Organization') {
+                notes.push(
+                    `${login} is an organization, which cannot be a code owner: CODEOWNERS uses the placeholder @OWNER; pass --owner @${login}/team or @user (needs write access)`,
+                )
+            } else {
+                ownerHandle = `@${login}`
+                if (type === null)
+                    notes.push(
+                        `could not tell whether ${login} is a user; if it is an organization, pass --owner @${login}/team or @user for CODEOWNERS`,
+                    )
+            }
+        }
         const ctx: RenderCtx = {
             version,
             sha,
@@ -205,15 +348,22 @@ export async function main(
             repo,
             cronMinute:
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
+            stage,
+            owner: ownerHandle,
         }
-        const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
-            ...values['skip-file'],
+            ...values.skip,
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
         fileActions = planFiles(
             dir,
-            { kind, skip, force: values.force, enablePvr },
+            {
+                kind,
+                skip,
+                force: values.force,
+                enablePvr,
+                enableAgentic: values['enable-agentic'],
+            },
             ctx,
         )
         const conflicts = fileActions.filter((a) => a.status === 'conflict')
@@ -234,6 +384,39 @@ export async function main(
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
         }
+        if (fileActions.some((a) => a.name === 'codeowners')) {
+            if (ctx.owner == null && !repo)
+                notes.push(
+                    'CODEOWNERS uses the placeholder @OWNER (no repo to take the owner from); pass --owner @handle',
+                )
+            const gh = deps.gh ?? ghCli()
+            if (
+                repo &&
+                (await ghAvailable(gh)) === null &&
+                (await rulesetsPlanGated(gh, repo))
+            )
+                notes.push(
+                    `CODEOWNERS is written but not enforced: ${repo} is private on a plan without rulesets (upgrade to GitHub Pro or make it public)`,
+                )
+        }
+        const agenticPlanned = fileActions.some((a) => a.name === 'agentic')
+        if (enableAgentic && (!agenticPlanned || conflicts.length > 0)) {
+            notes.push(
+                conflicts.length > 0
+                    ? 'deps-review was not installed (file conflicts, nothing written)'
+                    : 'deps-review was not installed (the files half did not include agentic)',
+            )
+        } else if (enableAgentic) {
+            const r = await installDepsReview(
+                dir,
+                version,
+                dryRun,
+                deps.ghAw ?? defaultGhAw,
+            )
+            out.push('agentic:')
+            out.push(row(r.status, r.name, r.detail))
+            if (r.status === 'failed' && !dryRun) exitCode = 1
+        }
     }
 
     // Settings half.
@@ -247,14 +430,51 @@ export async function main(
             if (!dryRun) exitCode = 1
         } else if (repo) {
             settingResults = await runSettings(gh, repo, {
-                skip: new Set(values['skip-setting']),
+                skip: new Set(values.skip),
                 enablePvr,
                 enableAiScan,
+                enableAgentic,
                 dryRun,
             })
             for (const r of settingResults)
                 out.push(row(r.status, r.name, r.detail))
             if (settingResults.some((r) => r.status === 'failed')) exitCode = 1
+        }
+    }
+
+    // Rulesets half. A bad --config is reported even when gh is unavailable.
+    if (preset.rulesets) {
+        let fleet: Fleet | undefined
+        if (values.config) {
+            fleet = await loadOrExit(rulesetsFile(values.config), checkFleet)
+            const key = repo
+                ? Object.keys(fleet).find(
+                      (k) => k.toLowerCase() === repo?.toLowerCase(),
+                  )
+                : undefined
+            if (repo && key) repo = key
+            if (repo && !key) {
+                console.error(
+                    `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
+                )
+                process.exit(2)
+            }
+        }
+        out.push(dryRun ? 'rulesets (dry run):' : 'rulesets:')
+        const gh = deps.gh ?? ghCli()
+        const unavailable = repoError ?? (await ghAvailable(gh))
+        if (unavailable) {
+            out.push(row('unavailable', 'rulesets', unavailable))
+            if (!dryRun) exitCode = 1
+        } else if (repo) {
+            const results = await runRulesets(
+                gh,
+                repo,
+                fleet ?? defaultFleet(repo),
+                dryRun,
+            )
+            for (const r of results) out.push(row(r.status, r.name, r.detail))
+            if (results.some((r) => r.status === 'failed')) exitCode = 1
         }
     }
 
@@ -271,20 +491,90 @@ export async function main(
         }
     }
 
+    if (enableAgentic && !preset.settings) {
+        notes.push(
+            'agentic settings were not applied (the settings half did not run)',
+        )
+    }
+    if (enableAgentic) {
+        const pin = agenticLocksGhAwVersion()
+        if (pin) {
+            notes.push(
+                `agentic-locks recompiles with gh-aw ${pin} and fails on a different lock; use the same version locally: gh extension install github/gh-aw --pin ${pin}`,
+            )
+        }
+    }
+
     if (repo && preset.settings) {
         out.push('manual:')
-        for (const l of manualReminders(repo, enableAiScan)) out.push(`  ${l}`)
+        for (const l of manualReminders(repo, enableAiScan, enableAgentic))
+            out.push(`  ${l}`)
     }
     if (notes.length > 0) {
         out.push('notes:')
         for (const n of notes) out.push(`  ${n}`)
     }
+    // Fleet half: add the repo to the infra repo's rulesets config. With
+    // --preset rulesets, --config is read above instead (the entry must exist).
+    let fleetDone = false
+    let fleetFile = ''
+    if (values.config !== undefined && !preset.rulesets) {
+        const file = rulesetsFile(values.config)
+        fleetFile = file
+        out.push(dryRun ? 'fleet (dry run):' : 'fleet:')
+        if (!repo) {
+            out.push(row('unavailable', 'rulesets', repoError ?? ''))
+            exitCode = 1
+        } else if (!existsSync(file)) {
+            out.push(row('failed', 'rulesets', `${file} does not exist`))
+            exitCode = 1
+        } else {
+            // A path that is a directory, or a file that cannot be read or
+            // written, is a failed row like any other, not a crash that drops
+            // the results buffered in `out`.
+            try {
+                const edit = addToFleet(readFileSync(file, 'utf8'), repo)
+                if (edit.status === 'failed') {
+                    out.push(
+                        row('failed', 'rulesets', `${file}: ${edit.detail}`),
+                    )
+                    exitCode = 1
+                } else {
+                    if (edit.status === 'added' && !dryRun)
+                        writeFileSync(file, edit.text)
+                    fleetDone = true
+                    out.push(row(edit.status, 'rulesets', `${repo} in ${file}`))
+                }
+            } catch (e) {
+                out.push(
+                    row(
+                        'failed',
+                        'rulesets',
+                        `${file}: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                )
+                exitCode = 1
+            }
+        }
+    }
+
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
-    out.push(
-        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': tool(),`,
-        '    (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
-    )
+    if (fleetDone) {
+        // Discovery from this repo would not find the infra repo's config,
+        // so the commands name it.
+        out.push(
+            '  review and commit the rulesets config, then run:',
+            `    voidflow plan rulesets --config ${fleetFile} --repo ${repo}`,
+            `    voidflow apply rulesets --config ${fleetFile} --repo ${repo}`,
+        )
+    } else if (!(preset.rulesets && values.config)) {
+        out.push(
+            '  add the repo to your fleet rulesets config: rerun with --config <path to it>, e.g. ../infra/rulesets.ts',
+            `  or add this entry by hand: '${repo ?? 'OWNER/REPO'}': {},`,
+            '  (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
+        )
+    }
     console.log(out.join('\n'))
     process.exit(exitCode)
 }

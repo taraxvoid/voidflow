@@ -114,10 +114,11 @@ on:
         default: false
       red-audits:
         description: >
-          Report a failed accessibility or Lighthouse audit (test:e2e:a11y,
-          test:e2e:lighthouse, run on schedule and workflow_dispatch) as a
-          warning and a job-summary line instead of failing the run. The
-          failure reports still upload. Set false to make a red audit fail CI.
+          Fail the run when an accessibility or Lighthouse audit
+          (test:e2e:a11y, test:e2e:lighthouse, run on schedule and
+          workflow_dispatch) fails. Off by default: a failed audit is reported
+          as a warning and a job-summary line, and the run stays green. The
+          failure reports upload either way.
         type: boolean
         default: false
 
@@ -443,7 +444,7 @@ jobs:
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.test_unit == 'true'
         run: '"$PM" run test:unit'
 
-      - name: Check Licenses for GPL kudzu
+      - name: Check Licenses
         if: steps.decide.outputs.validate == 'true' && (steps.scripts.outputs.check_licenses == 'true' && (steps.changes.outputs.lockfile == 'true' || steps.changes.outputs.scripts == 'true'))
         run: '"$PM" run check:licenses'
 

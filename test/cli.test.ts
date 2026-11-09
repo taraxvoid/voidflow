@@ -3,6 +3,7 @@ import {
     mkdirSync,
     mkdtempSync,
     readFileSync,
+    realpathSync,
     renameSync,
     rmSync,
     writeFileSync,
@@ -164,6 +165,33 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         expect(r.code).toBe(2)
         expect(r.err).toContain(`${join(dir, 'rulesets.ts')}:`)
         expect(r.err).toContain('unknown tier "nope"')
+    })
+
+    test('plan finds a config dir and re-runs the tool under the same runtime', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
+        roots.push(dir)
+        mkdirSync(join(dir, 'infra'))
+        mkdirSync(join(dir, 'home'))
+        writeFileSync(
+            join(dir, 'infra', 'rulesets.ts'),
+            "export default { orgs: { o: { repos: { r: { tiers: ['nope'] } } } } }",
+        )
+        const r = await run(
+            [...cli, 'plan', 'rulesets', '--config', 'infra'],
+            dir,
+            {
+                CF_TOKEN_ADMIN: '',
+                VOIDFLOW_CONFIG: '',
+                VOIDFLOW_CONFIG_BASE: '',
+                XDG_CONFIG_HOME: join(dir, 'home'),
+            },
+        )
+        expect(r.err).toContain(
+            // relative to the child's cwd, which the OS reports resolved
+            `plan rulesets | config ${join(realpathSync(dir), 'infra', 'rulesets.ts')} (flag)`,
+        )
+        expect(r.err).toContain('unknown tier "nope"')
+        expect(r.code).toBe(2)
     })
 })
 
