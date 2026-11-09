@@ -18,6 +18,9 @@ workflows:
         - 'actions/setup-node@v7.1.0'
         - 'googleapis/release-please-action@v5.0.0'
         - 'oven-sh/setup-bun@v2.2.0'
+    '.github/workflows/relock-actions.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'actions/create-github-app-token@v3.2.0'
     '.github/workflows/scorecard.yml':
         - 'actions/checkout@v4.2.2'
         - 'actions/upload-artifact@v4.6.1'
