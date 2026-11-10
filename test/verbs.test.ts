@@ -310,6 +310,17 @@ describe('voidflow plan|check|apply', () => {
         expect(r.err).toContain('CF_TOKEN_ADMIN is not set')
     })
 
+    test('tokens with no provider skips a missing provider file', async () => {
+        const f = fixture({ 'rulesets.ts': RULESETS })
+        const r = await voidflow(['plan', 'tokens', '--config', f.cfg], f)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('tokens cf: no cf-tokens.ts')
+        expect(r.err).toContain('skipped')
+        expect(r.err).toContain('no fleet config found')
+        expect(r.err).toContain('(for cf-tokens.ts)')
+        expect(r.err).not.toContain('rulesets.ts or')
+    })
+
     test('apply tokens with no provider refuses', async () => {
         const f = fixture({ 'cf-tokens.ts': 'export default {}' })
         const r = await voidflow(['apply', 'tokens', '--config', f.cfg], f)

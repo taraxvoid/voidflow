@@ -318,7 +318,7 @@ export function verbMain(verb: Verb) {
                     home,
                 })
                 if (hit) found.push([tool, hit])
-                else if (v.tool || v.tokensAll)
+                else if (v.tool)
                     fail(
                         `${prog}: ${toolName(tool)}: no ${TOOL_FILE[tool]} found; looked in ${lookedIn(tool, v, xdg)}`,
                     )
@@ -332,7 +332,7 @@ export function verbMain(verb: Verb) {
         }
         if (found.length === 0)
             fail(
-                `${prog}: no fleet config found; looked in ${lookedIn('rulesets', v, xdg)} (for rulesets.ts or cf-tokens.ts)`,
+                `${prog}: no fleet config found; looked in ${lookedIn(wanted[0], v, xdg)} (for ${wanted.map((t) => TOOL_FILE[t]).join(' or ')})`,
             )
         // A --config or VOIDFLOW_CONFIG file (not a directory) is the same
         // file for every tool.
