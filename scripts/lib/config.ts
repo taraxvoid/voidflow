@@ -1,5 +1,5 @@
 /**
- * Fleet config for the repo tools (cf-tokens, apply-rulesets): a module in
+ * Fleet config for the repo tools (tokens providers, apply-rulesets): a module in
  * the org's own (private) infra repo, given with --config, which holds the
  * repo, account and zone mapping so voidflow holds only code. Both tools
  * require it.
