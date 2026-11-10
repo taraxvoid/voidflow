@@ -1,13 +1,15 @@
 /**
  * The fleet verbs over the per-tool commands:
  *
- *   voidflow plan  [rulesets|cf-tokens] [--repo <name>]      # read-only
- *   voidflow check [rulesets|cf-tokens] [--repo <name>]      # exit 1 on drift
- *   voidflow apply  rulesets|cf-tokens  --repo <name> | --entire-fleet
+ *   voidflow plan  [rulesets|tokens [provider]] [--repo <name>]   # read-only
+ *   voidflow check [rulesets|tokens [provider]] [--repo <name>]   # exit 1 on drift
+ *   voidflow apply  rulesets|tokens <provider>  --repo <name> | --entire-fleet
  *
  * Each finds the tool's config (scripts/lib/discover.ts), prints a header
  * line to stderr, then runs `voidflow <tool> --config <file> [--check|--apply]`
- * as a child process with the remaining flags. See docs/fleet.md.
+ * as a child process with the remaining flags (token tools run as
+ * `voidflow tokens <provider>`; see scripts/lib/providers.ts). See
+ * docs/fleet.md.
  */
 import { spawnSync } from 'node:child_process'
 import { readFileSync, statSync } from 'node:fs'
@@ -24,24 +26,31 @@ import {
     xdgDir,
 } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
+import {
+    PROVIDERS,
+    type Provider,
+    providerOf,
+    TOKEN_TOOLS,
+} from './lib/providers.ts'
 
 type Verb = 'plan' | 'check' | 'apply'
 
 /** Tools in run order, rulesets first. */
-const TOOLS: Tool[] = ['rulesets', 'cf-tokens']
-
-const isTool = (x: string): x is Tool => (TOOLS as string[]).includes(x)
+const TOOLS: Tool[] = ['rulesets', ...TOKEN_TOOLS]
 
 /** Flags the verb sets itself, or that belong to the per-tool command only. */
 const REFUSED: Record<string, string> = {
     '--apply': 'the verb decides; use `voidflow apply`',
     '--check': 'the verb decides; use `voidflow check`',
-    '--try': 'use `voidflow cf-tokens --try`',
-    '--groups': 'use `voidflow cf-tokens --groups`',
+    '--try': 'use `voidflow tokens cf --try`',
+    '--groups': 'use `voidflow tokens cf --groups`',
 }
 
 export type VerbArgs = {
     tool?: Tool
+    provider?: Provider
+    /** `tokens` with no provider: run every token provider. */
+    tokensAll?: boolean
     config?: string
     entireFleet: boolean
     repo?: string
@@ -50,11 +59,13 @@ export type VerbArgs = {
 
 /**
  * Split the verb's own arguments from the tool's: the first positional is the
- * tool, `--config` and `--entire-fleet` are consumed, `--repo` is recorded and
- * kept for the tool, everything else is forwarded. Throws on a bad argument.
+ * tool (`rulesets`, or `tokens` with an optional provider), `--config` and
+ * `--entire-fleet` are consumed, `--repo` is recorded and kept for the tool,
+ * everything else is forwarded. Throws on a bad argument.
  */
 export function splitVerbArgs(argv: string[]): VerbArgs {
     const out: VerbArgs = { entireFleet: false, rest: [] }
+    const pos: string[] = []
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === '--') {
@@ -83,17 +94,36 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
                 if (inline === undefined) out.rest.push(argv[++i])
                 out.repo = v
             }
-        } else if (out.tool !== undefined) {
+        } else {
+            pos.push(a)
+        }
+    }
+    const [first, second, third] = pos
+    if (first === 'rulesets') {
+        if (second !== undefined)
             throw new Error(
-                `one tool at a time, got ${JSON.stringify(a)} after ${out.tool}`,
+                `rulesets takes no provider, got ${JSON.stringify(second)}`,
             )
-        } else if (isTool(a)) {
-            out.tool = a
+        out.tool = 'rulesets'
+    } else if (first === 'tokens') {
+        if (second === undefined) {
+            out.tokensAll = true
+        } else if (second in PROVIDERS) {
+            out.provider = second as Provider
+            out.tool = PROVIDERS[second as Provider]
         } else {
             throw new Error(
-                `unknown tool ${JSON.stringify(a)} (${TOOLS.join(' or ')})`,
+                `unknown provider ${JSON.stringify(second)} (${Object.keys(PROVIDERS).join(' or ')})`,
             )
         }
+        if (third !== undefined)
+            throw new Error(
+                `one provider at a time, got ${JSON.stringify(third)} after ${second}`,
+            )
+    } else if (first !== undefined) {
+        throw new Error(
+            `unknown tool ${JSON.stringify(first)} (rulesets or tokens <provider>)`,
+        )
     }
     return out
 }
@@ -135,8 +165,8 @@ export function worstExit(codes: number[]): 0 | 1 | 2 {
 const usage = (verb: Verb) =>
     `${
         verb === 'apply'
-            ? 'usage: voidflow apply rulesets|cf-tokens (--repo <name> | --entire-fleet) [flags]'
-            : `usage: voidflow ${verb} [rulesets|cf-tokens] [--repo <name>] [flags]`
+            ? 'usage: voidflow apply rulesets|tokens <provider> (--repo <name> | --entire-fleet) [flags]'
+            : `usage: voidflow ${verb} [rulesets|tokens [provider]] [--repo <name>] [flags]`
     }
 
   --config <file|dir>  the fleet config: a tool's module, or the infra repo
@@ -157,12 +187,18 @@ ${
           ? 'Read-only: exit 1 on drift, 2 on a config or auth error.'
           : 'Writes. Other flags (--prune, --rotate) go to the tool; see `voidflow <tool> --help`.'
 }
-Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}.`
+Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone runs every tokens provider.`
 
 const VERB_FLAG: Record<Verb, string[]> = {
     plan: [],
     check: ['--check'],
     apply: ['--apply'],
+}
+
+/** The user-facing name of a tool: `rulesets` or `tokens cf`. */
+const toolName = (tool: Tool) => {
+    const provider = providerOf(tool)
+    return provider ? `tokens ${provider}` : tool
 }
 
 /**
@@ -176,7 +212,14 @@ export function toolArgs(
     file: string,
     rest: string[],
 ): string[] {
-    return [tool, '--config', file, ...VERB_FLAG[verb], ...rest]
+    const provider = providerOf(tool)
+    return [
+        ...(provider ? ['tokens', provider] : [tool]),
+        '--config',
+        file,
+        ...VERB_FLAG[verb],
+        ...rest,
+    ]
 }
 
 /** Where discovery looked, for a "not found" message. */
@@ -250,8 +293,16 @@ export function verbMain(verb: Verb) {
         }
         if (verb === 'apply' && !v.tool)
             fail(
-                `${prog}: apply needs a tool: voidflow apply rulesets|cf-tokens\n\n${usage(verb)}`,
+                v.tokensAll
+                    ? `${prog}: apply tokens needs a provider: voidflow apply tokens <provider> (${Object.keys(PROVIDERS).join(' or ')})\n\n${usage(verb)}`
+                    : `${prog}: apply needs a tool: voidflow apply rulesets|tokens <provider>\n\n${usage(verb)}`,
             )
+
+        const wanted: Tool[] = v.tool
+            ? [v.tool]
+            : v.tokensAll
+              ? TOKEN_TOOLS
+              : TOOLS
 
         const env = process.env
         const home = homedir()
@@ -259,7 +310,7 @@ export function verbMain(verb: Verb) {
 
         let found: [Tool, Found][] = []
         try {
-            for (const tool of v.tool ? [v.tool] : TOOLS) {
+            for (const tool of wanted) {
                 const hit = discover(tool, {
                     flag: v.config,
                     env,
@@ -267,13 +318,13 @@ export function verbMain(verb: Verb) {
                     home,
                 })
                 if (hit) found.push([tool, hit])
-                else if (v.tool)
+                else if (v.tool || v.tokensAll)
                     fail(
-                        `${prog}: no ${TOOL_FILE[tool]} found; looked in ${lookedIn(tool, v, xdg)}`,
+                        `${prog}: ${toolName(tool)}: no ${TOOL_FILE[tool]} found; looked in ${lookedIn(tool, v, xdg)}`,
                     )
                 else
                     console.error(
-                        `${prog}: ${tool}: no ${TOOL_FILE[tool]} in ${lookedIn(tool, v, xdg)}, skipped`,
+                        `${prog}: ${toolName(tool)}: no ${TOOL_FILE[tool]} in ${lookedIn(tool, v, xdg)}, skipped`,
                     )
             }
         } catch (e) {
@@ -287,11 +338,12 @@ export function verbMain(verb: Verb) {
         // file for every tool.
         if (
             !v.tool &&
-            found.length === TOOLS.length &&
+            found.length > 1 &&
+            found.length === wanted.length &&
             found.every(([, f]) => f.file === found[0][1].file)
         )
             fail(
-                `${prog}: ${v.config !== undefined ? `--config ${v.config}` : `VOIDFLOW_CONFIG ${process.env.VOIDFLOW_CONFIG}`} is a file, so name the tool it is for: voidflow ${verb} rulesets|cf-tokens`,
+                `${prog}: ${v.config !== undefined ? `--config ${v.config}` : `VOIDFLOW_CONFIG ${process.env.VOIDFLOW_CONFIG}`} is a file, so name the tool it is for: voidflow ${verb} rulesets or tokens <provider>`,
             )
 
         // Without a tool, --repo runs only the tools whose config lists it, so
@@ -309,7 +361,7 @@ export function verbMain(verb: Verb) {
                 if (matches(repos, repo).length > 0) listed.push([tool, hit])
                 else
                     console.error(
-                        `${prog}: ${tool}: no repo matches --repo ${repo} in ${hit.file}, skipped`,
+                        `${prog}: ${toolName(tool)}: no repo matches --repo ${repo} in ${hit.file}, skipped`,
                     )
             }
             if (listed.length === 0)
@@ -345,7 +397,7 @@ export function verbMain(verb: Verb) {
         const codes: number[] = []
         for (const [tool, hit] of found) {
             console.error(
-                `voidflow ${ver} ${verb} ${tool} | config ${hit.file} (${hit.via}) | scope ${scope}`,
+                `voidflow ${ver} ${verb} ${toolName(tool)} | config ${hit.file} (${hit.via}) | scope ${scope}`,
             )
             const r = spawnSync(
                 process.execPath,

@@ -22,8 +22,34 @@ describe('splitVerbArgs', () => {
             entireFleet: false,
             rest: [],
         })
-        expect(splitVerbArgs(['--prune', 'cf-tokens']).tool).toBe('cf-tokens')
+        expect(splitVerbArgs(['--prune', 'tokens', 'cf'])).toEqual({
+            tool: 'cf-tokens',
+            provider: 'cf',
+            entireFleet: false,
+            rest: ['--prune'],
+        })
         expect(splitVerbArgs([]).tool).toBeUndefined()
+    })
+
+    test('tokens alone means every tokens provider', () => {
+        expect(splitVerbArgs(['tokens'])).toEqual({
+            tokensAll: true,
+            entireFleet: false,
+            rest: [],
+        })
+    })
+
+    test('rejects an unknown provider or extra positionals', () => {
+        expect(() => splitVerbArgs(['tokens', 'bogus'])).toThrow(
+            'unknown provider "bogus"',
+        )
+        expect(() => splitVerbArgs(['tokens', 'cf', 'x'])).toThrow(
+            'one provider at a time',
+        )
+        expect(() => splitVerbArgs(['rulesets', 'cf'])).toThrow(
+            'rulesets takes no provider',
+        )
+        expect(() => splitVerbArgs(['nope'])).toThrow('unknown tool "nope"')
     })
 
     test('consumes both --config forms and --entire-fleet', () => {
@@ -61,14 +87,14 @@ describe('splitVerbArgs', () => {
 
     test('rejects an unknown positional or a second tool', () => {
         expect(() => splitVerbArgs(['nope'])).toThrow('"nope"')
-        expect(() => splitVerbArgs(['rulesets', 'cf-tokens'])).toThrow(
-            'one tool',
+        expect(() => splitVerbArgs(['rulesets', 'tokens'])).toThrow(
+            'rulesets takes no provider',
         )
     })
 
     test('rejects the flags the verb itself sets, and --try/--groups', () => {
         for (const f of ['--apply', '--check', '--try', '--groups'])
-            expect(() => splitVerbArgs(['cf-tokens', f])).toThrow(f)
+            expect(() => splitVerbArgs(['tokens', 'cf', f])).toThrow(f)
         expect(() => splitVerbArgs(['rulesets', '--config'])).toThrow(
             '--config',
         )
@@ -83,7 +109,7 @@ describe('splitVerbArgs', () => {
 
     test('flags after -- are forwarded as given', () => {
         expect(
-            splitVerbArgs(['cf-tokens', '--repo', 'a', '--', 'x', '--check'])
+            splitVerbArgs(['tokens', 'cf', '--repo', 'a', '--', 'x', '--check'])
                 .rest,
         ).toEqual(['--repo', 'a', '--', 'x', '--check'])
     })
@@ -161,7 +187,8 @@ describe('toolArgs', () => {
             'x',
         ])
         expect(args).toEqual([
-            'cf-tokens',
+            'tokens',
+            'cf',
             '--config',
             '/c.ts',
             '--check',
@@ -268,10 +295,33 @@ describe('voidflow plan|check|apply', () => {
 
     test('a named tool with no file exits 2 saying where it looked', async () => {
         const f = fixture({ 'rulesets.ts': RULESETS })
-        const r = await voidflow(['plan', 'cf-tokens', '--config', f.cfg], f)
+        const r = await voidflow(['plan', 'tokens', 'cf', '--config', f.cfg], f)
         expect(r.code).toBe(2)
-        expect(r.err).toContain('cf-tokens.ts')
+        expect(r.err).toContain('tokens cf: no cf-tokens.ts')
         expect(r.err).toContain(f.cfg)
+    })
+
+    test('tokens with no provider runs every tokens provider', async () => {
+        const f = fixture({
+            'cf-tokens.ts': `export default { 'o/zz': { account: '${'c'.repeat(32)}', envs: [{ env: 'prod' }], retire: [] } }`,
+        })
+        const r = await voidflow(['plan', 'tokens', '--config', f.cfg], f)
+        expect(r.err).toContain('plan tokens cf |')
+        expect(r.err).toContain('CF_TOKEN_ADMIN is not set')
+    })
+
+    test('apply tokens with no provider refuses', async () => {
+        const f = fixture({ 'cf-tokens.ts': 'export default {}' })
+        const r = await voidflow(['apply', 'tokens', '--config', f.cfg], f)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('apply tokens needs a provider')
+    })
+
+    test('an unknown provider exits 2', async () => {
+        const f = fixture({ 'rulesets.ts': RULESETS })
+        const r = await voidflow(['plan', 'tokens', 'bogus'], f)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('unknown provider "bogus"')
     })
 
     test('prints the header on stderr, then runs the tool', async () => {
@@ -297,7 +347,7 @@ describe('voidflow plan|check|apply', () => {
             ['plan', '--config', f.cfg, '--repo', 'nope'],
             f,
         )
-        expect(r.err).toContain('cf-tokens: no cf-tokens.ts')
+        expect(r.err).toContain('tokens cf: no cf-tokens.ts')
         expect(r.err).toContain('skipped')
         expect(r.err).toContain('no repo matches --repo nope')
         expect(r.code).toBe(2)
@@ -319,7 +369,7 @@ describe('voidflow plan|check|apply', () => {
             `rulesets: no repo matches --repo zz in ${join(f.cfg, 'rulesets.ts')}, skipped`,
         )
         expect(r.err).not.toContain('check rulesets |')
-        expect(r.err).toContain('check cf-tokens |')
+        expect(r.err).toContain('check tokens cf |')
         expect(r.err).toContain('CF_TOKEN_ADMIN is not set')
     })
 
@@ -339,7 +389,7 @@ describe('voidflow plan|check|apply', () => {
         mkdirSync(join(f.xdg, 'voidflow'))
         writeFileSync(join(f.xdg, 'voidflow', 'rulesets.ts'), RULESETS)
         writeFileSync(join(f.work, 'cf-tokens.ts'), 'export default {}')
-        const r = await voidflow(['plan', 'cf-tokens'], f)
+        const r = await voidflow(['plan', 'tokens', 'cf'], f)
         expect(r.code).toBe(2)
         expect(r.err).toContain('it exists, so')
         expect(r.err).toContain('were not searched')
