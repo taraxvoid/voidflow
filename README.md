@@ -468,7 +468,7 @@ is only `SEE LICENSE IN <file>` isn't read.
 **Fleet tools** - the `voidflow` CLI, for branch rulesets and scoped
 Cloudflare deploy tokens as code (and [`init`](#init-reference)). Run it with `bunx` or `npx` (Node 24+) from
 an org's infra repo that holds the fleet map (`--config`) and pins the version;
-no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
+no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `tokens cf`
 also needs `CF_TOKEN_ADMIN`. [`docs/fleet.md`](docs/fleet.md) covers the
 infra repo, how the verbs find its config (including `~/.config/voidflow`) and
 their targets; config shapes and flags are in
@@ -482,7 +482,7 @@ bunx @taraxvoid/voidflow@<version> plan                             # both tools
 bunx @taraxvoid/voidflow@<version> check rulesets                   # exit 1 on drift
 bunx @taraxvoid/voidflow@<version> apply rulesets --repo transbot   # or --entire-fleet; no default target
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
-bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
+bunx @taraxvoid/voidflow@<version> tokens cf --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
 npx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts     # the same, under Node 24+
 ```
 
