@@ -96,12 +96,12 @@ describe('tool-release.yml channel step matches release-channel.ts', () => {
 })
 
 describe('tool-release.yml tag check matches assertVersionMatchesChannel', () => {
-    // Only the version half: cut the git ancestry check off the end.
+    // Only the version half: cut the tag resolution and ancestry check off.
     const full: string = step(
         'publish',
         'Check tag belongs to this channel',
     ).run
-    const run = full.slice(0, full.indexOf('if ! git merge-base'))
+    const run = full.slice(0, full.indexOf('# Resolve the tag once'))
     const repo = callerRepo([])
     const cases: Array<[string, string]> = [
         ['main', '1.2.3'],
@@ -170,6 +170,18 @@ describe('tool-release.yml publish: the npm tarball is attested', () => {
         expect(stage.env.TARBALL).toBe('${{ steps.pack.outputs.tarball }}')
         expect(stage.run).toContain('npm stage publish "$TARBALL" ')
         expect(stage.run).not.toMatch(/(^|\s)npm publish /m)
+    })
+
+    test('builds the exact commit whose ancestry it checked', () => {
+        const check = publish[index('Check tag belongs to this channel')]
+        expect(check.id).toBe('tag')
+        expect(check.run).toContain('git merge-base --is-ancestor "$sha"')
+        const tagCheckout = publish.find(
+            (s, i) =>
+                i > index('Check tag belongs to this channel') &&
+                String(s.uses).startsWith('actions/checkout@'),
+        )
+        expect(tagCheckout?.with.ref).toBe('${{ steps.tag.outputs.sha }}')
     })
 
     test('checks every bin made it into the tarball', () => {

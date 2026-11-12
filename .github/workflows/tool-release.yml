@@ -210,6 +210,7 @@ jobs:
       # branch. Compare against the branch tip, not HEAD: release-please tags
       # the branch as it is when it runs (see release-please.yml, v0.12.2).
       - name: Check tag belongs to this channel
+        id: tag
         env:
           BRANCH: ${{ github.ref_name }}
           KIND: ${{ needs.channel.outputs.kind }}
@@ -229,14 +230,18 @@ jobs:
             echo "::error::version $version does not belong on the $KIND channel (branch $BRANCH)" >&2
             exit 1
           fi
-          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" "refs/remotes/origin/${BRANCH}"; then
+          # Resolve the tag once and build that exact commit: checking out the
+          # tag by name could pick a branch of the same name instead.
+          sha=$(git rev-parse --verify "refs/tags/${TAG}^{commit}")
+          if ! git merge-base --is-ancestor "$sha" "refs/remotes/origin/${BRANCH}"; then
             echo "::error::Tag ${TAG} is not on branch ${BRANCH}; run this workflow from the branch that owns the tag." >&2
             exit 1
           fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          ref: ${{ steps.tag.outputs.sha }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

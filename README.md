@@ -364,6 +364,10 @@ Each channel reads `.release-please/<main|next|maintenance>.json` and its
 `-manifest.json`; a branch without one fails. Needs a release bot GitHub App
 (so the release PR's CI runs) and npm trusted publishing configured with
 **your** workflow file (e.g. `release.yml`) and the `npm` environment.
+Create that environment yourself and limit its deployment branches to your
+release branches (`main`, `next`, `release/*`): npm only checks the workflow
+file and environment name, so an unrestricted environment would let any
+branch's run of the caller publish.
 
 ```yaml
 name: Release
