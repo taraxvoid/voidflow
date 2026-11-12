@@ -284,6 +284,30 @@ function agenticSettings(): Setting[] {
                     can_approve_pull_request_reviews: false,
                 }),
         },
+        {
+            name: 'fork-pr-approval',
+            optIn: 'agentic',
+            // Runs from any outside contributor's fork PR wait for approval,
+            // so agent-driven workflows never run untrusted code unprompted.
+            async read(gh, repo) {
+                const b = object(
+                    (
+                        await get(
+                            gh,
+                            `repos/${repo}/actions/permissions/fork-pr-contributor-approval`,
+                        )
+                    ).body,
+                )
+                return b?.approval_policy === 'all_external_contributors'
+            },
+            write: (gh, repo) =>
+                send(
+                    gh,
+                    'PUT',
+                    `repos/${repo}/actions/permissions/fork-pr-contributor-approval`,
+                    { approval_policy: 'all_external_contributors' },
+                ),
+        },
         ...AGENTIC_LABELS.map(
             (label): Setting => ({
                 name: `label-${label.name}`,

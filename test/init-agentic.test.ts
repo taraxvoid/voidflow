@@ -26,6 +26,7 @@ function fakeGh() {
         default_workflow_permissions: 'write',
         can_approve_pull_request_reviews: true,
     }
+    let forkPolicy = { approval_policy: 'first_time_contributors' }
     const writes: string[] = []
     const gh: Gh = {
         available: async () => null,
@@ -38,6 +39,13 @@ function fakeGh() {
             if (path === 'repos/o/r/actions/permissions/workflow') {
                 if (method === 'PUT') perms = body as typeof perms
                 return { status: 200, body: perms }
+            }
+            if (
+                path ===
+                'repos/o/r/actions/permissions/fork-pr-contributor-approval'
+            ) {
+                if (method === 'PUT') forkPolicy = body as typeof forkPolicy
+                return { status: 200, body: forkPolicy }
             }
             if (path === 'repos/o/r/labels' && method === 'POST') {
                 labels.add((body as { name: string }).name)
@@ -138,6 +146,7 @@ describe('init --enable-agentic', () => {
             'update-branch',
             'delete-branch-on-merge',
             'actions-permissions',
+            'fork-pr-approval',
             'label-low-risk',
             'label-needs-you',
         ])
@@ -157,7 +166,12 @@ describe('init --enable-agentic', () => {
         })
         expect([...f.labels].sort()).toEqual(['low-risk', 'needs-you'])
         const again = await run([...ARGV, dir], f.gh)
-        for (const n of ['auto-merge', 'actions-permissions', 'label-low-risk'])
+        for (const n of [
+            'auto-merge',
+            'actions-permissions',
+            'fork-pr-approval',
+            'label-low-risk',
+        ])
             expect(again.out).toMatch(new RegExp(`unchanged\\s+${n}`))
     })
 
