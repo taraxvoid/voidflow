@@ -1,0 +1,393 @@
+name: Release
+
+# Release flow for bun tools and libraries published to npm: release-please on
+# branch-based channels, then an attested, staged npm publish. The same flow
+# as voidflow's own release-please.yml (see RELEASING.md), minus the parts only
+# voidflow has (JSR, the unscoped mirror, the next back-merge).
+#
+# Channels, by the branch the caller runs on:
+#   main         stable      npm dist-tag `latest`
+#   next         prerelease  npm dist-tag `next`  (X.Y.Z-next.N)
+#   release/N.x  maintenance npm dist-tag `release-N.x`
+# Any other branch fails the run. Each channel reads its release-please config
+# and manifest from `.release-please/<main|next|maintenance>[-manifest].json`
+# in the caller's repo; a channel without a config file fails the same way.
+#
+# Caller:
+#
+#   on:
+#     push:
+#       branches: [main]          # plus next / release/** if you use them
+#     workflow_dispatch:          # republish an existing tag
+#       inputs:
+#         tag: { type: string, required: true }
+#         dry-run: { type: boolean, default: false }
+#   permissions: {}
+#   jobs:
+#     release:
+#       uses: taraxvoid/voidflow/.github/workflows/tool-release.yml@<sha> # vX.Y.Z
+#       permissions:
+#         contents: write
+#         pull-requests: write
+#         id-token: write
+#         attestations: write
+#       with:
+#         release-bot-client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+#         tag: ${{ inputs.tag }}
+#         dry-run: ${{ inputs.dry-run == true }}
+#       secrets:
+#         release-bot-private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+#
+# The release bot is a GitHub App, not GITHUB_TOKEN: events authored by
+# GITHUB_TOKEN don't trigger other workflows, so the release PR would open
+# without CI ever running on it.
+#
+# npm: configure trusted publishing (OIDC) for the package with the caller's
+# repo, the CALLER's workflow file (e.g. release.yml, not this file) and the
+# environment named by `npm-environment` (default `npm`). That environment is
+# the only server-side limit on who can publish, so restrict it to the release
+# branches. The tarball is packed once, attested with actions/attest, and that
+# same file is staged with `npm stage publish`, so the bytes on npm are the
+# bytes the attestation covers and nothing goes live until a person approves
+# it with 2FA.
+
+on:
+  workflow_call:
+    inputs:
+      release-bot-client-id:
+        description: Client ID of the GitHub App that opens release PRs and tags.
+        type: string
+        required: true
+      tag:
+        description: >
+          Republish this existing tag instead of running release-please (the
+          caller's workflow_dispatch). Empty on push.
+        type: string
+        default: ''
+      dry-run:
+        description: Run the publish steps with --dry-run; nothing is published or attested.
+        type: boolean
+        default: false
+      npm-environment:
+        description: GitHub environment the publish job runs in (npm trusted publishing checks it).
+        type: string
+        default: npm
+      floating-tag:
+        description: On a stable release, move the v<major> tag to the release commit.
+        type: boolean
+        default: true
+      runner:
+        description: Runner label for every job.
+        type: string
+        default: ubuntu-latest
+    secrets:
+      release-bot-private-key:
+        description: Private key of the release bot GitHub App.
+        required: true
+    outputs:
+      release_created:
+        description: "'true' when release-please cut a release in this run."
+        value: ${{ jobs.release-please.outputs.release_created }}
+      tag_name:
+        description: The release's tag, when one was cut.
+        value: ${{ jobs.release-please.outputs.tag_name }}
+
+permissions: {}
+
+# One release run per branch at a time; never cancel a run mid-publish.
+concurrency:
+  group: tool-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  channel:
+    name: Resolve channel
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      kind: ${{ steps.channel.outputs.kind }}
+      dist_tag: ${{ steps.channel.outputs.dist_tag }}
+      config: ${{ steps.channel.outputs.config }}
+      manifest: ${{ steps.channel.outputs.manifest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same mapping as scripts/release-channel.ts (test/tool-release.test.ts
+      # runs this step against it). Inlined because a reusable workflow can't
+      # reach scripts in its own repo: checkout gives it the caller's tree.
+      # Unknown branches fail closed: no fall-through to `latest`.
+      - name: Resolve release channel from branch
+        id: channel
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$BRANCH" = main ]; then
+            kind=stable; dist_tag=latest; name=main
+          elif [ "$BRANCH" = next ]; then
+            kind=prerelease; dist_tag=next; name=next
+          elif [[ "$BRANCH" =~ ^release/([0-9]+(\.[0-9]+)?)\.x$ ]]; then
+            kind=maintenance; dist_tag="release-${BASH_REMATCH[1]}.x"; name=maintenance
+          else
+            echo "::error::no release channel for branch \"$BRANCH\" (expected main, next, release/N.x or release/N.M.x)" >&2
+            exit 1
+          fi
+          config=".release-please/${name}.json"
+          manifest=".release-please/${name}-manifest.json"
+          for f in "$config" "$manifest"; do
+            if [ ! -f "$f" ]; then
+              echo "::error file=$f::$f is missing: the $kind channel needs a release-please config and manifest" >&2
+              exit 1
+            fi
+          done
+          {
+            echo "kind=$kind"
+            echo "dist_tag=$dist_tag"
+            echo "config=$config"
+            echo "manifest=$manifest"
+          } >> "$GITHUB_OUTPUT"
+
+  release-please:
+    name: Release Please
+    needs: channel
+    if: inputs.tag == ''
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      major: ${{ steps.release.outputs.major }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.release-bot-client-id }}
+          private-key: ${{ secrets.release-bot-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          target-branch: ${{ github.ref_name }}
+          config-file: ${{ needs.channel.outputs.config }}
+          manifest-file: ${{ needs.channel.outputs.manifest }}
+
+  publish:
+    name: Publish to npm
+    needs: [channel, release-please]
+    if: >-
+      !cancelled() &&
+      needs.channel.result == 'success' &&
+      (needs.release-please.outputs.release_created == 'true' || inputs.tag != '')
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    environment: ${{ inputs.npm-environment }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      # Tooling comes from the branch that triggered the run, not the tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Abort before anything is published unless the tag belongs to this
+      # channel: its version fits the channel and the tagged commit is on this
+      # branch. Compare against the branch tip, not HEAD: release-please tags
+      # the branch as it is when it runs (see release-please.yml, v0.12.2).
+      - name: Check tag belongs to this channel
+        env:
+          BRANCH: ${{ github.ref_name }}
+          KIND: ${{ needs.channel.outputs.kind }}
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          case "$KIND" in
+            prerelease) shape='^[0-9]+\.[0-9]+\.[0-9]+-next(\.[0-9]+)?$' ;;
+            *) shape='^[0-9]+\.[0-9]+\.[0-9]+$' ;;
+          esac
+          if ! [[ "$version" =~ $shape ]]; then
+            echo "::error::version $version does not belong on the $KIND channel (branch $BRANCH)" >&2
+            exit 1
+          fi
+          if [[ "$BRANCH" =~ ^release/(.+)\.x$ ]] && [[ "$version" != "${BASH_REMATCH[1]}."* ]]; then
+            echo "::error::version $version does not belong on the $KIND channel (branch $BRANCH)" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" "refs/remotes/origin/${BRANCH}"; then
+            echo "::error::Tag ${TAG} is not on branch ${BRANCH}; run this workflow from the branch that owns the tag." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # `npm stage publish` needs npm >= 11.15.0, newer than Node 24's bundled
+      # npm, so install an exact pinned version.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install pinned npm
+        env:
+          # renovate: datasource=npm depName=npm
+          NPM_VERSION: 12.2.1
+        run: |
+          set -euo pipefail
+          npm install -g "npm@${NPM_VERSION}"
+          npm --version
+
+      - name: Check package.json version matches tag
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(jq -r .version package.json)
+          if [ "v${PKG_VERSION}" != "$TAG" ]; then
+            echo "::error::package.json version ${PKG_VERSION} does not match tag ${TAG}." >&2
+            exit 1
+          fi
+
+      # Builds whatever the package ships from a gitignored dir (dist/). npm's
+      # script handling under --ignore-scripts is not something to lean on, so
+      # install and build here rather than in `prepack`.
+      - name: Build
+        run: |
+          set -euo pipefail
+          if jq -e '.scripts.build' package.json >/dev/null; then
+            bun install --frozen-lockfile --ignore-scripts
+            bun run build
+          else
+            echo "No build script; nothing to build."
+          fi
+
+      - name: Pack npm tarball
+        id: pack
+        env:
+          PACK_DIR: ${{ runner.temp }}/npm-pack
+        run: |
+          set -euo pipefail
+          mkdir -p "$PACK_DIR"
+          NAME=$(jq -r .name package.json)
+          VERSION=$(jq -r .version package.json)
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "${NAME}@${VERSION} is already on npm, skipping."
+            exit 0
+          fi
+          # npm names the tarball <name>-<version>.tgz, @scope/pkg as scope-pkg.
+          file="${PACK_DIR}/$(echo "${NAME#@}" | tr / -)-${VERSION}.tgz"
+          npm pack --ignore-scripts --pack-destination "$PACK_DIR" >&2
+          test -f "$file"
+          # Every bin must be in the tarball (a built bin is not committed).
+          for bin in $(jq -r '.bin // {} | if type == "string" then . else .[] end' package.json); do
+            if ! tar -tzf "$file" "package/${bin#./}" >/dev/null 2>&1; then
+              echo "::error::${file##*/} is missing its bin ${bin}" >&2
+              exit 1
+            fi
+          done
+          echo "tarball=${file}" >> "$GITHUB_OUTPUT"
+
+      # Before the publish, so a version never reaches npm without its
+      # attestation. Skipped on a dry run.
+      - name: Attest npm tarball
+        if: "!inputs.dry-run && steps.pack.outputs.tarball != ''"
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/npm-pack/*.tgz
+
+      - name: Stage on npm
+        if: steps.pack.outputs.tarball != ''
+        env:
+          DIST_TAG: ${{ needs.channel.outputs.dist_tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "$DRY_RUN" = "true" ]; then flags+=(--dry-run); fi
+          : "${DIST_TAG:?npm dist-tag is empty; refusing to publish}"
+          log=$(mktemp)
+          if ! npm stage publish "$TARBALL" --tag "$DIST_TAG" "${flags[@]}" 2>&1 | tee "$log"; then
+            # Staged versions share the published-version index, so restaging
+            # is a 409; trusted-publishing tokens can't `npm stage list`.
+            if grep -qE '\bE409\b|409 Conflict' "$log"; then
+              echo "::notice::${TARBALL##*/} is already staged; approve it on npmjs.com."
+              exit 0
+            fi
+            exit 1
+          fi
+          # Same as scripts/stage-summary.sh: the approve command, from the
+          # `+ name@version (staged with id <uuid>)` line.
+          line=$(grep -E '^\+ .+ \(staged with id [0-9a-f-]+\)' "$log" | tail -n1 || true)
+          [ -n "$line" ] || exit 0
+          spec=$(sed -E 's/^\+ (.+) \(staged with id .*/\1/' <<<"$line")
+          id=$(sed -E 's/.*staged with id ([0-9a-f-]+)\).*/\1/' <<<"$line")
+          echo "::notice::${spec} staged (id ${id}); approve with 2FA: npm stage approve ${id}"
+          {
+            echo "### Staged on npm: \`${spec}\`"
+            echo
+            echo "Not live until approved (2FA)."
+            echo
+            echo '```bash'
+            echo "npm stage approve ${id}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
+  # release, so callers can pin a moving major. vX.Y.Z tags are untouched.
+  floating-tag:
+    name: Move floating major tag
+    needs: [channel, release-please]
+    if: >-
+      inputs.floating-tag &&
+      needs.release-please.outputs.release_created == 'true' &&
+      needs.channel.outputs.kind == 'stable'
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ inputs.release-bot-client-id }}
+          private-key: ${{ secrets.release-bot-private-key }}
+          permission-contents: write
+
+      - name: Point v<major> at the release commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MAJOR: ${{ needs.release-please.outputs.major }}
+          SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          set -euo pipefail
+          TAG="v${MAJOR}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" -f sha="$SHA" -F force=true
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="$SHA"
+          fi
+          echo "${TAG} -> ${SHA}"
