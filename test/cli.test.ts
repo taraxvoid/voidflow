@@ -79,8 +79,9 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
     test('without a command, prints usage and exits 2', async () => {
         const r = await voidflow([])
         expect(r.code).toBe(2)
-        expect(r.out).toContain('cf-tokens')
+        expect(r.out).toContain('tokens')
         expect(r.out).toContain('rulesets')
+        expect(r.out).not.toContain('cf-tokens')
     })
 
     test('--help exits 0', async () => {
@@ -102,23 +103,49 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
     })
 
     test('hands the remaining flags to the script', async () => {
-        for (const c of ['rulesets', 'cf-tokens']) {
-            const r = await voidflow([c])
+        for (const c of [['rulesets'], ['tokens', 'cf']]) {
+            const r = await voidflow(c)
             expect(r.code).toBe(2)
             expect(r.err).toContain('needs --config')
         }
     })
 
+    test('tokens needs a known provider', async () => {
+        for (const [args, want] of [
+            [[], 'needs a provider'],
+            [['bogus'], 'unknown provider "bogus"'],
+        ] as const) {
+            const r = await voidflow(['tokens', ...args])
+            expect(r.code).toBe(2)
+            expect(r.err).toContain(want)
+            expect(r.err).toContain('providers: cf')
+        }
+    })
+
+    test('tokens --help lists the providers', async () => {
+        const r = await voidflow(['tokens', '--help'])
+        expect(r.code).toBe(0)
+        expect(r.out).toContain('usage: voidflow tokens <provider>')
+        expect(r.out).toContain('providers: cf')
+    })
+
+    test('cf-tokens still works as a hidden alias for tokens cf', async () => {
+        const r = await voidflow(['cf-tokens'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('needs --config')
+    })
+
     test("a command's --help lists its flags, without needing --config", async () => {
         for (const [c, flag] of [
             ['rulesets', '--prune'],
-            ['cf-tokens', '--try <env>'],
+            ['tokens', '--try <env>'],
         ]) {
+            const argv = c === 'tokens' ? [c, 'cf'] : [c]
             for (const h of ['--help', '-h']) {
-                const r = await voidflow([c, h])
+                const r = await voidflow([...argv, h])
                 expect(r.code).toBe(0)
                 expect(r.out).toContain(
-                    `usage: voidflow ${c} --config <module>`,
+                    `usage: voidflow ${argv.join(' ')} --config <module>`,
                 )
                 expect(r.out).toContain(flag)
             }

@@ -161,7 +161,7 @@ By default each env's token goes into an environment secret,
 `CLOUDFLARE_API_TOKEN` in the GitHub environment named like the env. Only
 jobs with `environment: <env>` read it, so the environment's deployment
 branch policy (`main` only for `prod`) is what keeps a pull request job from
-reading the prod token. cf-tokens does not set that policy; list the env under
+reading the prod token. `tokens cf` does not set that policy; list the env under
 the repo's `environments` in the rulesets config (see
 [Branch rulesets](#branch-rulesets)) so `plan rulesets` reports it. That is the recommended shape: one deploy job for
 `main` with `environment: prod`, one for pull requests with
@@ -205,13 +205,13 @@ With the infra repo found as in [`docs/fleet.md`](docs/fleet.md#discovery):
 
 ```sh
 vf="bunx @taraxvoid/voidflow@<version>"
-$vf plan cf-tokens                           # read-only: diff every repo's tokens against the config
-$vf check cf-tokens                          # exit 1 on drift or a token within 14 days of expiry
-$vf apply cf-tokens --repo example_project   # create/update, rotate tokens due, set CLOUDFLARE_API_TOKEN per env
-$vf apply cf-tokens --entire-fleet           # the same for every repo
-$vf apply cf-tokens --repo example_project --rotate  # rotate its tokens now
-$vf apply cf-tokens --repo example_project --prune   # also delete `retire` tokens and a leftover repo-wide secret
-$vf cf-tokens --config ~/.config/voidflow/cf-tokens.ts --groups  # live names of the permission group ids the config uses
+$vf plan tokens cf                           # read-only: diff every repo's tokens against the config
+$vf check tokens cf                          # exit 1 on drift or a token within 14 days of expiry
+$vf apply tokens cf --repo example_project   # create/update, rotate tokens due, set CLOUDFLARE_API_TOKEN per env
+$vf apply tokens cf --entire-fleet           # the same for every repo
+$vf apply tokens cf --repo example_project --rotate  # rotate its tokens now
+$vf apply tokens cf --repo example_project --prune   # also delete `retire` tokens and a leftover repo-wide secret
+$vf tokens cf --config ~/.config/voidflow/cf-tokens.ts --groups  # live names of the permission group ids the config uses
 ```
 
 The plan prints when each token was last used, so a CI deploy shows up there.
@@ -220,7 +220,7 @@ deploy with a throwaway token that has the same policies. From the site's
 checkout:
 
 ```sh
-bunx @taraxvoid/voidflow@<version> cf-tokens --config ~/.config/voidflow/cf-tokens.ts \
+bunx @taraxvoid/voidflow@<version> tokens cf --config ~/.config/voidflow/cf-tokens.ts \
     --repo example_project --try prod -- bunx wrangler deploy
 ```
 
@@ -257,8 +257,8 @@ Limits worth knowing:
       token-fallback: ${{ vars.CF_TOKEN_FALLBACK }}
   ```
 
-Cut over one repo at a time: `voidflow apply cf-tokens --repo <name>`, deploy,
-then `voidflow apply cf-tokens --repo <name> --prune` to delete its old token.
+Cut over one repo at a time: `voidflow apply tokens cf --repo <name>`, deploy,
+then `voidflow apply tokens cf --repo <name> --prune` to delete its old token.
 
 ## Fleet config (`--config`)
 
@@ -268,13 +268,13 @@ that export `REPOS` (or a default). The package's `voidflow` bin runs both
 tools, so the infra repo needs a pinned release rather than a voidflow
 checkout. The `plan`, `check` and `apply` verbs find the config themselves
 (`--config`, `VOIDFLOW_CONFIG`, `~/.config/voidflow`, then the directories up
-from here); the tool commands `rulesets` and `cf-tokens` require `--config`.
+from here); the tool commands `rulesets` and `tokens <provider>` require `--config`.
 [`docs/fleet.md`](docs/fleet.md) covers discovery, the org-grouped shape, the
 verbs and their exit codes.
 
 ```sh
 bunx @taraxvoid/voidflow@<version> check rulesets
-npx @taraxvoid/voidflow@<version> apply cf-tokens --repo example_project
+npx @taraxvoid/voidflow@<version> apply tokens cf --repo example_project
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts --check   # the tool command
 ```
 
@@ -351,7 +351,7 @@ apply tool *args:
 # [no-cd]: the command runs in the site checkout `just -f` was called from
 [no-cd]
 cf-tokens-try repo env +cmd:
-    {{ cf }} cf-tokens --config {{ quote(justfile_directory() / "cf-tokens.ts") }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
+    {{ cf }} tokens cf --config {{ quote(justfile_directory() / "cf-tokens.ts") }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 ```
 
 A rulesets config can use the tier model, where any field left out takes

@@ -1,7 +1,8 @@
 # Fleet config and the plan, check and apply verbs
 
 voidflow holds the code for two fleet tools: branch rulesets (`rulesets`) and
-scoped Cloudflare deploy tokens (`cf-tokens`). Which repos they cover, and
+scoped deploy tokens (`tokens <provider>`, today `tokens cf` for Cloudflare).
+Which repos they cover, and
 how, lives in your org's own private infra repo. This page covers that repo's
 shape, how voidflow finds it, and the `plan`, `check` and `apply` verbs that
 run both tools from a pinned release, with no voidflow checkout and no
@@ -20,6 +21,9 @@ infra/
   cf-tokens.ts    # which repos get which Cloudflare deploy tokens
   package.json    # optional: pins @taraxvoid/voidflow for typed configs
 ```
+
+A tokens provider's file is `<provider>-tokens.ts` (`cf-tokens.ts` today;
+`scripts/lib/providers.ts` lists the providers).
 
 A repo can hold either file or both. To run the verbs from anywhere, link the
 checkout to voidflow's config directory:
@@ -57,11 +61,12 @@ it looked.
 voidflow plan                                  # ~/.config/voidflow, both tools
 voidflow plan rulesets --config ../infra       # ../infra/rulesets.ts
 VOIDFLOW_CONFIG=~/src/infra voidflow check     # both tools from there
-voidflow plan cf-tokens --config ./cf-tokens.ts
+voidflow plan tokens cf --config ./cf-tokens.ts
 ```
 
-`voidflow rulesets --config <module>` and `voidflow cf-tokens --config
-<module>` keep working as before, with no discovery.
+`voidflow rulesets --config <module>` and `voidflow tokens cf --config
+<module>` keep working as before, with no discovery. `voidflow cf-tokens` is
+a hidden alias for `tokens cf` until 1.0.0 stable.
 
 ## Config shapes
 
@@ -111,9 +116,9 @@ export; a shorthand `{ orgs }` is refused, so add the repo by hand there.
 ## Verbs and targets
 
 ```sh
-voidflow plan  [rulesets|cf-tokens] [--repo <name>]   # read-only: what apply would change
-voidflow check [rulesets|cf-tokens] [--repo <name>]   # read-only: exit 1 on drift
-voidflow apply  rulesets|cf-tokens  (--repo <name> | --entire-fleet)
+voidflow plan  [rulesets|tokens [provider]] [--repo <name>]   # read-only: what apply would change
+voidflow check [rulesets|tokens [provider]] [--repo <name>]   # read-only: exit 1 on drift
+voidflow apply  rulesets|tokens <provider>  (--repo <name> | --entire-fleet)
 ```
 
 - `plan` and `check` cover every repo by default; `--repo` narrows to one
@@ -123,14 +128,15 @@ voidflow apply  rulesets|cf-tokens  (--repo <name> | --entire-fleet)
   tools whose config lists the repo (the others are skipped with a note),
   and exits 2 if none does.
 - `apply` writes, so it takes exactly one tool and exactly one target:
-  `--repo <name>`, which must name a single repo (a bare name in two orgs is
-  refused with both listed), or `--entire-fleet`. With neither, it lists the
-  repos and stops. There is no default target: running it from a site
-  checkout never infers that site.
-- Other flags go to the tool: `--prune`, and `--rotate` for cf-tokens. See
-  `voidflow rulesets --help` and `voidflow cf-tokens --help`. The verbs set
+  `rulesets` or `tokens <provider>` (`tokens` alone is refused, naming the
+  providers). `--repo <name>`, which must name a single repo (a bare name in
+  two orgs is refused with both listed), or `--entire-fleet`. With neither,
+  it lists the repos and stops. There is no default target: running it from
+  a site checkout never infers that site.
+- Other flags go to the tool: `--prune`, and `--rotate` for `tokens cf`. See
+  `voidflow rulesets --help` and `voidflow tokens cf --help`. The verbs set
   `--check` and `--apply` themselves and refuse them; `--try` and `--groups`
-  stay on `voidflow cf-tokens`.
+  stay on `voidflow tokens cf`.
 
 Every run prints one header line per tool to stderr before the tool runs:
 
@@ -190,7 +196,7 @@ apply tool *args:
 ```
 
 Keep supplying `CF_TOKEN_ADMIN` the way you do now (fnox, 1Password, the
-environment) for cf-tokens.
+environment) for `tokens cf`.
 
 ## What belongs here, and what does not
 
