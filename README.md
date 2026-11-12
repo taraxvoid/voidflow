@@ -445,6 +445,9 @@ Also published as `voidflow`. `check-licenses` and `unlighthouse-runner` need
 `bun` on `PATH`; the `voidflow` CLI (below) runs under Bun or Node 24+. Each
 npm tarball has a GitHub build attestation;
 [`RELEASING.md`](RELEASING.md#verify-an-npm-tarball) shows how to check one.
+Releases are immutable on GitHub, and `gh release verify v<version> --repo taraxvoid/voidflow`
+checks it against GitHub's own attestation;
+[`RELEASING.md`](RELEASING.md#verify-a-release) has the details and the limits.
 
 **Lighthouse budgets** - runs [Unlighthouse](https://unlighthouse.dev/) against
 the build and fails on a missed budget. Options: `--dir` (default `dist`, use
@@ -647,7 +650,6 @@ the shared steps' ordering.
 
 Upgrading from `lefthook/site.yml` (≤ v0.13): switch `configs` to
 `lefthook/base.yml`.
-
 ## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),

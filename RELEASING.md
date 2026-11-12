@@ -10,11 +10,11 @@ only: the infra repo's rulesets config lists it under voidflow's
 The versions below are examples of the shape each channel takes, not the
 current ones; those are in `.release-please/*-manifest.json`.
 
-| Branch | Channel | Version | npm dist-tag | GitHub release |
-|---|---|---|---|---|
-| `main` | stable | `0.10.0` | `latest` | normal |
-| `next` | prerelease | `0.10.0-next`, then `-next.1`, `-next.2` | `next` | prerelease |
-| `release/N.x` | maintenance (patch-only) | `0.9.4` | `release-N.x` | normal |
+| Branch        | Channel                  | Version                                  | npm dist-tag  | GitHub release |
+| ------------- | ------------------------ | ---------------------------------------- | ------------- | -------------- |
+| `main`        | stable                   | `0.10.0`                                 | `latest`      | normal         |
+| `next`        | prerelease               | `0.10.0-next`, then `-next.1`, `-next.2` | `next`        | prerelease     |
+| `release/N.x` | maintenance (patch-only) | `0.9.4`                                  | `release-N.x` | normal         |
 
 ```mermaid
 gitGraph
@@ -171,3 +171,48 @@ gh attestation verify taraxvoid-voidflow-<version>.tgz \
 `npm pack <spec>` downloads the registry's tarball as is. Releases before the
 first one with this change have no attestation. A republish (`workflow_dispatch`)
 attests only what it actually publishes, and a dry run attests nothing.
+
+### Verify a release
+
+Releases are published with GitHub's
+[immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
+setting on: a published release's tag and assets cannot be moved, changed or
+deleted. GitHub records that with a signed release attestation for the tag,
+commit and assets, listed on the repo's
+[attestations page](https://github.com/taraxvoid/voidflow/attestations). The
+setting is a repo toggle that can be turned off, so do not take this page's word
+for it; ask GitHub:
+
+```sh
+gh release verify v<version> --repo taraxvoid/voidflow
+gh release verify-asset v<version> <file> --repo taraxvoid/voidflow
+```
+
+`verify` passes only if the release exists and is immutable. A release also
+shows the lock icon and "Immutable" label on its Releases page. `verify-asset`
+checks a local file against an asset of the release; it cannot check the
+auto-generated source zip or tarball.
+
+What this does and does not tell you:
+
+- The attestation is made when the release is published, so it is a point in
+  time record. A release published while the setting was on stays immutable,
+  and one published while it was off never gets an attestation, so a failing
+  `gh release verify` leaves that release unverified: investigate the error
+  before concluding it was mutable when published (it may be a transient or
+  auth failure). Immutability applies to future releases only: v0.5.0 and earlier
+  predate it and fail the check. `.github/immutable-since` names the first
+  release that is covered (v0.5.1).
+- The floating major tag (`v1` once 1.0.0 is out) is moved on every stable
+  release on purpose and is not covered. To get the guarantee, pin the full
+  `vX.Y.Z` tag or its commit SHA (see [Pinning](README.md#pinning)).
+- The release workflow runs `gh release verify` on every release it creates and
+  fails the run if it does not pass. A weekly workflow
+  (`.github/workflows/verify-releases.yml`) re-checks every release since the
+  baseline and opens an issue on a failure, so a release published without
+  immutability does not go unnoticed (it detects the release, not a change to
+  the repo setting). These are checks on our side; the attestation itself
+  is what you verify.
+- release-please creates the release with no uploaded assets, so there is no
+  draft-then-attach step that immutability could break. The npm tarballs are
+  separate and covered by the attestation above.

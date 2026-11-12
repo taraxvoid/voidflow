@@ -263,9 +263,7 @@ jobs:
           else
             npm pkg set name=voidflow
             # Pointer blurb on top, then the full README minus its own H1.
-            # Relative links point at files outside the package, so make them
-            # GitHub URLs.
-            { cat scripts/mirror-readme.md; printf '\n---\n'; tail -n +2 README.md | sed -E 's#\]\(([A-Za-z0-9_.][^):]*)\)#](https://github.com/taraxvoid/voidflow/blob/main/\1)#g'; } > "$PACK_DIR/mirror-README.md"
+            { cat scripts/mirror-readme.md; printf '\n---\n'; tail -n +2 README.md; } > "$PACK_DIR/mirror-README.md"
             cp "$PACK_DIR/mirror-README.md" README.md
             file=$(pack)
             echo "mirror=${file}" >> "$GITHUB_OUTPUT"
@@ -476,3 +474,32 @@ jobs:
           gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
             --body "The automatic main to next back-merge for ${TAG} failed: ${RUN_URL}. Merge main into next by hand (RELEASING.md, \"If the back-merge fails\") before the next promotion, or that promotion PR will conflict."
 
+
+  # Every release (stable, prerelease, maintenance): GitHub only attaches its
+  # release attestation when the repo's immutable-releases setting was on at
+  # publish time, so `gh release verify` failing means the setting was off and
+  # this release can be moved or edited. Fails the run so it is not silent.
+  # RELEASING.md ("Verify a release") shows consumers the same check.
+  verify-immutable:
+    name: Verify the release is immutable
+    needs: [release-please]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      - name: Verify the release attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: bun scripts/verify-releases.ts "$TAG"
