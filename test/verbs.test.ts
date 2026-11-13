@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
+    chmodSync,
+    existsSync,
     mkdirSync,
     mkdtempSync,
+    realpathSync,
     rmSync,
     symlinkSync,
     writeFileSync,
@@ -10,6 +13,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
     applyTargetError,
+    credentialSource,
+    repoModeError,
+    repoToolArgs,
     splitVerbArgs,
     toolArgs,
     worstExit,
@@ -471,5 +477,167 @@ describe('voidflow plan|check|apply', () => {
         expect(r.code).toBe(2)
         expect(r.err).toContain('orgs.a.repos."x/y": name has a slash')
         expect(r.err).not.toContain('    at ')
+    })
+})
+
+describe('repoModeError', () => {
+    test('refuses --repo and --entire-fleet', () => {
+        const repo = repoModeError({ repo: 'x', entireFleet: false, rest: [] })
+        expect(repo).toContain('--repo')
+        expect(repo).toContain('per-repo')
+        const fleet = repoModeError({ entireFleet: true, rest: [] })
+        expect(fleet).toContain('--entire-fleet')
+    })
+
+    test('allows neither', () => {
+        expect(repoModeError({ entireFleet: false, rest: [] })).toBeNull()
+    })
+})
+
+describe('credentialSource', () => {
+    test('names the variable gh will read, never a value', () => {
+        expect(credentialSource({ GH_TOKEN: 'x', GITHUB_TOKEN: 'y' })).toBe(
+            'GH_TOKEN',
+        )
+        expect(credentialSource({ GITHUB_TOKEN: 'y' })).toBe('GITHUB_TOKEN')
+        expect(credentialSource({ GH_TOKEN: '' })).toBe('gh auth')
+        expect(credentialSource({})).toBe('gh auth')
+    })
+})
+
+describe('repoToolArgs', () => {
+    test('points the rulesets command at the file, verb flag first', () => {
+        expect(
+            repoToolArgs('check', '/r/voidflow.config.ts', ['--prune']),
+        ).toEqual([
+            'rulesets',
+            '--repo-config',
+            '/r/voidflow.config.ts',
+            '--check',
+            '--prune',
+        ])
+        expect(repoToolArgs('plan', '/r/voidflow.config.ts', [])).toEqual([
+            'rulesets',
+            '--repo-config',
+            '/r/voidflow.config.ts',
+        ])
+    })
+})
+
+describe('voidflow in a repo with a voidflow.config.ts', () => {
+    /** A fixture whose work dir is a repo holding `config`, run with a gh that only leaves a marker. */
+    async function inRepo(
+        args: string[],
+        config: string,
+        env: Record<string, string> = {},
+    ) {
+        const f = fixture({ 'rulesets.ts': RULESETS })
+        mkdirSync(join(f.work, '.git'))
+        const file = join(f.work, 'voidflow.config.ts')
+        writeFileSync(file, config)
+        const shim = join(f.root, 'shim')
+        const marker = join(shim, 'gh-called')
+        mkdirSync(shim)
+        writeFileSync(
+            join(shim, 'gh'),
+            `#!/bin/sh\ntouch '${marker}'\nexit 1\n`,
+        )
+        chmodSync(join(shim, 'gh'), 0o755)
+        const proc = Bun.spawn(['bun', CLI, ...args], {
+            cwd: f.work,
+            env: {
+                ...process.env,
+                HOME: f.home,
+                XDG_CONFIG_HOME: f.xdg,
+                PATH: `${shim}:${process.env.PATH}`,
+                GITHUB_REPOSITORY: 'o/n',
+                GH_TOKEN: '',
+                GITHUB_TOKEN: '',
+                VOIDFLOW_CONFIG: '',
+                VOIDFLOW_CONFIG_BASE: '',
+                CF_TOKEN_ADMIN: '',
+                ...env,
+            },
+            stdout: 'pipe',
+            stderr: 'pipe',
+        })
+        const [code, err] = await Promise.all([
+            proc.exited,
+            new Response(proc.stderr).text(),
+        ])
+        return {
+            code,
+            err,
+            file: realpathSync(file),
+            fleet: join(f.cfg, 'rulesets.ts'),
+            ghCalled: existsSync(marker),
+        }
+    }
+
+    const TOOL = "export default { kind: 'tool' }"
+
+    test('plan rulesets reads the repo file and names the repo and credential', async () => {
+        const r = await inRepo(['plan', 'rulesets'], TOOL)
+        expect(r.err).toContain(
+            `config ${r.file} (repo) | repo o/n | credential gh auth`,
+        )
+        expect(r.ghCalled).toBe(true)
+    })
+
+    test('--repo is refused in per-repo mode, before any child runs', async () => {
+        const r = await inRepo(['plan', 'rulesets', '--repo', 'x'], TOOL)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('per-repo')
+        expect(r.err).not.toContain('(repo) |')
+        expect(r.ghCalled).toBe(false)
+    })
+
+    test('a bare plan runs rulesets only and says tokens were skipped', async () => {
+        const r = await inRepo(['plan'], TOOL)
+        expect(r.err).toContain('plan rulesets')
+        expect(r.err).toContain('tokens skipped')
+    })
+
+    test('an explicit --config or VOIDFLOW_CONFIG selects the fleet path', async () => {
+        const f = await inRepo(['plan', 'rulesets'], TOOL)
+        const viaFlag = await inRepo(
+            ['plan', 'rulesets', '--config', f.fleet],
+            TOOL,
+        )
+        expect(viaFlag.err).not.toContain('(repo)')
+        const viaEnv = await inRepo(['plan', 'rulesets'], TOOL, {
+            VOIDFLOW_CONFIG: f.fleet,
+        })
+        expect(viaEnv.err).not.toContain('(repo)')
+    })
+
+    test('the fleet path prints the deprecation line once', async () => {
+        const f = await inRepo(['plan', 'rulesets'], TOOL)
+        const r = await inRepo(['plan', 'rulesets', '--config', f.fleet], TOOL)
+        expect(r.err.split('fleet configs are deprecated').length - 1).toBe(1)
+    })
+
+    test('plan tokens cf goes through fleet discovery, not the repo file', async () => {
+        const r = await inRepo(['plan', 'tokens', 'cf'], TOOL)
+        expect(r.err).toContain('no cf-tokens.ts')
+        expect(r.err).not.toContain('(repo)')
+    })
+
+    test('a config that does not load exits 2 naming the file, before any gh call', async () => {
+        const r = await inRepo(
+            ['plan', 'rulesets'],
+            "export default { kind: 'sit' }",
+        )
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(r.file)
+        expect(r.ghCalled).toBe(false)
+    })
+
+    test('a cloudflare section is reported as not applied yet', async () => {
+        const r = await inRepo(
+            ['plan', 'rulesets'],
+            "export default { kind: 'site', cloudflare: { account: 'abc' } }",
+        )
+        expect(r.err).toContain('note: cloudflare section found')
     })
 })

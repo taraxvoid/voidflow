@@ -57,9 +57,8 @@ const OPTIONS = {
     'repo-config': { type: 'string' },
 } as const
 
-const usage = (
-    prog: string,
-) => `usage: ${prog} (--config <module> | --repo-config <file>) [flags]
+const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
+       ${prog} --repo-config <file> [flags]
 
   --config <module>  the fleet map: a module exporting REPOS (or a default)
   --repo-config <file>  a voidflow.config.ts: manage the repo it sits in

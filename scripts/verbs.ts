@@ -14,7 +14,7 @@
 import { spawnSync } from 'node:child_process'
 import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { checkRepos } from '../cloudflare/tokens.ts'
 import { checkFleet } from '../rulesets/index.ts'
 import { loadConfig } from './lib/config.ts'
@@ -32,6 +32,11 @@ import {
     providerOf,
     TOKEN_TOOLS,
 } from './lib/providers.ts'
+import {
+    findRepoConfig,
+    loadVoidflowConfig,
+    repoSlug,
+} from './lib/repo-config.ts'
 
 type Verb = 'plan' | 'check' | 'apply'
 
@@ -187,7 +192,29 @@ ${
           ? 'Read-only: exit 1 on drift, 2 on a config or auth error.'
           : 'Writes. Other flags (--prune, --rotate) go to the tool; see `voidflow <tool> --help`.'
 }
-Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone runs every tokens provider.`
+Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone runs every tokens provider.
+
+Inside a repo with a voidflow.config.ts (and no --config or VOIDFLOW_CONFIG),
+rulesets run from that file for that repo only: --repo and --entire-fleet do
+not apply. See docs/config.md.`
+
+/** Why per-repo mode refuses these arguments, or null when it takes them. */
+export function repoModeError(v: VerbArgs): string | null {
+    if (v.repo !== undefined)
+        return '--repo does not apply to a per-repo config; it manages the repo it sits in'
+    if (v.entireFleet)
+        return '--entire-fleet does not apply to a per-repo config; it manages the repo it sits in'
+    return null
+}
+
+/** The name of the credential `gh` will use, never its value. */
+export function credentialSource(
+    env: Record<string, string | undefined>,
+): string {
+    if (env.GH_TOKEN) return 'GH_TOKEN'
+    if (env.GITHUB_TOKEN) return 'GITHUB_TOKEN'
+    return 'gh auth'
+}
 
 const VERB_FLAG: Record<Verb, string[]> = {
     plan: [],
@@ -220,6 +247,15 @@ export function toolArgs(
         ...VERB_FLAG[verb],
         ...rest,
     ]
+}
+
+/** The `voidflow rulesets` command line for one verb run on a voidflow.config.ts. */
+export function repoToolArgs(
+    verb: Verb,
+    file: string,
+    rest: string[],
+): string[] {
+    return ['rulesets', '--repo-config', file, ...VERB_FLAG[verb], ...rest]
 }
 
 /** Where discovery looked, for a "not found" message. */
@@ -276,6 +312,47 @@ function fail(msg: string): never {
     process.exit(2)
 }
 
+/**
+ * One verb run on the repo's own voidflow.config.ts: loads and validates it
+ * before any child runs, prints the header, then re-runs `voidflow rulesets`
+ * on it. Exits the process.
+ */
+async function runRepoMode(
+    verb: Verb,
+    v: VerbArgs,
+    prog: string,
+    file: string,
+): Promise<never> {
+    const refused = repoModeError(v)
+    if (refused) fail(`${prog}: ${refused}`)
+    let cloudflare: boolean
+    let slug: string
+    try {
+        cloudflare = (await loadVoidflowConfig(file)).cloudflare !== undefined
+        slug = await repoSlug(process.env, dirname(file))
+    } catch (e) {
+        fail(`${prog}: ${(e as Error).message}`)
+    }
+    if (!v.tool)
+        console.error(
+            `${prog}: tokens skipped (per-repo config manages rulesets only)`,
+        )
+    if (cloudflare)
+        console.error(
+            'note: cloudflare section found; token management is not applied from voidflow.config.ts yet',
+        )
+    console.error(
+        `voidflow ${version()} ${verb} rulesets | config ${file} (repo) | repo ${slug} | credential ${credentialSource(process.env)}`,
+    )
+    const r = spawnSync(
+        process.execPath,
+        [cliPath(), ...repoToolArgs(verb, file, v.rest)],
+        { stdio: 'inherit' },
+    )
+    if (r.error) console.error(`${prog}: rulesets: ${r.error.message}`)
+    process.exit(r.error || r.status === null ? 2 : r.status)
+}
+
 /** The `main` of one verb, for scripts/cli.ts. */
 export function verbMain(verb: Verb) {
     return async (argv: string[], prog = `voidflow ${verb}`): Promise<void> => {
@@ -297,6 +374,16 @@ export function verbMain(verb: Verb) {
                     ? `${prog}: apply tokens needs a provider: voidflow apply tokens <provider> (${Object.keys(PROVIDERS).join(' or ')})\n\n${usage(verb)}`
                     : `${prog}: apply needs a tool: voidflow apply rulesets|tokens <provider>\n\n${usage(verb)}`,
             )
+
+        // Inside a repo with a voidflow.config.ts, rulesets come from that
+        // file, unless the fleet is named explicitly or a token tool is asked.
+        const repoFile =
+            v.config === undefined &&
+            !process.env.VOIDFLOW_CONFIG &&
+            (v.tool === 'rulesets' || (!v.tool && !v.tokensAll))
+                ? findRepoConfig(process.cwd())
+                : null
+        if (repoFile) return runRepoMode(verb, v, prog, repoFile)
 
         const wanted: Tool[] = v.tool
             ? [v.tool]
@@ -391,6 +478,11 @@ export function verbMain(verb: Verb) {
                     ? 'fleet (read-only)'
                     : `repo ${v.repo} (read-only)`
         }
+
+        if (found.some(([tool]) => tool === 'rulesets'))
+            console.error(
+                'voidflow: fleet configs are deprecated for rulesets; move each repo to a voidflow.config.ts (docs/config.md)',
+            )
 
         const ver = version()
         const cli = cliPath()
