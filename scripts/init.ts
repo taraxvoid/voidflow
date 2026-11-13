@@ -425,7 +425,6 @@ export async function main(
                 ),
                 `re-run with ${paint('bold', '--force')} to overwrite them, or ${paint('bold', '--skip <name>')} to leave one alone`,
                 '',
-
             )
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
@@ -621,6 +620,7 @@ export async function main(
             '  (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
         )
     }
+    if (dryRun) out.push('plan only: re-run with --apply to make these changes')
     console.log([...refusal, ...out].join('\n'))
 
     process.exit(exitCode)
