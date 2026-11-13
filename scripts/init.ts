@@ -3,9 +3,9 @@
  * settings voidflow wants. Safe to re-run: identical files are `unchanged`,
  * settings already as desired are `unchanged`.
  *
- *   voidflow init --kind tool                    # files and settings, current dir
- *   voidflow init --kind site --dry-run ../app   # plan only
- *   voidflow init --preset settings              # settings only, no --kind needed
+ *   voidflow init --kind tool                    # plan only (the default), current dir
+ *   voidflow init --kind site --apply ../app     # write the files, change the settings
+ *   voidflow init --preset settings --apply      # settings only, no --kind needed
  *
  * node: APIs only, so it runs under Node 24+ as well as Bun.
  */
@@ -79,7 +79,7 @@ const OPTIONS = {
     owner: { type: 'string' },
     config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
-    'dry-run': { type: 'boolean', default: false },
+    apply: { type: 'boolean', default: false },
 } as const
 
 const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
@@ -94,8 +94,8 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --repo owner/name       the GitHub repo (default: the origin remote)
   --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
   --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
-  -f, --force             overwrite files that differ
-  --dry-run               plan both halves, write and change nothing
+  --apply                 write the files and change the settings (default: plan only)
+  -f, --force             with --apply, overwrite files that differ
 
 dir defaults to the current directory and must be a git work tree. Settings
 need the gh CLI, authenticated as someone with admin on the repo.
@@ -282,7 +282,8 @@ export async function main(
             prog,
         )
 
-    const dryRun = values['dry-run']
+    if (values.force && !values.apply) fail('--force needs --apply', prog)
+    const dryRun = !values.apply
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
     const enableAgentic = values['enable-agentic']
@@ -379,7 +380,7 @@ export async function main(
         if (conflicts.length > 0) {
             exitCode = 1
             out.push(
-                `  nothing written: ${conflicts.length} file(s) differ (${conflicts.map((a) => a.target).join(', ')}); re-run with --force to overwrite`,
+                `  nothing written: ${conflicts.length} file(s) differ (${conflicts.map((a) => a.target).join(', ')}); re-run with --apply --force to overwrite`,
             )
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
@@ -575,6 +576,7 @@ export async function main(
             '  (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
         )
     }
+    if (dryRun) out.push('plan only: re-run with --apply to make these changes')
     console.log(out.join('\n'))
     process.exit(exitCode)
 }
