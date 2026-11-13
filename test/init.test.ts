@@ -185,6 +185,37 @@ describe('voidflow init', () => {
         expect(f.writes.length).toBeGreaterThan(0)
     })
 
+    test('a refusal leads the output and no row claims a change was made', async () => {
+        const dir = repo()
+        writeFileSync(join(dir, 'mise.toml'), '[tools]\n')
+        const r = await run(['--kind', 'tool', dir])
+        expect(r.out.startsWith('refused: nothing was written, 1 ')).toBe(true)
+        expect(r.out).toContain('files (nothing written):')
+        expect(r.out).toMatch(/would create\s+bunfig/)
+        expect(r.out).not.toMatch(/^ {2}create\s/m)
+        expect(r.out).not.toContain('\x1b[')
+    })
+
+    test('FORCE_COLOR colors statuses and --no-color wins', async () => {
+        const prev = process.env.FORCE_COLOR
+        process.env.FORCE_COLOR = '1'
+        try {
+            const on = await run(['--kind', 'tool', '--dry-run', repo()])
+            expect(on.out).toContain('\x1b[32mwould create')
+            const off = await run([
+                '--kind',
+                'tool',
+                '--dry-run',
+                '--no-color',
+                repo(),
+            ])
+            expect(off.out).not.toContain('\x1b[')
+        } finally {
+            if (prev === undefined) delete process.env.FORCE_COLOR
+            else process.env.FORCE_COLOR = prev
+        }
+    })
+
     test('--force overwrites a conflicting file', async () => {
         const dir = repo()
         writeFileSync(join(dir, 'mise.toml'), '[tools]\n')
