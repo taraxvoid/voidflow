@@ -1,0 +1,8 @@
+# Action refs are pinned to commits by .github/workflows/actions.lock
+# (gh actions-lock), verified in verify-lockfile.yml, so workflows reference
+# version tags. Require a ref (no bare `uses: owner/repo`), not a hash.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        '*': ref-pin

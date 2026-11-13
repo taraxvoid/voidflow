@@ -85,6 +85,15 @@ function repo(): string {
     return dir
 }
 
+/**
+ * Tests were written when init applied by default. `--dry-run` marks a plan-only
+ * run (the default now); anything else gets `--apply`.
+ */
+const asArgv = (argv: string[]) =>
+    argv.includes('--dry-run')
+        ? argv.filter((a) => a !== '--dry-run')
+        : [...argv, '--apply']
+
 async function run(argv: string[], gh: Gh) {
     const out: string[] = []
     const err: string[] = []
@@ -99,7 +108,10 @@ async function run(argv: string[], gh: Gh) {
     }) as never)
     let code = -1
     try {
-        await main(argv, 'voidflow init', { gh, resolveSha: async () => 'sha' })
+        await main(asArgv(argv), 'voidflow init', {
+            gh,
+            resolveSha: async () => 'sha',
+        })
     } catch (e) {
         if (!(e instanceof Exit)) throw e
         code = e.code

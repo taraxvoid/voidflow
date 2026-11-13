@@ -4,8 +4,8 @@ Secure-by-default CI/CD, GitHub repo settings and git hooks for TypeScript
 repos, set up with one command:
 
 ```sh
-npx @taraxvoid/voidflow init --kind site    # an Astro site
-npx @taraxvoid/voidflow init --kind tool    # a bun CLI, TUI or library
+npx @taraxvoid/voidflow init --kind site --apply    # an Astro site
+npx @taraxvoid/voidflow init --kind tool --apply    # a bun CLI, TUI or library
 ```
 
 Built for Astro sites, bun tools and Cloudflare deploys. Works with `bun`,
@@ -33,7 +33,7 @@ Built for Astro sites, bun tools and Cloudflare deploys. Works with `bun`,
 
 `init` needs Node 24+ (or Bun), a git work tree, and the
 [`gh` CLI](https://cli.github.com/) logged in with admin on the repo for the
-settings half. `bunx @taraxvoid/voidflow init --kind tool` works the same as
+settings half. `bunx @taraxvoid/voidflow init --kind tool --apply` works the same as
 `npx`.
 
 **New Astro site:**
@@ -41,7 +41,7 @@ settings half. `bunx @taraxvoid/voidflow init --kind tool` works the same as
 ```sh
 bun create astro my-site
 cd my-site
-npx @taraxvoid/voidflow init --kind site
+npx @taraxvoid/voidflow init --kind site --apply
 ```
 
 Commit what it wrote and push.
@@ -49,7 +49,7 @@ Commit what it wrote and push.
 **New tool:** run `git init`, add a `package.json`, then:
 
 ```sh
-npx @taraxvoid/voidflow init --kind tool
+npx @taraxvoid/voidflow init --kind tool --apply
 ```
 
 **Existing repo:** preview first. `init` is additive: it merges `.gitignore` and
@@ -57,8 +57,8 @@ npx @taraxvoid/voidflow init --kind tool
 write already exists with different content.
 
 ```sh
-npx @taraxvoid/voidflow init --kind site --dry-run
-npx @taraxvoid/voidflow init --kind site --skip renovate   # keep your own renovate.json
+npx @taraxvoid/voidflow init --kind site                     # plans only
+npx @taraxvoid/voidflow init --kind site --apply --skip renovate   # keep your own renovate.json
 ```
 
 **After the first push**, add branch rulesets (they block direct pushes to
@@ -66,8 +66,8 @@ npx @taraxvoid/voidflow init --kind site --skip renovate   # keep your own renov
 CodeQL has code to scan:
 
 ```sh
-npx @taraxvoid/voidflow init --kind tool --preset rulesets
-npx @taraxvoid/voidflow init --preset settings
+npx @taraxvoid/voidflow init --kind tool --preset rulesets --apply
+npx @taraxvoid/voidflow init --preset settings --apply
 ```
 
 Re-running is always safe: files and settings already as wanted are reported
@@ -103,8 +103,8 @@ version and `--force` to overwrite the ones that differ.
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to the repo's `checks` in your fleet rulesets config |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
 | `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos `init` writes `@OWNER` and asks for `--owner`) |
-| `-f`, `--force` | overwrite files that differ |
-| `--dry-run` | plan everything, change nothing |
+| `--apply` | write the files and change the settings. Without it `init` only plans and changes nothing |
+| `-f`, `--force` | with `--apply`, overwrite files that differ |
 
 ### Skip names
 
@@ -157,7 +157,7 @@ with push protection, and CodeQL default setup. Opt-ins are never turned off.
 - On a private repo without GitHub Code Security, CodeQL and secret scanning
   are reported `skipped-plan`.
 - Before the first push CodeQL has nothing to scan and is `skipped-no-code`;
-  re-run `init --preset settings` after it.
+  re-run `init --preset settings --apply` after it.
 - `--enable-agentic` adds: allow auto-merge, always suggest updating PR
   branches, delete head branches on merge, a read-only workflow token with
   Actions unable to approve PRs, and the `low-risk` and `needs-you`
@@ -197,7 +197,7 @@ patches and majors may change and how deprecations reach you.
 
 ### Trying a canary release
 
-Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init --kind tool`
+Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init --kind tool --apply`
 (or the `bunx` form, or `--kind site`) runs the newest one. If your npm config has a release-age
 cooldown (`min-release-age` or `before`), a fresh canary is filtered
 out and `@next` silently resolves to an older version. For the unscoped mirror
@@ -220,7 +220,7 @@ does not know the setting at all, so `npx` can still pick an older release.
 Until that is fixed, turn the cutoff off for that one command:
 
 ```sh
-npx --min-release-age=0 @taraxvoid/voidflow@next init --kind tool
+npx --min-release-age=0 @taraxvoid/voidflow@next init --kind tool --apply
 ```
 
 This also lifts the cooldown for the dependencies `npx` installs for that run.
@@ -354,6 +354,54 @@ jobs:
   validate:
     uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<sha> # vX.Y.Z
 ```
+
+### Tool release
+
+For tools published to npm: release-please on branch channels (`main` →
+`latest`, `next` → `next`, `release/N.x` → `release-N.x`), then the packed
+tarball is attested and staged with `npm stage publish`, so nothing goes live
+until you approve it with 2FA, and the bytes on npm are the attested bytes.
+Each channel reads `.release-please/<main|next|maintenance>.json` and its
+`-manifest.json`; a branch without one fails. Needs a release bot GitHub App
+(so the release PR's CI runs) and npm trusted publishing configured with
+**your** workflow file (e.g. `release.yml`) and the `npm` environment.
+Create that environment yourself and limit its deployment branches to your
+release branches (`main`, `next`, `release/*`): npm only checks the workflow
+file and environment name, so an unrestricted environment would let any
+branch's run of the caller publish.
+
+```yaml
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag: { type: string, required: true }
+      dry-run: { type: boolean, default: false }
+
+permissions: {}
+
+jobs:
+  release:
+    uses: taraxvoid/voidflow/.github/workflows/tool-release.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+      attestations: write
+    with:
+      release-bot-client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+      tag: ${{ inputs.tag }}
+      dry-run: ${{ inputs.dry-run == true }}
+    secrets:
+      release-bot-private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+```
+
+Inputs: `npm-environment` (default `npm`), `floating-tag` (move `v<major>` on
+a stable release, default on), `runner`. voidflow's own release
+(`release-please.yml`) still runs separately: it also publishes to JSR and an
+unscoped mirror and back-merges `main` into `next`.
 
 ### Code scanning
 

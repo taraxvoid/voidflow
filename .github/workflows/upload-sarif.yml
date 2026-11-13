@@ -42,7 +42,7 @@ jobs:
     steps:
       - name: Fetch SARIF
         id: fetch
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: actions/download-artifact@v8.0.2
         # A validate run that stopped before keeping SARIF leaves nothing to upload.
         continue-on-error: true
         with:
@@ -52,14 +52,14 @@ jobs:
       # One category per tool, so each upload replaces only its own results.
       - name: Upload gitleaks
         if: ${{ steps.fetch.outcome == 'success' && hashFiles('sarif/gitleaks.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@v4.39.0
         with:
           sarif_file: sarif/gitleaks.sarif
           category: gitleaks
 
       - name: Upload zizmor
         if: ${{ steps.fetch.outcome == 'success' && hashFiles('sarif/zizmor.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@v4.39.0
         with:
           sarif_file: sarif/zizmor.sarif
           category: zizmor

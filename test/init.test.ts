@@ -113,6 +113,15 @@ function repo(origin: string | null = 'https://github.com/o/r.git'): string {
     return dir
 }
 
+/**
+ * Tests were written when init applied by default. `--dry-run` marks a plan-only
+ * run (the default now); anything else gets `--apply`.
+ */
+const asArgv = (argv: string[]) =>
+    argv.includes('--dry-run')
+        ? argv.filter((a) => a !== '--dry-run')
+        : [...argv, '--apply']
+
 async function run(argv: string[], gh: Gh = fakeGh().gh) {
     const out: string[] = []
     const err: string[] = []
@@ -127,7 +136,7 @@ async function run(argv: string[], gh: Gh = fakeGh().gh) {
     }) as never)
     let code = -1
     try {
-        await main(argv, 'voidflow init', {
+        await main(asArgv(argv), 'voidflow init', {
             gh,
             resolveSha: async () => 'deadbeef',
         })
@@ -155,6 +164,20 @@ const TOOL_FILES = [
 ]
 
 describe('voidflow init', () => {
+    test('without --apply it plans and writes nothing', async () => {
+        const dir = repo()
+        const r = await run(['--kind', 'tool', '--dry-run', dir])
+        expect(r.code).toBe(0)
+        expect(r.out).toContain('plan only: re-run with --apply')
+        expect(existsSync(join(dir, 'mise.toml'))).toBe(false)
+    })
+
+    test('--force without --apply is a usage error', async () => {
+        const r = await run(['--kind', 'tool', '--force', '--dry-run', repo()])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('--force needs --apply')
+    })
+
     test('full run on an empty repo exits 0 and writes the tool files', async () => {
         const dir = repo()
         const r = await run(['--kind', 'tool', dir])
