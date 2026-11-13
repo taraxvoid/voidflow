@@ -69,7 +69,10 @@ for the release flow.
 logic; the fleet (which repos, tiers, checks and bypasses) lives in the org's
 own infra repo (see [Fleet config](#fleet-config---config)). A tiered repo's
 missing fields take `tool()`'s defaults; a repo whose protection doesn't fit
-the tiers spells out its rulesets in full. Needs `gh` with admin on the repos.
+the tiers spells out its rulesets in full. A repo can instead carry its own
+[`voidflow.config.ts`](docs/config.md) with a `kind` of `site` or `tool`, and
+run `plan`, `check` and `apply rulesets` from inside it; the fleet form below
+is deprecated. Needs `gh` with admin on the repos.
 With the infra repo at `~/.config/voidflow`, or from inside its checkout (see
 [`docs/fleet.md`](docs/fleet.md) for discovery and the verbs):
 

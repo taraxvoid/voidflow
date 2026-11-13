@@ -11,6 +11,11 @@ justfile.
 Experimental: commands, flags and config shapes may change in a minor
 ([`STABILITY.md`](../STABILITY.md#experimental)). Pin an exact version.
 
+Moving away from fleet configs: a repo can now carry its own
+`voidflow.config.ts`, and `plan`, `check` and `apply rulesets` run from it
+inside that repo (see [`config.md`](config.md)). Fleet configs for rulesets
+are deprecated and will be removed once each repo has its own file.
+
 ## The infra repo
 
 One module per tool at the repo root:

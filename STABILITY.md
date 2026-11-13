@@ -35,8 +35,9 @@ prerelease `-next.N` versions, which may change or break between prereleases.
 
 The fleet tools are published but outside this policy: the `voidflow` CLI
 (`plan`, `check`, `apply`, `tokens`, `rulesets`, `init`, how config files
-are discovered, and the starter files `init` writes) and the `./cloudflare`
-and `./rulesets` exports that type their configs. The
+are discovered, the per-repo `voidflow.config.ts`, and the starter files
+`init` writes) and the `./cloudflare`, `./config` and `./rulesets` exports
+that type their configs. The
 `init --enable-agentic` opt-in is the least settled of these. They're new and
 still settling, so their commands, flags and config shapes may change in any
 minor. The changelog says when. Pin an exact version where you run them.
