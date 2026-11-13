@@ -49,6 +49,8 @@ const REFUSED: Record<string, string> = {
     '--check': 'the verb decides; use `voidflow check`',
     '--try': 'use `voidflow tokens cf --try`',
     '--groups': 'use `voidflow tokens cf --groups`',
+    '--repo-config':
+        'the verbs find the repo file themselves; run them inside that repo',
 }
 
 export type VerbArgs = {

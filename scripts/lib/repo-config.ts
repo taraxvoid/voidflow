@@ -51,15 +51,19 @@ export function parseRemote(url: string): string | null {
 const SLUG = /^[^/\s]+\/[^/\s]+$/
 
 /**
- * The GitHub repo for the checkout at `cwd`: GITHUB_REPOSITORY (set in
- * Actions) when it is shaped `owner/name`, else the origin remote.
+ * The GitHub repo for the checkout at `cwd`: its origin remote, or
+ * GITHUB_REPOSITORY (set in Actions) when the checkout has no GitHub origin.
+ * When both exist they must agree (ignoring case): a stale variable, or a job
+ * that checked out a second repo, must not point writes at another repo.
  */
 export async function repoSlug(
     env: Record<string, string | undefined>,
     cwd: string,
 ): Promise<string> {
-    const fromEnv = env.GITHUB_REPOSITORY
-    if (fromEnv && SLUG.test(fromEnv)) return fromEnv
+    const fromEnv =
+        env.GITHUB_REPOSITORY && SLUG.test(env.GITHUB_REPOSITORY)
+            ? env.GITHUB_REPOSITORY
+            : null
     let remote: string | null = null
     try {
         const r = await capture(
@@ -71,6 +75,11 @@ export async function repoSlug(
     } catch {
         // git missing: reported below with the other way out
     }
+    if (fromEnv && remote && fromEnv.toLowerCase() !== remote.toLowerCase())
+        throw new Error(
+            `GITHUB_REPOSITORY is ${fromEnv} but this checkout's origin is ${remote}; run from the repo whose voidflow.config.ts this is, or fix the variable`,
+        )
+    if (fromEnv) return fromEnv
     if (remote) return remote
     throw new Error(
         'cannot tell which GitHub repo this is: no github.com origin remote; set GITHUB_REPOSITORY=owner/name',

@@ -480,6 +480,17 @@ describe('voidflow plan|check|apply', () => {
     })
 })
 
+describe('a forwarded --repo-config', () => {
+    test('is refused in both spellings, so it cannot retarget a verb run', () => {
+        expect(() =>
+            splitVerbArgs(['rulesets', '--repo-config=/b.ts']),
+        ).toThrow('--repo-config')
+        expect(() =>
+            splitVerbArgs(['rulesets', '--repo-config', '/b.ts']),
+        ).toThrow('--repo-config')
+    })
+})
+
 describe('repoModeError', () => {
     test('refuses --repo and --entire-fleet', () => {
         const repo = repoModeError({ repo: 'x', entireFleet: false, rest: [] })

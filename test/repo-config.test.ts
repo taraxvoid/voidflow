@@ -88,9 +88,33 @@ describe('parseRemote', () => {
 })
 
 describe('repoSlug', () => {
-    test('prefers GITHUB_REPOSITORY', async () => {
-        const dir = gitRepo('git@github.com:x/y.git')
-        expect(await repoSlug({ GITHUB_REPOSITORY: 'o/n' }, dir)).toBe('o/n')
+    test('uses GITHUB_REPOSITORY when the checkout has no GitHub origin', async () => {
+        expect(await repoSlug({ GITHUB_REPOSITORY: 'o/n' }, gitRepo())).toBe(
+            'o/n',
+        )
+        expect(
+            await repoSlug(
+                { GITHUB_REPOSITORY: 'o/n' },
+                gitRepo('https://gitlab.com/o/n.git'),
+            ),
+        ).toBe('o/n')
+    })
+
+    test('GITHUB_REPOSITORY that agrees with origin is accepted, ignoring case', async () => {
+        const dir = gitRepo('git@github.com:Owner/Name.git')
+        expect(await repoSlug({ GITHUB_REPOSITORY: 'owner/name' }, dir)).toBe(
+            'owner/name',
+        )
+    })
+
+    test('GITHUB_REPOSITORY that disagrees with origin is an error naming both', async () => {
+        const dir = gitRepo('git@github.com:o/a.git')
+        const err = await repoSlug({ GITHUB_REPOSITORY: 'x/other' }, dir).then(
+            () => null,
+            (e: Error) => e,
+        )
+        expect(err?.message).toContain('x/other')
+        expect(err?.message).toContain('o/a')
     })
 
     test('falls back to the origin remote', async () => {

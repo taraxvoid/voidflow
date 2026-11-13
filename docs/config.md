@@ -34,8 +34,10 @@ export default {
   Cloudflare account id and `adminTokenEnv` names the variable that holds the
   admin token, never the token itself.
 
-There is no `owner/name` key. The repo is `GITHUB_REPOSITORY` when that is set
-(as in Actions), otherwise the `origin` remote of the checkout.
+There is no `owner/name` key. The repo is the `origin` remote of the checkout,
+or `GITHUB_REPOSITORY` (set in Actions) when the checkout has no GitHub origin.
+If both exist and differ, voidflow exits 2 naming both, so a stale variable or
+a job that checked out a second repo cannot send writes to the wrong repo.
 
 ## Defaults
 
