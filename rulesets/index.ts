@@ -124,6 +124,15 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     ...over,
 })
 
+/**
+ * Sites run a single `main` that deploys to prod (previews on PRs), so the old
+ * next and live protection is retired. Retire only acts with --prune.
+ */
+export const SITE_RETIRE = ['next (staging)', 'live (prod)']
+
+export const site = (over: Partial<RepoConfig> = {}): RepoConfig =>
+    tool({ retire: [...SITE_RETIRE], ...over })
+
 const NAMES: Record<Tier, string> = {
     main: 'main (prod)',
     next: 'next (staging)',
