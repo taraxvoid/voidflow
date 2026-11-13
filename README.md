@@ -355,6 +355,54 @@ jobs:
     uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<sha> # vX.Y.Z
 ```
 
+### Tool release
+
+For tools published to npm: release-please on branch channels (`main` →
+`latest`, `next` → `next`, `release/N.x` → `release-N.x`), then the packed
+tarball is attested and staged with `npm stage publish`, so nothing goes live
+until you approve it with 2FA, and the bytes on npm are the attested bytes.
+Each channel reads `.release-please/<main|next|maintenance>.json` and its
+`-manifest.json`; a branch without one fails. Needs a release bot GitHub App
+(so the release PR's CI runs) and npm trusted publishing configured with
+**your** workflow file (e.g. `release.yml`) and the `npm` environment.
+Create that environment yourself and limit its deployment branches to your
+release branches (`main`, `next`, `release/*`): npm only checks the workflow
+file and environment name, so an unrestricted environment would let any
+branch's run of the caller publish.
+
+```yaml
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag: { type: string, required: true }
+      dry-run: { type: boolean, default: false }
+
+permissions: {}
+
+jobs:
+  release:
+    uses: taraxvoid/voidflow/.github/workflows/tool-release.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+      attestations: write
+    with:
+      release-bot-client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+      tag: ${{ inputs.tag }}
+      dry-run: ${{ inputs.dry-run == true }}
+    secrets:
+      release-bot-private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+```
+
+Inputs: `npm-environment` (default `npm`), `floating-tag` (move `v<major>` on
+a stable release, default on), `runner`. voidflow's own release
+(`release-please.yml`) still runs separately: it also publishes to JSR and an
+unscoped mirror and back-merges `main` into `next`.
+
 ### Code scanning
 
 Both CI workflows save gitleaks and zizmor results as a `voidflow-sarif`
