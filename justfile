@@ -83,7 +83,7 @@ security:
     export GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
     uvx zizmor@{{ zizmor_version }} --min-severity medium .
 
-# Apply zizmor's auto-fixes (e.g. pin unpinned action refs to hashes)
+# Apply zizmor's auto-fixes. Action pins live in actions.lock (gh actions-lock), so review the diff and re-run `gh actions-lock` if any `uses:` changed.
 security-fix:
     #!/usr/bin/env bash
     set -euo pipefail
