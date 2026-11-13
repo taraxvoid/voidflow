@@ -19,6 +19,21 @@ import { capture } from '../scripts/lib/proc.ts'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
 
+describe('agentic gate caller', () => {
+    test('grants the permissions the reusable workflow requests', () => {
+        const caller = readFileSync(
+            join(ROOT, 'templates/common/agentic-gate.yml'),
+            'utf8',
+        )
+        for (const p of [
+            'checks: write',
+            'contents: read',
+            'pull-requests: read',
+        ])
+            expect(caller).toContain(p)
+    })
+})
+
 function walk(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
         e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],

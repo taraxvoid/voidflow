@@ -18,7 +18,7 @@ const ctx: RenderCtx = {
 const L1 =
     'Written by voidflow v1.2.3: https://www.npmjs.com/package/@taraxvoid/voidflow'
 const L2 =
-    'Set up a repo the same way: npx @taraxvoid/voidflow init --kind tool'
+    'Set up a repo the same way: npx @taraxvoid/voidflow init --kind tool --apply'
 
 describe('render', () => {
     test('fills version, sha, kind, repo, cron', () => {
@@ -113,7 +113,7 @@ describe('withMarker', () => {
         const y = withMarker('lefthook.yml', 'a: 1\n', ctx).split('\n')
         expect(y.slice(0, 2)).toEqual([`# ${L1}`, `# ${L2}`])
         const b = withMarker('biome.json', '{}\n', ctx).split('\n')
-        expect(b.slice(0, 2)).toEqual([`// ${L1}`, `// ${L2}`])
+        expect(b.join('\n')).toBe('{}\n')
         expect(withMarker('tsconfig.json', '{}\n', ctx).startsWith('// ')).toBe(
             true,
         )

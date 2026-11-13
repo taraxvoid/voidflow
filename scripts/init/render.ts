@@ -14,6 +14,10 @@ export type RenderCtx = {
     kind: Kind
     repo: string | null
     cronMinute: number
+    /** Agentic rollout stage; shadow when unset. */
+    stage?: 'shadow' | 'gate'
+    /** `@user`, `@org` or `@org/team` for CODEOWNERS; null renders a placeholder. */
+    owner?: string | null
 }
 
 /** Fill the init-time placeholders. A null sha pins the tag instead. */
@@ -28,12 +32,13 @@ export function render(template: string, ctx: RenderCtx): string {
         .replaceAll('{{kind}}', ctx.kind)
         .replaceAll('{{cron_minute}}', String(ctx.cronMinute))
         .replaceAll('{{repo}}', ctx.repo ?? 'OWNER/REPO')
+        .replaceAll('{{owner}}', ctx.owner ?? '@OWNER')
 }
 
 function markerLines(ctx: RenderCtx): [string, string] {
     return [
         `Written by voidflow v${ctx.version}: https://www.npmjs.com/package/@taraxvoid/voidflow`,
-        `Set up a repo the same way: npx @taraxvoid/voidflow init --kind ${ctx.kind}`,
+        `Set up a repo the same way: npx @taraxvoid/voidflow init --kind ${ctx.kind} --apply`,
     ]
 }
 
@@ -55,10 +60,15 @@ export function withMarker(
         const parsed = JSON.parse(content)
         return json({ ...parsed, description: lines })
     }
-    if (name === 'biome.json' || name === 'tsconfig.json')
-        return prefixed('// ')
+    // biome.json takes no comments: Biome 2.5 rejects them in a .json file.
+    if (name === 'tsconfig.json') return prefixed('// ')
     if (ext === '.json') return content
-    if (HASH.has(ext) || name === '.gitignore' || name === 'gitignore')
+    if (
+        HASH.has(ext) ||
+        name === '.gitignore' ||
+        name === 'gitignore' ||
+        name === 'CODEOWNERS'
+    )
         return prefixed('# ')
     if (SLASH.has(ext)) return prefixed('// ')
     if (ext === '.md') return `<!--\n${lines.join('\n')}\n-->\n\n${content}`

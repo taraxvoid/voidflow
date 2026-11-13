@@ -5,6 +5,9 @@ import {
     checkFleet,
     desired,
     diff,
+    type EnvPolicy,
+    envBranches,
+    envDiff,
     type Fleet,
     isPlanGated,
     mergeQueueIneligible,
@@ -38,6 +41,7 @@ const REPOS: Record<string, RepoConfig> = {
         bypass: {},
         aka: { main: ['main/prod'] },
         retire: [],
+        environments: { npm: ['main', 'prerelease', 'maintenance'] },
     },
 }
 
@@ -323,6 +327,9 @@ describe('raw rulesets (another fleet, --config)', () => {
                 },
                 'a/d': { checks: 'validate', codeowners: 'yes' },
                 'a/e': { linearhistory: false },
+                'a/f': { environments: { prod: [], npm: ['main', 'stable'] } },
+                'a/g': { environments: ['prod'] },
+                'a/h': { environments: { '': ['main'] } },
             })
         } catch (e) {
             msg = (e as Error).message
@@ -337,6 +344,10 @@ describe('raw rulesets (another fleet, --config)', () => {
             '"a/d".checks: not a list',
             '"a/d".codeowners: not a boolean',
             '"a/e".linearhistory: unknown field',
+            '"a/f".environments."prod": not a non-empty list of tiers',
+            '"a/f".environments."npm"[1]: unknown tier "stable"',
+            '"a/g".environments: not a object',
+            '"a/h".environments."": missing environment name',
         ]) {
             expect(msg).toContain(want)
         }
@@ -356,6 +367,7 @@ describe('tool()', () => {
             bypass: {},
             aka: {},
             retire: [],
+            environments: {},
         })
     })
 
@@ -445,5 +457,72 @@ describe('mergeQueueIneligible', () => {
                 private: true,
             }),
         ).toBeNull()
+    })
+})
+
+describe('environment branch policies', () => {
+    const missing: EnvPolicy = {
+        exists: false,
+        protectedBranches: false,
+        customBranchPolicies: false,
+        branches: [],
+        tags: [],
+    }
+    const env = (over: Partial<EnvPolicy>): EnvPolicy => ({
+        ...missing,
+        exists: true,
+        ...over,
+    })
+    const npm = envBranches(
+        REPOS['taraxvoid/voidflow'].environments.npm,
+        'main',
+    )
+
+    test('voidflow publishes to npm from main, next and release/* only', () => {
+        expect(npm).toEqual(['main', 'next', 'release/*'])
+    })
+
+    test('the main tier uses the actual default branch name, and tiers on one branch collapse', () => {
+        expect(envBranches(['main'], 'trunk')).toEqual(['trunk'])
+        expect(envBranches(['next', 'prerelease'], 'main')).toEqual(['next'])
+    })
+
+    test('an explicit list that matches is in sync', () => {
+        expect(
+            envDiff(env({ customBranchPolicies: true, branches: npm }), npm),
+        ).toEqual([])
+    })
+
+    test('"protected branches only" is drift, since it reads classic protection rather than rulesets', () => {
+        expect(envDiff(env({ protectedBranches: true }), ['main'])).toEqual([
+            '- protected branches only',
+            '+ selected branches',
+            '+ branch main',
+        ])
+    })
+
+    test('no policy at all says every branch may deploy', () => {
+        expect(envDiff(env({}), ['main'])).toEqual([
+            '- any branch may deploy',
+            '+ selected branches',
+            '+ branch main',
+        ])
+    })
+
+    test('a missing environment is reported, extra branches and tag policies are dropped', () => {
+        expect(envDiff(missing, ['main'])).toEqual([
+            '+ environment (missing)',
+            '+ branch main',
+        ])
+        expect(
+            envDiff(
+                env({
+                    customBranchPolicies: true,
+                    branches: ['main', 'feature/*'],
+                    tags: ['v*'],
+                }),
+                ['main'],
+            ),
+        ).toEqual(['- branch feature/*', '- tag v*'])
     })
 })

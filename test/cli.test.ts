@@ -3,6 +3,7 @@ import {
     mkdirSync,
     mkdtempSync,
     readFileSync,
+    realpathSync,
     renameSync,
     rmSync,
     writeFileSync,
@@ -78,8 +79,9 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
     test('without a command, prints usage and exits 2', async () => {
         const r = await voidflow([])
         expect(r.code).toBe(2)
-        expect(r.out).toContain('cf-tokens')
+        expect(r.out).toContain('tokens')
         expect(r.out).toContain('rulesets')
+        expect(r.out).not.toContain('cf-tokens')
     })
 
     test('--help exits 0', async () => {
@@ -101,23 +103,49 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
     })
 
     test('hands the remaining flags to the script', async () => {
-        for (const c of ['rulesets', 'cf-tokens']) {
-            const r = await voidflow([c])
+        for (const c of [['rulesets'], ['tokens', 'cf']]) {
+            const r = await voidflow(c)
             expect(r.code).toBe(2)
             expect(r.err).toContain('needs --config')
         }
     })
 
+    test('tokens needs a known provider', async () => {
+        for (const [args, want] of [
+            [[], 'needs a provider'],
+            [['bogus'], 'unknown provider "bogus"'],
+        ] as const) {
+            const r = await voidflow(['tokens', ...args])
+            expect(r.code).toBe(2)
+            expect(r.err).toContain(want)
+            expect(r.err).toContain('providers: cf')
+        }
+    })
+
+    test('tokens --help lists the providers', async () => {
+        const r = await voidflow(['tokens', '--help'])
+        expect(r.code).toBe(0)
+        expect(r.out).toContain('usage: voidflow tokens <provider>')
+        expect(r.out).toContain('providers: cf')
+    })
+
+    test('cf-tokens still works as a hidden alias for tokens cf', async () => {
+        const r = await voidflow(['cf-tokens'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('needs --config')
+    })
+
     test("a command's --help lists its flags, without needing --config", async () => {
         for (const [c, flag] of [
             ['rulesets', '--prune'],
-            ['cf-tokens', '--try <env>'],
+            ['tokens', '--try <env>'],
         ]) {
+            const argv = c === 'tokens' ? [c, 'cf'] : [c]
             for (const h of ['--help', '-h']) {
-                const r = await voidflow([c, h])
+                const r = await voidflow([...argv, h])
                 expect(r.code).toBe(0)
                 expect(r.out).toContain(
-                    `usage: voidflow ${c} --config <module>`,
+                    `usage: voidflow ${argv.join(' ')} --config <module>`,
                 )
                 expect(r.out).toContain(flag)
             }
@@ -139,12 +167,12 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         expect(r.out).toContain('--preset')
     })
 
-    test('init --dry-run plans the files from the shipped templates', async () => {
+    test('init plans by default, from the shipped templates', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
         roots.push(dir)
         expect(Bun.spawnSync(['git', 'init', '-q', dir]).exitCode).toBe(0)
         const r = await voidflow(
-            ['init', '--kind', 'tool', '--preset', 'files', '--dry-run', dir],
+            ['init', '--kind', 'tool', '--preset', 'files', dir],
             dir,
         )
         expect(r.err).toBe('')
@@ -164,6 +192,33 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         expect(r.code).toBe(2)
         expect(r.err).toContain(`${join(dir, 'rulesets.ts')}:`)
         expect(r.err).toContain('unknown tier "nope"')
+    })
+
+    test('plan finds a config dir and re-runs the tool under the same runtime', async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
+        roots.push(dir)
+        mkdirSync(join(dir, 'infra'))
+        mkdirSync(join(dir, 'home'))
+        writeFileSync(
+            join(dir, 'infra', 'rulesets.ts'),
+            "export default { orgs: { o: { repos: { r: { tiers: ['nope'] } } } } }",
+        )
+        const r = await run(
+            [...cli, 'plan', 'rulesets', '--config', 'infra'],
+            dir,
+            {
+                CF_TOKEN_ADMIN: '',
+                VOIDFLOW_CONFIG: '',
+                VOIDFLOW_CONFIG_BASE: '',
+                XDG_CONFIG_HOME: join(dir, 'home'),
+            },
+        )
+        expect(r.err).toContain(
+            // relative to the child's cwd, which the OS reports resolved
+            `plan rulesets | config ${join(realpathSync(dir), 'infra', 'rulesets.ts')} (flag)`,
+        )
+        expect(r.err).toContain('unknown tier "nope"')
+        expect(r.code).toBe(2)
     })
 })
 

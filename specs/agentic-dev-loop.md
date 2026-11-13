@@ -236,7 +236,7 @@ Candidate probes (deterministic, each emits structured findings):
   artifact poisoning, over-broad `permissions`, secrets reaching forks
 - drift between intended and actual repo settings and rulesets (reuse the
   `init` settings table and `rulesets-plan --check`)
-- stale or unused credentials (`cf-tokens` plan already knows last use)
+- stale or unused credentials (`tokens cf` plan already knows last use)
 - secret handling in IaC (SOPS recipients, plaintext in history)
 - data migrations: destructive statements, missing rollback
 - reachability of vulnerable dependencies from this repo's own code

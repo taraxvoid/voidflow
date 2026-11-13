@@ -59,14 +59,15 @@ tools:
 
 safe-outputs:
   add-labels:
-    allowed: ["deps:low-risk", "deps:needs-you"]
+    allowed: ["low-risk", "needs-you"]
     create-if-missing: true
     target: "${{ github.event.pull_request.number || inputs.pr }}" # this PR only, never "*"
     max: 1
+  # Agents may add `needs-you` but never clear it; only a human removes it.
   remove-labels:
-    allowed: ["deps:low-risk", "deps:needs-you"]
+    allowed: ["low-risk"]
     target: "${{ github.event.pull_request.number || inputs.pr }}" # this PR only, never "*"
-    max: 2
+    max: 1
   add-comment:
     target: "${{ github.event.pull_request.number || inputs.pr }}" # this PR only, never "*"
     max: 1
@@ -107,7 +108,7 @@ safe-outputs:
             PR: ${{ github.event.pull_request.number || inputs.pr }}
             # The commit the agent reviewed. Manual runs review the head at dispatch.
             EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
-            VOIDFLOW: "1.0.0-next.3" # x-release-please-version
+            VOIDFLOW: "1.0.0-next.4" # x-release-please-version
           run: |
             set -euo pipefail
             pr() { gh pr view "$PR" --repo "$REPO" --json "$1" --jq ".$1"; }
@@ -216,8 +217,9 @@ summarise the migration steps that apply to this repo.
 
 1. Call `deps_gate` exactly once with `verdict` set to `low-risk` or
    `needs-you`. Any other value, or no call, counts as needs you.
-2. Remove whichever of `deps:low-risk` / `deps:needs-you` no longer
-   applies, then add the one that does.
+2. Add the label that applies. If the verdict is `needs-you`, remove
+   `low-risk` if present. Never remove `needs-you`: a human may have set
+   it for another reason, and only a human clears it.
 3. One comment:
    - first line: **Low risk** or **Needs you**, with the reason in one
      sentence;

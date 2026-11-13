@@ -3,14 +3,14 @@
  * --config module (the org's infra repo), shaped as in cloudflare/tokens.ts.
  * Every invocation takes --config <module>, e.g. ../infra/cf-tokens.ts:
  *
- *   voidflow cf-tokens                          # plan (read-only), every repo
- *   voidflow cf-tokens --repo example_project          # plan one repo
- *   voidflow cf-tokens --check                  # plan, exit 1 on drift or a token due to rotate
- *   voidflow cf-tokens --apply                  # create/update/rotate, set the GitHub env secrets
- *   voidflow cf-tokens --apply --rotate         # ...and rotate every token now
- *   voidflow cf-tokens --apply --prune          # ...and delete the repo's `retire` tokens
- *   voidflow cf-tokens --groups                 # live names of the permission group ids used
- *   voidflow cf-tokens --repo example_project --try prod -- bunx wrangler deploy
+ *   voidflow tokens cf                          # plan (read-only), every repo
+ *   voidflow tokens cf --repo example_project          # plan one repo
+ *   voidflow tokens cf --check                  # plan, exit 1 on drift or a token due to rotate
+ *   voidflow tokens cf --apply                  # create/update/rotate, set the GitHub env secrets
+ *   voidflow tokens cf --apply --rotate         # ...and rotate every token now
+ *   voidflow tokens cf --apply --prune          # ...and delete the repo's `retire` tokens
+ *   voidflow tokens cf --groups                 # live names of the permission group ids used
+ *   voidflow tokens cf --repo example_project --try prod -- bunx wrangler deploy
  *                                               # run a command with a throwaway token scoped like prod's
  *
  * The module exports `REPOS` (or a default); see scripts/lib/config.ts.
@@ -29,6 +29,7 @@
 import {
     type Action,
     checkRepos,
+    D1_WRITE,
     type EnvConfig,
     envAccount,
     expiresOn,
@@ -77,7 +78,7 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
 Needs CF_TOKEN_ADMIN and gh with admin on the repos.`
 
 /** `prog` names the command in the --help usage. */
-export async function main(argv: string[], prog = 'voidflow cf-tokens') {
+export async function main(argv: string[], prog = 'voidflow tokens cf') {
     const { values, positionals } = parseOrExit(
         argv,
         { options: OPTIONS, allowPositionals: true },
@@ -177,6 +178,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             used.set(id, [...(used.get(id) ?? []), where])
         for (const id of WORKER_EDITOR) note(id, 'WORKER_EDITOR')
         note(WORKERS_ROUTES_WRITE, 'WORKERS_ROUTES_WRITE')
+        note(D1_WRITE, 'D1_WRITE')
         note(WORKERS_SCRIPTS_WRITE, 'WORKERS_SCRIPTS_WRITE')
         for (const acct of accounts) {
             const live = await cf<
@@ -424,7 +426,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const want = policies(cfg, env, ids, target.zones)
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
         console.log(
-            `  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`,
+            `  ${env.env}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, secret in ${scopeLabel(repo, env)}`,
         )
         // The list endpoint omits policies; fetch each match in full.
         const have = await Promise.all(
@@ -493,7 +495,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         )
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
         console.log(
-            `try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`,
+            `try ${t.id}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, until ${expires.toISOString()}`,
         )
         let code = 1
         try {

@@ -2,13 +2,19 @@
 
 voidflow uses release channels mapped to branches, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
-Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`.
+Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`. That environment is the only server-side
+limit on who can publish, so it deploys from `main`, `next` and `release/*`
+only: the infra repo's rulesets config lists it under voidflow's
+`environments`, and `rulesets-plan` reports drift.
 
-| Branch | Channel | Version | npm dist-tag | GitHub release |
-|---|---|---|---|---|
-| `main` | stable | `0.10.0` | `latest` | normal |
-| `next` | prerelease | `0.10.0-next`, then `-next.1`, `-next.2` | `next` | prerelease |
-| `release/N.x` | maintenance (patch-only) | `0.9.4` | `release-N.x` | normal |
+The versions below are examples of the shape each channel takes, not the
+current ones; those are in `.release-please/*-manifest.json`.
+
+| Branch        | Channel                  | Version                                  | npm dist-tag  | GitHub release |
+| ------------- | ------------------------ | ---------------------------------------- | ------------- | -------------- |
+| `main`        | stable                   | `0.10.0`                                 | `latest`      | normal         |
+| `next`        | prerelease               | `0.10.0-next`, then `-next.1`, `-next.2` | `next`        | prerelease     |
+| `release/N.x` | maintenance (patch-only) | `0.9.4`                                  | `release-N.x` | normal         |
 
 ```mermaid
 gitGraph
@@ -60,25 +66,33 @@ Check the stable release PR's version before merging it. release-please walks
 `feat` on `next` dated before the latest stable release (e.g. a hotfix released
 while the feature waited on `next`) is never counted and the PR proposes a
 patch bump. Fix it by pinning the version (below), then add the missed entries
-to the release PR's `CHANGELOG.md` by hand.
-
-A `Release-As` footer on `next` reaches `main` with the promotion, and
-release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
-start a prerelease line makes the stable release PR propose `1.0.0-next`.
+to both the release PR's body and its `CHANGELOG.md` by hand: release-please
+builds the GitHub release notes from the PR body, not from the file.
 
 To pin the version, set `"release-as": "X.Y.Z"` on the `.` package in
 `.release-please/main.json` with a squash-merged PR to `main`. It overrides any
-commit footer. Remove it in the first PR after that release, or every later
+commit footer, so if the file already pins a different version (check it
+first), update or remove that pin before relying on a footer for another
+version. Remove it in the first PR after that release, or every later
 release PR proposes the same version again. A `Release-As:` footer in a PR
 body isn't reliable: CodeRabbit appends its summary to the body, so the footer
 is no longer the last paragraph of the squash commit and isn't parsed.
+
+A `Release-As` footer on `next` reaches `main` with the promotion, and
+release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
+start a prerelease line makes the stable release PR propose `1.0.0-next`. The
+newest footer wins, so the same fix applies: a squash-merged PR to `main`
+ending `Release-As: 1.0.0`.
 
 ## Approve the npm release
 
 npm packages are published with `npm stage publish`: the workflow uploads each
 version to npm's staging area and it is not live until a human approves it
 with 2FA. Each release stages two packages (`@taraxvoid/voidflow` and the
-unscoped `voidflow` mirror), so approve both, via the Staged Packages tab on
+unscoped `voidflow` mirror), so approve both, `@taraxvoid/voidflow` first
+(`voidflow init` run from the mirror writes a dependency on the scoped
+package at the same version, which would not install until that is live),
+via the Staged Packages tab on
 npmjs.com or `npm stage approve <id>`. The GitHub release, `vX.Y.Z` tag and
 floating `v0` tag are created before approval; actions consumers pin git tags,
 so this is fine, but `npm install` of the new version works only after
@@ -157,3 +171,48 @@ gh attestation verify taraxvoid-voidflow-<version>.tgz \
 `npm pack <spec>` downloads the registry's tarball as is. Releases before the
 first one with this change have no attestation. A republish (`workflow_dispatch`)
 attests only what it actually publishes, and a dry run attests nothing.
+
+### Verify a release
+
+Releases are published with GitHub's
+[immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
+setting on: a published release's tag and assets cannot be moved, changed or
+deleted. GitHub records that with a signed release attestation for the tag,
+commit and assets, listed on the repo's
+[attestations page](https://github.com/taraxvoid/voidflow/attestations). The
+setting is a repo toggle that can be turned off, so do not take this page's word
+for it; ask GitHub:
+
+```sh
+gh release verify v<version> --repo taraxvoid/voidflow
+gh release verify-asset v<version> <file> --repo taraxvoid/voidflow
+```
+
+`verify` passes only if the release exists and is immutable. A release also
+shows the lock icon and "Immutable" label on its Releases page. `verify-asset`
+checks a local file against an asset of the release; it cannot check the
+auto-generated source zip or tarball.
+
+What this does and does not tell you:
+
+- The attestation is made when the release is published, so it is a point in
+  time record. A release published while the setting was on stays immutable,
+  and one published while it was off never gets an attestation, so a failing
+  `gh release verify` leaves that release unverified: investigate the error
+  before concluding it was mutable when published (it may be a transient or
+  auth failure). Immutability applies to future releases only: v0.5.0 and earlier
+  predate it and fail the check. `.github/immutable-since` names the first
+  release that is covered (v0.5.1).
+- The floating major tag (`v1` once 1.0.0 is out) is moved on every stable
+  release on purpose and is not covered. To get the guarantee, pin the full
+  `vX.Y.Z` tag or its commit SHA (see [Pinning](README.md#pinning)).
+- The release workflow runs `gh release verify` on every release it creates and
+  fails the run if it does not pass. A weekly workflow
+  (`.github/workflows/verify-releases.yml`) re-checks every release since the
+  baseline and opens an issue on a failure, so a release published without
+  immutability does not go unnoticed (it detects the release, not a change to
+  the repo setting). These are checks on our side; the attestation itself
+  is what you verify.
+- release-please creates the release with no uploaded assets, so there is no
+  draft-then-attach step that immutability could break. The npm tarballs are
+  separate and covered by the attestation above.

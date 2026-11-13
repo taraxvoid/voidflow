@@ -1,13 +1,14 @@
 /**
  * Thin adapter over the `gh` CLI so the settings code can be faked in tests.
  */
+import { isUpgradeMessage } from '../../rulesets/plan-gate.ts'
 import { capture } from '../lib/proc.ts'
 
 export type GhResult = { status: number; body: unknown }
 
 export interface Gh {
     rest(
-        method: 'GET' | 'PUT' | 'PATCH',
+        method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
         path: string,
         body?: unknown,
     ): Promise<GhResult>
@@ -165,4 +166,42 @@ export async function resolveRepo(
         throw new Error(`origin remote "${url}" is not a github.com repository`)
     }
     return `${m[1]}/${m[2]}`
+}
+
+/**
+ * True when GitHub refuses rulesets on `repo` because it is private on a plan
+ * without them, so CODEOWNERS would be written but never enforced. Any other
+ * outcome, including errors, is false: this only ever adds a note.
+ */
+export async function rulesetsPlanGated(
+    gh: Gh,
+    repo: string,
+): Promise<boolean> {
+    try {
+        const r = await gh.rest('GET', `repos/${repo}/rulesets`)
+        const message = object(r.body)?.message
+        return (
+            r.status === 403 &&
+            typeof message === 'string' &&
+            isUpgradeMessage(message)
+        )
+    } catch {
+        return false
+    }
+}
+
+/** `User`, `Organization`, or null when GitHub did not say (offline, no access). */
+export async function ownerType(
+    gh: Gh,
+    login: string,
+): Promise<'User' | 'Organization' | null> {
+    try {
+        const r = await gh.rest('GET', `users/${login}`)
+        const type = object(r.body)?.type
+        return r.status === 200 && (type === 'User' || type === 'Organization')
+            ? type
+            : null
+    } catch {
+        return null
+    }
 }

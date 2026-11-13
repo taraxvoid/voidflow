@@ -27,7 +27,7 @@ export type RepoInfo = {
 
 type Setting = {
     name: string
-    optIn?: 'pvr' | 'ai-scan'
+    optIn?: 'pvr' | 'ai-scan' | 'agentic'
     read(gh: Gh, repo: string, info: RepoInfo): Promise<boolean>
     write(gh: Gh, repo: string, info: RepoInfo): Promise<void>
 }
@@ -88,7 +88,7 @@ async function get(gh: Gh, path: string): Promise<GhResult> {
 
 async function send(
     gh: Gh,
-    method: 'PUT' | 'PATCH',
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
 ): Promise<void> {
@@ -201,6 +201,140 @@ export const SETTINGS: Setting[] = [
     },
 ]
 
+/**
+ * Labels the deps-review agent applies, created up front. Names follow
+ * rookery's convention: lowercase words joined by hyphens, so they never need
+ * quoting. `needs-you` is rookery's shared "blocked on a human" label, not a
+ * deps-only one. `was` is the old name: a repo that has it gets it deleted
+ * (nothing legacy is preserved).
+ */
+const AGENTIC_LABELS = [
+    {
+        name: 'low-risk',
+        was: 'deps:low-risk',
+        color: '0e8a16',
+        description: 'Dependency update judged low risk by deps-review',
+    },
+    {
+        name: 'needs-you',
+        was: 'deps:needs-you',
+        color: 'd93f0b',
+        description:
+            'Blocked on a human decision, whoever or whatever was working on it.',
+    },
+]
+
+async function labelExists(gh: Gh, repo: string, name: string) {
+    const r = await gh.rest(
+        'GET',
+        `repos/${repo}/labels/${encodeURIComponent(name)}`,
+    )
+    if (r.status === 404) return false
+    ok(r)
+    return true
+}
+
+function repoFlag(
+    name: string,
+    field:
+        | 'allow_auto_merge'
+        | 'allow_update_branch'
+        | 'delete_branch_on_merge',
+): Setting {
+    return {
+        name,
+        optIn: 'agentic',
+        async read(gh, repo) {
+            return (
+                object((await get(gh, `repos/${repo}`)).body)?.[field] === true
+            )
+        },
+        write: (gh, repo) =>
+            send(gh, 'PATCH', `repos/${repo}`, { [field]: true }),
+    }
+}
+
+function agenticSettings(): Setting[] {
+    return [
+        repoFlag('auto-merge', 'allow_auto_merge'),
+        repoFlag('update-branch', 'allow_update_branch'),
+        repoFlag('delete-branch-on-merge', 'delete_branch_on_merge'),
+        {
+            name: 'actions-permissions',
+            optIn: 'agentic',
+            // Read-only token, and Actions must never approve PRs: deps-review
+            // must not be able to approve what it reviews.
+            async read(gh, repo) {
+                const b = object(
+                    (
+                        await get(
+                            gh,
+                            `repos/${repo}/actions/permissions/workflow`,
+                        )
+                    ).body,
+                )
+                return (
+                    b?.default_workflow_permissions === 'read' &&
+                    b?.can_approve_pull_request_reviews === false
+                )
+            },
+            write: (gh, repo) =>
+                send(gh, 'PUT', `repos/${repo}/actions/permissions/workflow`, {
+                    default_workflow_permissions: 'read',
+                    can_approve_pull_request_reviews: false,
+                }),
+        },
+        {
+            name: 'fork-pr-approval',
+            optIn: 'agentic',
+            // Runs from any outside contributor's fork PR wait for approval,
+            // so agent-driven workflows never run untrusted code unprompted.
+            async read(gh, repo) {
+                const b = object(
+                    (
+                        await get(
+                            gh,
+                            `repos/${repo}/actions/permissions/fork-pr-contributor-approval`,
+                        )
+                    ).body,
+                )
+                return b?.approval_policy === 'all_external_contributors'
+            },
+            write: (gh, repo) =>
+                send(
+                    gh,
+                    'PUT',
+                    `repos/${repo}/actions/permissions/fork-pr-contributor-approval`,
+                    { approval_policy: 'all_external_contributors' },
+                ),
+        },
+        ...AGENTIC_LABELS.map(
+            (label): Setting => ({
+                name: `label-${label.name}`,
+                optIn: 'agentic',
+                read: (gh, repo) => labelExists(gh, repo, label.name),
+                async write(gh, repo) {
+                    const { name, color, description } = label
+                    if (await labelExists(gh, repo, label.was)) {
+                        await send(
+                            gh,
+                            'DELETE',
+                            `repos/${repo}/labels/${encodeURIComponent(label.was)}`,
+                        )
+                    }
+                    await send(gh, 'POST', `repos/${repo}/labels`, {
+                        name,
+                        color,
+                        description,
+                    })
+                },
+            }),
+        ),
+    ]
+}
+
+SETTINGS.push(...agenticSettings())
+
 export function settingNames(): string[] {
     return SETTINGS.map((s) => s.name)
 }
@@ -243,6 +377,7 @@ export async function runSettings(
         skip: Set<string>
         enablePvr: boolean
         enableAiScan: boolean
+        enableAgentic?: boolean
         dryRun: boolean
     },
 ): Promise<SettingResult[]> {
@@ -250,6 +385,7 @@ export async function runSettings(
         if (sel.skip.has(s.name)) return false
         if (s.optIn === 'pvr') return sel.enablePvr
         if (s.optIn === 'ai-scan') return sel.enableAiScan
+        if (s.optIn === 'agentic') return sel.enableAgentic
         return true
     })
     let info: RepoInfo
@@ -300,9 +436,18 @@ export async function runSettings(
     return results
 }
 
-export function manualReminders(repo: string, enableAiScan: boolean): string[] {
+export function manualReminders(
+    repo: string,
+    enableAiScan: boolean,
+    enableAgentic = false,
+): string[] {
     const url = `https://github.com/${repo}/settings/security_analysis`
     const lines = [`Turn on Dependabot malware alerts (no API): ${url}`]
+    if (enableAgentic) {
+        lines.push(
+            `Add the COPILOT_GITHUB_TOKEN secret for the deps-review engine (cannot be created from nothing), as an Actions secret (https://github.com/${repo}/settings/secrets/actions) and again as a Dependabot secret (https://github.com/${repo}/settings/secrets/dependabot)`,
+        )
+    }
     if (enableAiScan) {
         lines.push(
             `Turn on AI Scan for repositories (preview, no API): ${url}`,

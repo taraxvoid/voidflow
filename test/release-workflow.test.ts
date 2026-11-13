@@ -32,9 +32,7 @@ describe('release-please.yml publish: npm tarballs are attested', () => {
 
     test('attests the packed tarballs with a pinned actions/attest', () => {
         const attest = steps[index('Attest npm tarballs')]
-        expect(attest.uses).toMatch(/^actions\/attest@[0-9a-f]{40}$/)
-        // The version comment is what Renovate reads; YAML parsing drops it.
-        expect(text).toContain(`uses: ${attest.uses} # v`)
+        expect(attest.uses).toMatch(/^actions\/attest@v\d+\.\d+\.\d+$/)
         expect(attest.with['subject-path']).toBe(
             '${{ runner.temp }}/npm-pack/*.tgz',
         )

@@ -79,6 +79,16 @@ export type RepoConfig = {
      * a site that moved to a single stable main). Only deleted with --prune.
      */
     retire: string[]
+    /**
+     * Deployment environments whose branch policy follows the tiers: each
+     * environment named here may only be deployed to from the branches of the
+     * tiers listed, e.g. `{ prod: ['main'] }` or, for a package published from
+     * every release channel, `{ npm: ['main', 'prerelease', 'maintenance'] }`.
+     * The policy is an explicit branch list, not "protected branches only",
+     * which GitHub reads from classic branch protection and which allows every
+     * branch when a repo has none. An environment not listed is left alone.
+     */
+    environments: Record<string, Tier[]>
 }
 
 /**
@@ -110,6 +120,7 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     bypass: {},
     aka: {},
     retire: [],
+    environments: {},
     ...over,
 })
 
@@ -240,6 +251,51 @@ export function desired(
     }))
 }
 
+// ---- environment branch policies -------------------------------------------
+
+/**
+ * Branch name patterns an environment's deployment branch policy allows, for
+ * the given tiers. GitHub's policy patterns take branch names, not refs, so
+ * the main tier needs the repo's actual default branch.
+ */
+export function envBranches(tiers: Tier[], defaultBranch: string): string[] {
+    const name = (t: Tier) =>
+        t === 'main' ? defaultBranch : REFS[t].replace(/^refs\/heads\//, '')
+    return [...new Set(tiers.map(name))].sort()
+}
+
+/** What `repos/<repo>/environments/<env>` reports, reduced to the policy. */
+export type EnvPolicy = {
+    /** False when the environment does not exist yet. */
+    exists: boolean
+    protectedBranches: boolean
+    customBranchPolicies: boolean
+    /** Names of the `branch` type custom policies. */
+    branches: string[]
+    /** Custom policies of type `tag`; an env that wants only branches drops them. */
+    tags: string[]
+}
+
+/** Lines describing how `have` differs from an explicit list of `want` branches. */
+export function envDiff(have: EnvPolicy, want: string[]): string[] {
+    if (!have.exists)
+        return ['+ environment (missing)', ...want.map((b) => `+ branch ${b}`)]
+    const lines: string[] = []
+    if (have.protectedBranches) lines.push('- protected branches only')
+    if (!have.customBranchPolicies) {
+        if (!have.protectedBranches) lines.push('- any branch may deploy')
+        lines.push('+ selected branches')
+    }
+    const current = have.customBranchPolicies ? have.branches : []
+    for (const b of current.filter((b) => !want.includes(b)))
+        lines.push(`- branch ${b}`)
+    for (const b of want.filter((b) => !current.includes(b)))
+        lines.push(`+ branch ${b}`)
+    if (have.customBranchPolicies)
+        for (const t of have.tags) lines.push(`- tag ${t}`)
+    return lines
+}
+
 // ---- config from elsewhere ------------------------------------------------
 
 const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
@@ -313,6 +369,19 @@ export function checkFleet(x: unknown): Fleet {
         ).entries()) {
             if (!TIERS.includes(t))
                 bad(`${at}.tiers[${i}]`, `unknown tier ${JSON.stringify(t)}`)
+        }
+        for (const [env, tiers] of Object.entries(
+            isObj(full.environments) ? full.environments : {},
+        )) {
+            const ep = `${at}.environments.${JSON.stringify(env)}`
+            if (!isStr(env)) bad(ep, 'missing environment name')
+            if (!Array.isArray(tiers) || tiers.length === 0) {
+                bad(ep, 'not a non-empty list of tiers')
+                continue
+            }
+            for (const [i, t] of tiers.entries())
+                if (!TIERS.includes(t))
+                    bad(`${ep}[${i}]`, `unknown tier ${JSON.stringify(t)}`)
         }
         out[repo] = full as RepoConfig
     }
@@ -396,18 +465,7 @@ export function diff(have: unknown, want: unknown): string[] {
 
 // ---- plan gating ------------------------------------------------------------
 
-/**
- * True when a `gh api` error is GitHub refusing rulesets because the repo is
- * private on a plan without them (free personal accounts). That is a property
- * of the plan, not drift, so the script skips the repo instead of failing.
- * Other errors, including other 403s, still abort the run.
- */
-export function isPlanGated(message: string): boolean {
-    return (
-        /\(HTTP 403\)/.test(message) &&
-        /Upgrade to GitHub Pro|make this repository public/.test(message)
-    )
-}
+export { isPlanGated } from './plan-gate.ts'
 
 // ---- merge queue eligibility ------------------------------------------------
 

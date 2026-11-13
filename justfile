@@ -120,6 +120,7 @@ config_base := "env VOIDFLOW_CONFIG_BASE=" + quote(invocation_directory())
 
 # The rulesets-* and cf-tokens-* recipes all take --config <module>: the fleet
 # map in your infra repo (e.g. taraxvoid/infra), whose justfile wraps these.
+# cf-tokens-* call `voidflow tokens cf`.
 
 # Show how each repo's branch rulesets differ from the config (read-only; needs gh)
 rulesets-plan *args:
@@ -131,7 +132,7 @@ rulesets-apply *args:
 
 # CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
 cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
-cf_tokens := cf_admin + " " + config_base + " bun scripts/cli.ts cf-tokens"
+cf_tokens := cf_admin + " " + config_base + " bun scripts/cli.ts tokens cf"
 
 # Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
 cf-tokens-plan *args:
@@ -178,7 +179,12 @@ cut-maintenance tag branch:
     # A branch cut from an older tag still runs that tag's workflows, so bring
     # the current release tooling with it or releases from it would publish
     # without dist-tags (or not run at all).
-    for f in .github/workflows/release-please.yml .github/workflows/ci.yml scripts/release-channel.ts .release-please/maintenance.json; do
+    for f in .github/workflows/release-please.yml .github/workflows/ci.yml scripts/release-channel.ts scripts/verify-releases.ts .release-please/maintenance.json; do
+        # The verifier only exists on main once this has been promoted; the
+        # workflow copied from main needs it exactly when it is there.
+        if [ "$f" = scripts/verify-releases.ts ] && ! git cat-file -e "origin/main:$f" 2>/dev/null; then
+            continue
+        fi
         mkdir -p "$dir/$(dirname "$f")"
         git show "origin/main:$f" > "$dir/$f"
     done
