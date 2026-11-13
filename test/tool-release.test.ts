@@ -160,8 +160,8 @@ describe('tool-release.yml publish: the npm tarball is attested', () => {
         )
         expect(index('Attest npm tarball')).toBeLessThan(index('Stage on npm'))
         const attest = publish[index('Attest npm tarball')]
-        expect(attest.uses).toMatch(/^actions\/attest@[0-9a-f]{40}$/)
-        expect(text).toContain(`uses: ${attest.uses} # v`)
+        expect(attest.uses).toMatch(/^actions\/attest@v\d+\.\d+\.\d+$/)
+        expect(text).toContain(`uses: ${attest.uses}\n`)
         expect(attest.with['subject-path']).toBe(
             '${{ runner.temp }}/npm-pack/*.tgz',
         )
@@ -205,9 +205,9 @@ describe('tool-release.yml publish: the npm tarball is attested', () => {
         }
     })
 
-    test('every job pins its actions to a commit', () => {
+    test('every job pins its actions to a version tag (commits live in actions.lock)', () => {
         for (const job of Object.values<any>(wf.jobs))
             for (const s of job.steps ?? [])
-                if (s.uses) expect(s.uses).toMatch(/@[0-9a-f]{40}$/)
+                if (s.uses) expect(s.uses).toMatch(/@v\d+\.\d+\.\d+$/)
     })
 })
