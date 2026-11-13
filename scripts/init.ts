@@ -63,7 +63,7 @@ const OPTIONS = {
 
 const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
 
-  --kind tool|site        which starter files to write (not needed with --preset settings)
+  --kind tool|site        required, except with --preset settings (it writes no files)
   --preset <name>         ${Object.keys(PRESETS).join('|')} (default full)
   --skip-file <name>      leave this file out (repeatable)
   --skip-setting <name>   leave this setting alone (repeatable)
