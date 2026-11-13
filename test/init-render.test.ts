@@ -18,7 +18,7 @@ const ctx: RenderCtx = {
 const L1 =
     'Written by voidflow v1.2.3: https://www.npmjs.com/package/@taraxvoid/voidflow'
 const L2 =
-    'Set up a repo the same way: npx @taraxvoid/voidflow init --kind tool'
+    'Set up a repo the same way: npx @taraxvoid/voidflow init --kind tool --apply'
 
 describe('render', () => {
     test('fills version, sha, kind, repo, cron', () => {

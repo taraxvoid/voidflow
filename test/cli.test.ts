@@ -167,12 +167,12 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         expect(r.out).toContain('--preset')
     })
 
-    test('init --dry-run plans the files from the shipped templates', async () => {
+    test('init plans by default, from the shipped templates', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
         roots.push(dir)
         expect(Bun.spawnSync(['git', 'init', '-q', dir]).exitCode).toBe(0)
         const r = await voidflow(
-            ['init', '--kind', 'tool', '--preset', 'files', '--dry-run', dir],
+            ['init', '--kind', 'tool', '--preset', 'files', dir],
             dir,
         )
         expect(r.err).toBe('')

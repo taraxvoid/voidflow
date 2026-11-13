@@ -38,7 +38,7 @@ export function render(template: string, ctx: RenderCtx): string {
 function markerLines(ctx: RenderCtx): [string, string] {
     return [
         `Written by voidflow v${ctx.version}: https://www.npmjs.com/package/@taraxvoid/voidflow`,
-        `Set up a repo the same way: npx @taraxvoid/voidflow init --kind ${ctx.kind}`,
+        `Set up a repo the same way: npx @taraxvoid/voidflow init --kind ${ctx.kind} --apply`,
     ]
 }
 
