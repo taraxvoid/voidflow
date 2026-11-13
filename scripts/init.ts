@@ -13,6 +13,7 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
+import { colorEnabled, type Paint, painter, statusStyle } from './init/color.ts'
 import {
     applyFiles,
     FILE_ITEMS,
@@ -79,6 +80,8 @@ const OPTIONS = {
     owner: { type: 'string' },
     config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
+    'dry-run': { type: 'boolean', default: false },
+    'no-color': { type: 'boolean', default: false },
     apply: { type: 'boolean', default: false },
 } as const
 
@@ -94,6 +97,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --repo owner/name       the GitHub repo (default: the origin remote)
   --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
   --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
+  --no-color              no ANSI colors (also off when NO_COLOR is set or stdout is not a terminal; FORCE_COLOR=1 forces them on)
   --apply                 write the files and change the settings (default: plan only)
   -f, --force             with --apply, overwrite files that differ
 
@@ -118,8 +122,14 @@ function fail(msg: string, prog: string): never {
     process.exit(2)
 }
 
-const row = (status: string, name: string, extra = '') =>
-    `  ${status.padEnd(16)}${extra ? `${name.padEnd(28)} ${extra}` : name}`
+/** Set once per run from the flags and environment; plain text until then. */
+let paint: Paint = (_style, text) => text
+
+const row = (status: string, name: string, extra = '') => {
+    const style = statusStyle(status)
+    const label = status.padEnd(16)
+    return `  ${style ? paint(style, label) : label}${extra ? `${name.padEnd(28)} ${extra}` : name}`
+}
 
 /** The cron minute from a voidflow-written ci.yml, so a re-run stays unchanged. */
 function existingCronMinute(dir: string): number | null {
@@ -302,6 +312,8 @@ export async function main(
     }
 
     const out: string[] = []
+    const refusal: string[] = []
+    paint = painter(colorEnabled(values['no-color']))
     const notes: string[] = []
     let exitCode = 0
 
@@ -368,19 +380,51 @@ export async function main(
             ctx,
         )
         const conflicts = fileActions.filter((a) => a.status === 'conflict')
-        out.push(dryRun ? 'files (dry run):' : 'files:')
-        for (const a of fileActions)
+        const blocked = conflicts.length > 0
+        // Rows that would change a file read "would ..." whenever nothing is
+        // written (dry run, or blocked by a conflict), so a row never claims
+        // a change that did not happen.
+        const writesNothing = dryRun || blocked
+        const changes = new Set(['create', 'overwrite', 'merge'])
+        out.push(
+            blocked
+                ? 'files (nothing written):'
+                : dryRun
+                  ? 'files (dry run):'
+                  : 'files:',
+        )
+        for (const a of fileActions) {
+            const status =
+                writesNothing && changes.has(a.status)
+                    ? `would ${a.status}`
+                    : a.status
+            const detail =
+                a.detail ??
+                (a.status === 'conflict'
+                    ? 'exists and differs from the voidflow template'
+                    : '')
             out.push(
                 row(
-                    a.status,
+                    status,
                     a.name,
-                    [a.target, a.detail].filter(Boolean).join('  '),
+                    [a.target, detail].filter(Boolean).join('  '),
                 ),
             )
-        if (conflicts.length > 0) {
+        }
+        if (blocked) {
             exitCode = 1
-            out.push(
-                `  nothing written: ${conflicts.length} file(s) differ (${conflicts.map((a) => a.target).join(', ')}); re-run with --apply --force to overwrite`,
+            // Printed first, above every section, so the refusal is the
+            // first thing read.
+            refusal.push(
+                paint(
+                    'red',
+                    `refused: nothing was written, ${conflicts.length} existing file(s) differ from the voidflow templates:`,
+                ),
+                ...conflicts.map(
+                    (a) => `  ${a.target}${a.detail ? `  (${a.detail})` : ''}`,
+                ),
+                `re-run with ${paint('bold', '--force')} to overwrite them, or ${paint('bold', '--skip <name>')} to leave one alone`,
+                '',
             )
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
@@ -577,6 +621,7 @@ export async function main(
         )
     }
     if (dryRun) out.push('plan only: re-run with --apply to make these changes')
-    console.log(out.join('\n'))
+    console.log([...refusal, ...out].join('\n'))
+
     process.exit(exitCode)
 }
