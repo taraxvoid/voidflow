@@ -27,6 +27,8 @@
  * read or changed.
  */
 
+import { dirname } from 'node:path'
+import { toFleet } from '../config/index.ts'
 import {
     checkFleet,
     desired,
@@ -44,6 +46,7 @@ import {
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
 import { capture } from './lib/proc.ts'
+import { loadVoidflowConfig, repoSlug } from './lib/repo-config.ts'
 
 const OPTIONS = {
     apply: { type: 'boolean', default: false },
@@ -51,11 +54,16 @@ const OPTIONS = {
     check: { type: 'boolean', default: false },
     repo: { type: 'string' },
     config: { type: 'string' },
+    'repo-config': { type: 'string' },
 } as const
 
-const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
+const usage = (
+    prog: string,
+) => `usage: ${prog} (--config <module> | --repo-config <file>) [flags]
 
   --config <module>  the fleet map: a module exporting REPOS (or a default)
+  --repo-config <file>  a voidflow.config.ts: manage the repo it sits in
+                     (set by the verbs; takes no --repo)
   --repo <name>      only this repo (owner/name, or just name)
   --check            exit 1 on drift
   --apply            create and update rulesets to match
@@ -348,7 +356,32 @@ async function syncEnvs(
 export async function main(argv: string[], prog = 'voidflow rulesets') {
     const { values } = parseOrExit(argv, { options: OPTIONS }, usage(prog))
 
-    const REPOS = await loadOrExit(values.config, checkFleet)
+    const repoConfig = values['repo-config']
+    if (repoConfig !== undefined && values.config !== undefined) {
+        console.error(`${prog}: --repo-config and --config are alternatives`)
+        process.exit(2)
+    }
+    if (repoConfig !== undefined && values.repo !== undefined) {
+        console.error(
+            `${prog}: --repo does not apply to a per-repo config; it manages the repo it sits in`,
+        )
+        process.exit(2)
+    }
+
+    let REPOS: Fleet
+    if (repoConfig === undefined) {
+        REPOS = await loadOrExit(values.config, checkFleet)
+    } else {
+        try {
+            REPOS = toFleet(
+                await loadVoidflowConfig(repoConfig),
+                await repoSlug(process.env, dirname(repoConfig)),
+            )
+        } catch (e) {
+            console.error((e as Error).message)
+            process.exit(2)
+        }
+    }
 
     const repos = Object.keys(REPOS).filter(
         (r) =>

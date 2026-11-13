@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+    chmodSync,
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -135,5 +141,58 @@ describe('loadVoidflowConfig', () => {
             expect(err?.message.startsWith(path)).toBe(true)
             expect(err?.message).toContain(message)
         }
+    })
+})
+
+describe('rulesets --repo-config', () => {
+    const cli = join(import.meta.dir, '..', 'scripts', 'cli.ts')
+
+    /** Run `voidflow rulesets ...`, with a `gh` on PATH that only leaves a marker file. */
+    function run(args: string[]) {
+        const shim = tmp()
+        const marker = join(shim, 'gh-called')
+        const gh = join(shim, 'gh')
+        writeFileSync(gh, `#!/bin/sh\ntouch '${marker}'\nexit 1\n`)
+        chmodSync(gh, 0o755)
+        const r = Bun.spawnSync([process.execPath, cli, 'rulesets', ...args], {
+            env: {
+                ...process.env,
+                PATH: `${shim}:${process.env.PATH}`,
+                GITHUB_REPOSITORY: 'o/n',
+            },
+        })
+        return {
+            code: r.exitCode,
+            err: r.stderr.toString(),
+            ghCalled: existsSync(marker),
+        }
+    }
+
+    test('is refused together with --config', () => {
+        const r = run(['--repo-config', 'a.ts', '--config', 'b.ts'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('--repo-config and --config')
+    })
+
+    test('is refused together with --repo', () => {
+        const r = run(['--repo-config', 'a.ts', '--repo', 'x'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('per-repo')
+    })
+
+    test('a config that does not load exits 2 naming the file, before any gh call', () => {
+        const path = join(tmp(), CONFIG_FILE)
+        writeFileSync(path, "export default { kind: 'sit' }")
+        const r = run(['--repo-config', path])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(path)
+        expect(r.ghCalled).toBe(false)
+    })
+
+    test('a valid config reaches gh for its repo', () => {
+        const path = join(tmp(), CONFIG_FILE)
+        writeFileSync(path, "export default { kind: 'tool' }")
+        const r = run(['--repo-config', path])
+        expect(r.ghCalled).toBe(true)
     })
 })
