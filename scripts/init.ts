@@ -87,7 +87,7 @@ const OPTIONS = {
 
 const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
 
-  --kind tool|site        which starter files to write (not needed with --preset settings)
+  --kind tool|site        required, except with --preset settings (it writes no files)
   --preset <name>         ${Object.keys(PRESETS).join('|')}(default full)
   --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
