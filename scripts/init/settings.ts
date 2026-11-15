@@ -442,7 +442,7 @@ export function manualReminders(
     enableAgentic = false,
 ): string[] {
     const url = `https://github.com/${repo}/settings/security_analysis`
-    const lines = [`Turn on Dependabot malware alerts (no API): ${url}`]
+    const lines = [`Turn on Dependabot malware alerts (no API setting): ${url}`]
     if (enableAgentic) {
         lines.push(
             `Add the COPILOT_GITHUB_TOKEN secret for the deps-review engine (cannot be created from nothing), as an Actions secret (https://github.com/${repo}/settings/secrets/actions) and again as a Dependabot secret (https://github.com/${repo}/settings/secrets/dependabot)`,
@@ -450,8 +450,8 @@ export function manualReminders(
     }
     if (enableAiScan) {
         lines.push(
-            `Turn on AI Scan for repositories (preview, no API): ${url}`,
-            `Turn on code scanning for AI applications (preview, no API): ${url}`,
+            `Turn on AI Scan for repositories (preview, no API setting): ${url}`,
+            `Turn on code scanning for AI applications (preview, no API setting): ${url}`,
         )
     }
     return lines
