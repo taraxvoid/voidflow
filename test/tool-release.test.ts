@@ -161,6 +161,7 @@ describe('tool-release.yml publish: the npm tarball is attested', () => {
         expect(index('Attest npm tarball')).toBeLessThan(index('Stage on npm'))
         const attest = publish[index('Attest npm tarball')]
         expect(attest.uses).toMatch(/^actions\/attest@v\d+\.\d+\.\d+$/)
+        expect(text).toContain(`uses: ${attest.uses}\n`)
         expect(attest.with['subject-path']).toBe(
             '${{ runner.temp }}/npm-pack/*.tgz',
         )

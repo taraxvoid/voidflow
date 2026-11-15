@@ -124,6 +124,15 @@ export const tool = (over: Partial<RepoConfig> = {}): RepoConfig => ({
     ...over,
 })
 
+/**
+ * Sites run a single `main` that deploys to prod (previews on PRs), so the old
+ * next and live protection is retired. Retire only acts with --prune.
+ */
+export const SITE_RETIRE = ['next (staging)', 'live (prod)']
+
+export const site = (over: Partial<RepoConfig> = {}): RepoConfig =>
+    tool({ retire: [...SITE_RETIRE], ...over })
+
 const NAMES: Record<Tier, string> = {
     main: 'main (prod)',
     next: 'next (staging)',
@@ -329,6 +338,9 @@ export function checkFleet(x: unknown): Fleet {
         }
         if ('rulesets' in cfg) {
             out[repo] = cfg as RawConfig
+            for (const k of Object.keys(cfg))
+                if (k !== 'rulesets' && k !== 'retire')
+                    bad(`${at}.${k}`, 'unknown field')
             if (!strList(cfg.retire)) bad(`${at}.retire`, 'not a list')
             if (!Array.isArray(cfg.rulesets)) {
                 bad(`${at}.rulesets`, 'not a list')
@@ -382,6 +394,15 @@ export function checkFleet(x: unknown): Fleet {
             for (const [i, t] of tiers.entries())
                 if (!TIERS.includes(t))
                     bad(`${ep}[${i}]`, `unknown tier ${JSON.stringify(t)}`)
+        }
+        for (const [t, actors] of Object.entries(
+            isObj(full.bypass) ? full.bypass : {},
+        )) {
+            const bp = `${at}.bypass.${t}`
+            if (!TIERS.includes(t as Tier))
+                bad(bp, `unknown tier ${JSON.stringify(t)}`)
+            else if (!Array.isArray(actors) || !actors.every(isObj))
+                bad(bp, 'not a list of bypass actors')
         }
         out[repo] = full as RepoConfig
     }
