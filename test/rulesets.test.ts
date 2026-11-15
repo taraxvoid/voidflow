@@ -330,6 +330,7 @@ describe('raw rulesets (another fleet, --config)', () => {
                 'a/f': { environments: { prod: [], npm: ['main', 'stable'] } },
                 'a/g': { environments: ['prod'] },
                 'a/h': { environments: { '': ['main'] } },
+                'a/i': { bypass: { main: {}, dev: [] } },
             })
         } catch (e) {
             msg = (e as Error).message
@@ -348,6 +349,8 @@ describe('raw rulesets (another fleet, --config)', () => {
             '"a/f".environments."npm"[1]: unknown tier "stable"',
             '"a/g".environments: not a object',
             '"a/h".environments."": missing environment name',
+            '"a/i".bypass.main: not a list of bypass actors',
+            '"a/i".bypass.dev: unknown tier "dev"',
         ]) {
             expect(msg).toContain(want)
         }

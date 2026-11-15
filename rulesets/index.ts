@@ -392,6 +392,15 @@ export function checkFleet(x: unknown): Fleet {
                 if (!TIERS.includes(t))
                     bad(`${ep}[${i}]`, `unknown tier ${JSON.stringify(t)}`)
         }
+        for (const [t, actors] of Object.entries(
+            isObj(full.bypass) ? full.bypass : {},
+        )) {
+            const bp = `${at}.bypass.${t}`
+            if (!TIERS.includes(t as Tier))
+                bad(bp, `unknown tier ${JSON.stringify(t)}`)
+            else if (!Array.isArray(actors) || !actors.every(isObj))
+                bad(bp, 'not a list of bypass actors')
+        }
         out[repo] = full as RepoConfig
     }
     if (errs.length) throw new Error(errs.join('\n'))
