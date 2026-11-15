@@ -94,7 +94,7 @@ version and `--force` to overwrite the ones that differ.
 
 | Flag | Effect |
 |---|---|
-| `--kind tool\|site` | which starter files to write (not needed with `--preset settings` or `rulesets --config`) |
+| `--kind tool\|site` | which starter files to write; required except with `--preset settings` or `rulesets --config` |
 | `--skip <name>` | leave one file or setting out (repeatable, [names below](#skip-names)) |
 | `--config <file\|dir>` | the fleet rulesets config in your infra repo (a directory means its `rulesets.ts`). With `--preset rulesets`, apply this repo's entry from it instead of the default `tool()` (required for `--kind site`). Otherwise, add the repo to it (as `'owner/name': {},`, or under `orgs.<owner>.repos` in an [org-grouped](docs/fleet.md#config-shapes) config); comments and other entries are left as written. Review and commit that file, then run `voidflow plan rulesets` and `voidflow apply rulesets --repo <name>` |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |

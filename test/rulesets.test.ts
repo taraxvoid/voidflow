@@ -331,6 +331,7 @@ describe('raw rulesets (another fleet, --config)', () => {
                 'a/g': { environments: ['prod'] },
                 'a/h': { environments: { '': ['main'] } },
                 'a/i': { bypass: { main: {}, dev: [] } },
+                'a/j': { rulesets: [], retire: [], tiers: ['main'] },
             })
         } catch (e) {
             msg = (e as Error).message
@@ -351,6 +352,7 @@ describe('raw rulesets (another fleet, --config)', () => {
             '"a/h".environments."": missing environment name',
             '"a/i".bypass.main: not a list of bypass actors',
             '"a/i".bypass.dev: unknown tier "dev"',
+            '"a/j".tiers: unknown field',
         ]) {
             expect(msg).toContain(want)
         }

@@ -338,6 +338,9 @@ export function checkFleet(x: unknown): Fleet {
         }
         if ('rulesets' in cfg) {
             out[repo] = cfg as RawConfig
+            for (const k of Object.keys(cfg))
+                if (k !== 'rulesets' && k !== 'retire')
+                    bad(`${at}.${k}`, 'unknown field')
             if (!strList(cfg.retire)) bad(`${at}.retire`, 'not a list')
             if (!Array.isArray(cfg.rulesets)) {
                 bad(`${at}.rulesets`, 'not a list')
