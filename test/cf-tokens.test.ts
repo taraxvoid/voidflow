@@ -538,6 +538,13 @@ describe('voidflow tokens cf --repo-config', () => {
         expect(r.err).toContain('no cloudflare section')
     })
 
+    test('a relative --repo-config resolves against the working directory', async () => {
+        const r = await run(['--repo-config', 'voidflow.config.ts'])
+        expect(r.err).not.toContain('Cannot find')
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+    })
+
     test('names the missing admin variable', async () => {
         const r = await run(['--repo-config', '@file'])
         expect(r.code).toBe(2)

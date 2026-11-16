@@ -95,7 +95,8 @@ export async function loadVoidflowConfig(
     }
     let mod: { default?: unknown }
     try {
-        mod = (await import(file)) as { default?: unknown }
+        // A relative path means the working directory, not this module's.
+        mod = (await import(resolve(file))) as { default?: unknown }
     } catch (e) {
         return fail(e instanceof Error ? e.message : String(e))
     }
