@@ -12,12 +12,14 @@ import {
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
+    applyHint,
     applyTargetError,
     credentialSource,
     repoModeError,
     repoToolArgs,
     splitVerbArgs,
     toolArgs,
+    verbChildEnv,
     worstExit,
 } from '../scripts/verbs.ts'
 
@@ -208,6 +210,40 @@ describe('toolArgs', () => {
             '--config',
             '/r.ts',
         ])
+    })
+})
+
+describe('applyHint', () => {
+    test('includes the fleet tool, config, target, and forwarded flags', () => {
+        expect(
+            applyHint(
+                'rulesets',
+                '/infra/rulesets.ts',
+                ['--repo', 'o/site', '--prune'],
+                false,
+            ),
+        ).toBe(
+            'voidflow apply rulesets --config /infra/rulesets.ts --repo o/site --prune',
+        )
+        expect(
+            applyHint('cf-tokens', '/infra/cf-tokens.ts', ['--rotate'], true),
+        ).toBe(
+            'voidflow apply tokens cf --config /infra/cf-tokens.ts --entire-fleet --rotate',
+        )
+    })
+
+    test('uses the repo context when a per-repo config launched the child', () => {
+        expect(applyHint('rulesets', undefined, ['--prune'], false)).toBe(
+            'voidflow apply rulesets --prune',
+        )
+    })
+
+    test('marks children and passes the complete apply command', () => {
+        const env = verbChildEnv('voidflow apply rulesets --entire-fleet')
+        expect(env.VOIDFLOW_VIA_VERB).toBe('1')
+        expect(env.VOIDFLOW_APPLY_HINT).toBe(
+            'voidflow apply rulesets --entire-fleet',
+        )
     })
 })
 

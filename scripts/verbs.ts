@@ -38,9 +38,6 @@ import {
     repoSlug,
 } from './lib/repo-config.ts'
 
-/** Tells the spawned tool it was run by a verb, so its hints name `voidflow apply`, not `--apply`. */
-const VIA_VERB_ENV = { ...process.env, VOIDFLOW_VIA_VERB: '1' }
-
 type Verb = 'plan' | 'check' | 'apply'
 
 /** Tools in run order, rulesets first. */
@@ -233,6 +230,42 @@ const toolName = (tool: Tool) => {
     return provider ? `tokens ${provider}` : tool
 }
 
+function shellArg(arg: string): string {
+    return /^[\w@%+=:,./-]+$/u.test(arg)
+        ? arg
+        : `'${arg.replaceAll("'", "'\\''")}'`
+}
+
+/**
+ * The complete command a plan or check child can recommend to apply its
+ * changes. Fleet plans without a repo apply to the entire fleet.
+ */
+export function applyHint(
+    tool: Tool,
+    file: string | undefined,
+    rest: string[],
+    entireFleet: boolean,
+): string {
+    const args = [
+        'voidflow',
+        'apply',
+        ...toolName(tool).split(' '),
+        ...(file === undefined ? [] : ['--config', file]),
+        ...(entireFleet ? ['--entire-fleet'] : []),
+        ...rest,
+    ]
+    return args.map(shellArg).join(' ')
+}
+
+/** Environment for a verb child, including its complete apply hint. */
+export function verbChildEnv(hint: string): NodeJS.ProcessEnv {
+    return {
+        ...process.env,
+        VOIDFLOW_VIA_VERB: '1',
+        VOIDFLOW_APPLY_HINT: hint,
+    }
+}
+
 /**
  * The per-tool command line for one verb run. The verb's flag goes before the
  * forwarded flags: after a `--` in them it would be a positional, and check
@@ -352,7 +385,10 @@ async function runRepoMode(
     const r = spawnSync(
         process.execPath,
         [cliPath(), ...repoToolArgs(verb, file, v.rest)],
-        { stdio: 'inherit', env: VIA_VERB_ENV },
+        {
+            stdio: 'inherit',
+            env: verbChildEnv(applyHint('rulesets', undefined, v.rest, false)),
+        },
     )
     if (r.error) console.error(`${prog}: rulesets: ${r.error.message}`)
     process.exit(r.error || r.status === null ? 2 : r.status)
@@ -499,7 +535,12 @@ export function verbMain(verb: Verb) {
             const r = spawnSync(
                 process.execPath,
                 [cli, ...toolArgs(verb, tool, hit.file, v.rest)],
-                { stdio: 'inherit', env: VIA_VERB_ENV },
+                {
+                    stdio: 'inherit',
+                    env: verbChildEnv(
+                        applyHint(tool, hit.file, v.rest, v.repo === undefined),
+                    ),
+                },
             )
             if (r.error) console.error(`${prog}: ${tool}: ${r.error.message}`)
             codes.push(r.error || r.status === null ? 2 : r.status)
