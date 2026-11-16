@@ -16,6 +16,7 @@ import {
     applyTargetError,
     credentialSource,
     repoModeError,
+    repoModeTools,
     repoToolArgs,
     splitVerbArgs,
     toolArgs,
@@ -39,15 +40,24 @@ describe('splitVerbArgs', () => {
         expect(splitVerbArgs([]).tool).toBeUndefined()
     })
 
-    test('tokens alone means every tokens provider', () => {
+    test('tokens alone means the default provider, cf', () => {
         expect(splitVerbArgs(['tokens'])).toEqual({
-            tokensAll: true,
+            tool: 'cf-tokens',
+            provider: 'cf',
             entireFleet: false,
             rest: [],
+        })
+        expect(splitVerbArgs(['tokens', '--repo', 'x'])).toMatchObject({
+            tool: 'cf-tokens',
+            provider: 'cf',
+            repo: 'x',
         })
     })
 
     test('rejects an unknown provider or extra positionals', () => {
+        expect(() => splitVerbArgs(['tokens', 'constructor'])).toThrow(
+            'unknown provider "constructor"',
+        )
         expect(() => splitVerbArgs(['tokens', 'bogus'])).toThrow(
             'unknown provider "bogus"',
         )
@@ -236,6 +246,9 @@ describe('applyHint', () => {
         expect(applyHint('rulesets', undefined, ['--prune'], false)).toBe(
             'voidflow apply rulesets --prune',
         )
+        expect(applyHint('cf-tokens', undefined, ['--rotate'], false)).toBe(
+            'voidflow apply tokens cf --rotate',
+        )
     })
 
     test('marks children and passes the complete apply command', () => {
@@ -343,7 +356,7 @@ describe('voidflow plan|check|apply', () => {
         expect(r.err).toContain(f.cfg)
     })
 
-    test('tokens with no provider runs every tokens provider', async () => {
+    test('tokens with no provider runs cf', async () => {
         const f = fixture({
             'cf-tokens.ts': `export default { 'o/zz': { account: '${'c'.repeat(32)}', envs: [{ env: 'prod' }], retire: [] } }`,
         })
@@ -352,22 +365,23 @@ describe('voidflow plan|check|apply', () => {
         expect(r.err).toContain('CF_TOKEN_ADMIN is not set')
     })
 
-    test('tokens with no provider skips a missing provider file', async () => {
+    test('tokens with no provider and no cf-tokens.ts exits 2 saying where it looked', async () => {
         const f = fixture({ 'rulesets.ts': RULESETS })
         const r = await voidflow(['plan', 'tokens', '--config', f.cfg], f)
         expect(r.code).toBe(2)
         expect(r.err).toContain('tokens cf: no cf-tokens.ts')
-        expect(r.err).toContain('skipped')
-        expect(r.err).toContain('no fleet config found')
-        expect(r.err).toContain('(for cf-tokens.ts)')
-        expect(r.err).not.toContain('rulesets.ts or')
+        expect(r.err).toContain(f.cfg)
     })
 
-    test('apply tokens with no provider refuses', async () => {
-        const f = fixture({ 'cf-tokens.ts': 'export default {}' })
-        const r = await voidflow(['apply', 'tokens', '--config', f.cfg], f)
+    test('apply tokens with no provider applies cf', async () => {
+        const f = fixture({ 'rulesets.ts': RULESETS })
+        const r = await voidflow(
+            ['apply', 'tokens', '--config', f.cfg, '--repo', 'x'],
+            f,
+        )
         expect(r.code).toBe(2)
-        expect(r.err).toContain('apply tokens needs a provider')
+        expect(r.err).not.toContain('needs a provider')
+        expect(r.err).toContain('tokens cf: no cf-tokens.ts')
     })
 
     test('an unknown provider exits 2', async () => {
@@ -569,6 +583,68 @@ describe('repoToolArgs', () => {
             '/r/voidflow.config.ts',
         ])
     })
+
+    test('points the tokens command at the file for cf-tokens', () => {
+        expect(
+            repoToolArgs(
+                'apply',
+                '/r/voidflow.config.ts',
+                ['--prune'],
+                'cf-tokens',
+            ),
+        ).toEqual([
+            'tokens',
+            'cf',
+            '--repo-config',
+            '/r/voidflow.config.ts',
+            '--apply',
+            '--prune',
+        ])
+    })
+})
+
+describe('repoModeTools', () => {
+    const cf = {
+        account: '0123456789abcdef0123456789abcdef',
+        envs: [{ env: 'prod' }],
+        adminTokenEnv: 'Q',
+    }
+    const bare = { entireFleet: false, rest: [] }
+
+    test('a bare verb runs tokens after rulesets when the admin variable is set', () => {
+        expect(repoModeTools(bare, cf, { Q: 's' })).toEqual({
+            run: ['rulesets', 'cf-tokens'],
+        })
+    })
+
+    test('a bare verb skips tokens when the admin variable is unset or empty', () => {
+        for (const env of [{}, { Q: '' }])
+            expect(repoModeTools(bare, cf, env)).toEqual({
+                run: ['rulesets'],
+                skipped: 'tokens skipped (Q not set)',
+            })
+    })
+
+    test('a bare verb skips tokens without a cloudflare section', () => {
+        expect(repoModeTools(bare, undefined, {})).toEqual({
+            run: ['rulesets'],
+            skipped:
+                'tokens skipped (no cloudflare section in voidflow.config.ts)',
+        })
+    })
+
+    test('a named tool runs alone', () => {
+        expect(
+            repoModeTools(
+                { ...bare, tool: 'cf-tokens', provider: 'cf' },
+                cf,
+                {},
+            ),
+        ).toEqual({ run: ['cf-tokens'] })
+        expect(repoModeTools({ ...bare, tool: 'rulesets' }, cf, {})).toEqual({
+            run: ['rulesets'],
+        })
+    })
 })
 
 describe('voidflow in a repo with a voidflow.config.ts', () => {
@@ -664,7 +740,7 @@ describe('voidflow in a repo with a voidflow.config.ts', () => {
         expect(r.err.split('fleet configs are deprecated').length - 1).toBe(1)
     })
 
-    test('plan tokens cf goes through fleet discovery, not the repo file', async () => {
+    test('plan tokens cf goes through fleet discovery when the repo file has no cloudflare section', async () => {
         const r = await inRepo(['plan', 'tokens', 'cf'], TOOL)
         expect(r.err).toContain('no cf-tokens.ts')
         expect(r.err).not.toContain('(repo)')
@@ -680,11 +756,42 @@ describe('voidflow in a repo with a voidflow.config.ts', () => {
         expect(r.ghCalled).toBe(false)
     })
 
-    test('a cloudflare section is reported as not applied yet', async () => {
-        const r = await inRepo(
-            ['plan', 'rulesets'],
-            "export default { kind: 'site', cloudflare: { account: 'abc' } }",
+    const CF = `export default { kind: 'site', cloudflare: { account: '${'c'.repeat(32)}', adminTokenEnv: 'CF_TOKEN_ADMIN_Q', envs: [{ env: 'prod' }] } }`
+
+    test('plan tokens cf uses the repo file when it has a cloudflare section', async () => {
+        const r = await inRepo(['plan', 'tokens', 'cf'], CF)
+        expect(r.err).toContain(
+            `plan tokens cf | config ${r.file} (repo) | repo o/n | credential CF_TOKEN_ADMIN_Q`,
         )
-        expect(r.err).toContain('note: cloudflare section found')
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+        expect(r.err).not.toContain('not applied yet')
+    })
+
+    test('plan tokens with no provider uses the repo file too', async () => {
+        const r = await inRepo(['plan', 'tokens'], CF)
+        expect(r.err).toContain('plan tokens cf | config')
+        expect(r.err).toContain('(repo)')
+    })
+
+    test('a bare plan skips tokens when the admin variable is unset', async () => {
+        const r = await inRepo(['plan'], CF)
+        const rulesetsOnly = await inRepo(['plan', 'rulesets'], CF)
+        expect(r.err).toContain('tokens skipped (CF_TOKEN_ADMIN_Q not set)')
+        expect(r.err).not.toContain('plan tokens cf |')
+        expect(r.code).toBe(rulesetsOnly.code)
+    })
+
+    test('a bare plan runs tokens after rulesets when the admin variable is set', async () => {
+        // A dead proxy keeps the tokens child's Cloudflare calls off the network.
+        const r = await inRepo(['plan'], CF, {
+            CF_TOKEN_ADMIN_Q: 'x',
+            HTTPS_PROXY: 'http://127.0.0.1:9',
+            https_proxy: 'http://127.0.0.1:9',
+        })
+        const rules = r.err.indexOf('plan rulesets |')
+        const tokens = r.err.indexOf('plan tokens cf |')
+        expect(rules).toBeGreaterThan(-1)
+        expect(tokens).toBeGreaterThan(rules)
     })
 })

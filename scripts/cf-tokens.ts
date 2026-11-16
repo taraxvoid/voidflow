@@ -1,7 +1,10 @@
 /**
- * Plan, apply or rotate scoped Cloudflare deploy tokens for the fleet in the
- * --config module (the org's infra repo), shaped as in cloudflare/tokens.ts.
- * Every invocation takes --config <module>, e.g. ../infra/cf-tokens.ts:
+ * Plan, apply or rotate scoped Cloudflare deploy tokens, for one repo from
+ * the `cloudflare` section of its voidflow.config.ts (--repo-config <file>,
+ * what `voidflow plan|check|apply tokens` passes inside a repo), or for the
+ * fleet in a --config module (the org's infra repo), shaped as in
+ * cloudflare/tokens.ts. Fleet invocations take --config, e.g.
+ * ../infra/cf-tokens.ts:
  *
  *   voidflow tokens cf                          # plan (read-only), every repo
  *   voidflow tokens cf --repo example_project          # plan one repo
@@ -15,9 +18,10 @@
  *
  * The module exports `REPOS` (or a default); see scripts/lib/config.ts.
  *
- * Needs CF_TOKEN_ADMIN: a user-owned token covering every account in the
- * config (envs can sit in different accounts),
- * with Account API Tokens Edit, Workers Scripts Read (Worker tags) and Zone
+ * Needs an admin token: in the variable the repo's `cloudflare.adminTokenEnv`
+ * names (default CF_TOKEN_ADMIN) with --repo-config, else CF_TOKEN_ADMIN
+ * covering every account in the fleet config (envs can sit in different
+ * accounts). It needs Account API Tokens Edit, Workers Scripts Read (Worker tags) and Zone
  * Read (zone ids) on each. Keep it local; never put it in CI.
  *
  * GitHub goes through the `gh` CLI, with admin on the repos: even a plan reads
@@ -26,6 +30,7 @@
  * `gh secret set` and never printed.
  */
 
+import { dirname } from 'node:path'
 import {
     type Action,
     checkRepos,
@@ -46,9 +51,15 @@ import {
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
 } from '../cloudflare/tokens.ts'
+import {
+    adminTokenVar,
+    DEFAULT_ADMIN_TOKEN_ENV,
+    toTokenRepos,
+} from '../config/index.ts'
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
 import { capture, inherit } from './lib/proc.ts'
+import { loadVoidflowConfig, repoSlug } from './lib/repo-config.ts'
 
 const OPTIONS = {
     apply: { type: 'boolean', default: false },
@@ -59,12 +70,17 @@ const OPTIONS = {
     try: { type: 'string' },
     repo: { type: 'string' },
     config: { type: 'string' },
+    'repo-config': { type: 'string' },
 } as const
 
 const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
+       ${prog} --repo-config <file> [flags]
        ${prog} --config <module> --repo <name> --try <env> -- <command...>
+       ${prog} --repo-config <file> --try <env> -- <command...>
 
   --config <module>  the fleet map: a module exporting REPOS (or a default)
+  --repo-config <file>  a voidflow.config.ts: manage the repo it sits in,
+                     from its cloudflare section (takes no --repo)
   --repo <name>      only this repo (owner/name, or just name)
   --check            exit 1 on drift or a token due to rotate
   --apply            create, update and rotate tokens; set each env's secret
@@ -75,7 +91,31 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
   --try <env>        run the command after -- with a throwaway token scoped
                      like the env's
 
-Needs CF_TOKEN_ADMIN and gh with admin on the repos.`
+Needs the admin token (cloudflare.adminTokenEnv with --repo-config, default
+CF_TOKEN_ADMIN) and gh with admin on the repos.`
+
+/**
+ * The environment for a --try command: `env` without CF_TOKEN_ADMIN or
+ * `adminVar`, with the throwaway token and its account.
+ */
+export function tryChildEnv(
+    env: Record<string, string | undefined>,
+    adminVar: string,
+    value: string,
+    account: string,
+): Record<string, string | undefined> {
+    const out = { ...env }
+    delete out.CF_TOKEN_ADMIN
+    delete out[adminVar]
+    return {
+        ...out,
+        // The value is the throwaway --try token, created at run time and
+        // deleted after the command; nothing is hard-coded here.
+        // nosemgrep
+        CLOUDFLARE_API_TOKEN: value,
+        CLOUDFLARE_ACCOUNT_ID: account,
+    }
+}
 
 /** `prog` names the command in the --help usage. */
 export async function main(argv: string[], prog = 'voidflow tokens cf') {
@@ -85,12 +125,40 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         usage(prog),
     )
 
-    const REPOS = await loadOrExit(values.config, checkRepos)
+    const repoConfig = values['repo-config']
+    if (repoConfig !== undefined && values.config !== undefined) {
+        console.error(`${prog}: --repo-config and --config are alternatives`)
+        process.exit(2)
+    }
+    if (repoConfig !== undefined && values.repo !== undefined) {
+        console.error(
+            `${prog}: --repo does not apply to a per-repo config; it manages the repo it sits in`,
+        )
+        process.exit(2)
+    }
 
-    const ADMIN = process.env.CF_TOKEN_ADMIN
+    let REPOS: Record<string, RepoConfig>
+    let adminVar = DEFAULT_ADMIN_TOKEN_ENV
+    if (repoConfig === undefined) {
+        REPOS = await loadOrExit(values.config, checkRepos)
+    } else {
+        try {
+            const cfg = await loadVoidflowConfig(repoConfig)
+            REPOS = toTokenRepos(
+                cfg,
+                await repoSlug(process.env, dirname(repoConfig)),
+            )
+            if (cfg.cloudflare) adminVar = adminTokenVar(cfg.cloudflare)
+        } catch (e) {
+            console.error(`${prog}: ${(e as Error).message}`)
+            process.exit(2)
+        }
+    }
+
+    const ADMIN = process.env[adminVar]
     if (!ADMIN) {
         console.error(
-            'CF_TOKEN_ADMIN is not set (see CONTRIBUTING.md, Cloudflare deploy tokens as code)',
+            `${adminVar} is not set (see CONTRIBUTING.md, Cloudflare deploy tokens as code)`,
         )
         process.exit(2)
     }
@@ -463,7 +531,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
      * env's policies, to prove they are enough before CI depends on them. The
      * real token's value only exists in GitHub, so a local deploy can't use it,
      * and a shell holding a wider token would hide a missing grant. The child gets
-     * the throwaway token as CLOUDFLARE_API_TOKEN, with CF_TOKEN_ADMIN removed,
+     * the throwaway token as CLOUDFLARE_API_TOKEN, with the admin token removed,
      * runs in the directory `just` was run from, and the token is deleted after
      * (it expires within the hour regardless).
      */
@@ -499,15 +567,9 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         )
         let code = 1
         try {
-            const childEnv: Record<string, string | undefined> = {
-                ...process.env,
-                CLOUDFLARE_API_TOKEN: t.value,
-                CLOUDFLARE_ACCOUNT_ID: acct,
-            }
-            delete childEnv.CF_TOKEN_ADMIN
             code = await inherit(cmd, {
                 cwd: process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
-                env: childEnv,
+                env: tryChildEnv(process.env, adminVar, t.value, acct),
             })
         } finally {
             await cf('DELETE', `/accounts/${acct}/tokens/${t.id}`)

@@ -12,6 +12,9 @@ export const PROVIDERS = {
 
 export type Provider = keyof typeof PROVIDERS
 
+/** The provider `tokens` means when none is named. */
+export const DEFAULT_PROVIDER: Provider = 'cf'
+
 /** The provider id a token tool runs as, or undefined for other tools. */
 export const providerOf = (tool: Tool): Provider | undefined =>
     (Object.keys(PROVIDERS) as Provider[]).find((p) => PROVIDERS[p] === tool)

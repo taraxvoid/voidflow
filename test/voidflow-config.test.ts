@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import {
+    adminTokenVar,
     checkVoidflowConfig,
     defaultsFor,
     renderDefaultsTable,
     toFleet,
+    toTokenRepos,
 } from '../config/index.ts'
 import { site, tool } from '../rulesets/index.ts'
+
+const ACCT = '0123456789abcdef0123456789abcdef'
 
 const validRuleset = {
     name: 'main',
@@ -83,30 +87,57 @@ describe('checkVoidflowConfig', () => {
         ).toContain('rulesets.rulesets: not a list')
     })
 
-    test('cloudflare is validated', () => {
+    test('cloudflare takes the fleet entry shape', () => {
         expect(() =>
             checkVoidflowConfig({
                 kind: 'site',
                 cloudflare: {
-                    account: 'abc123',
-                    adminTokenEnv: 'CF_TOKEN_ADMIN',
+                    account: ACCT,
+                    adminTokenEnv: 'CF_TOKEN_ADMIN_Q',
+                    envs: [{ env: 'prod' }],
                 },
             }),
         ).not.toThrow()
-        expect(problems({ kind: 'site', cloudflare: {} })).toContain(
-            'cloudflare.account: missing',
-        )
+        expect(
+            problems({ kind: 'site', cloudflare: { account: ACCT } }),
+        ).toContain('cloudflare.envs: not a list')
         expect(
             problems({
                 kind: 'site',
-                cloudflare: { account: 'a', adminTokenEnv: 'not a var' },
+                cloudflare: { account: 'abc', envs: [{ env: 'prod' }] },
+            }),
+        ).toContain('cloudflare.account: not a 32-hex account id')
+        expect(
+            problems({
+                kind: 'site',
+                cloudflare: { account: ACCT, envs: [{}] },
+            }),
+        ).toContain('cloudflare.envs[0].env: missing')
+        expect(
+            problems({
+                kind: 'site',
+                cloudflare: {
+                    account: ACCT,
+                    envs: [{ env: 'prod' }],
+                    adminTokenEnv: 'not a var',
+                },
             }),
         ).toContain(
             'cloudflare.adminTokenEnv: not an environment variable name',
         )
         expect(
-            problems({ kind: 'site', cloudflare: { account: 'a', extra: 1 } }),
+            problems({
+                kind: 'site',
+                cloudflare: {
+                    account: ACCT,
+                    envs: [{ env: 'prod' }],
+                    extra: 1,
+                },
+            }),
         ).toContain('cloudflare.extra: unknown field')
+        expect(problems({ kind: 'site', cloudflare: 1 })).toContain(
+            'cloudflare: not an object',
+        )
     })
 
     test('reports every problem at once', () => {
@@ -135,6 +166,43 @@ describe('toFleet', () => {
         const raw = { rulesets: [validRuleset], retire: [] }
         const fleet = toFleet({ kind: 'tool', rulesets: raw }, 'o/n')
         expect(fleet['o/n']).toMatchObject({ rulesets: [validRuleset] })
+    })
+})
+
+describe('toTokenRepos', () => {
+    test('keys the cloudflare section by the repo, retire defaulted', () => {
+        expect(
+            toTokenRepos(
+                {
+                    kind: 'site',
+                    cloudflare: {
+                        account: ACCT,
+                        adminTokenEnv: 'Q',
+                        envs: [{ env: 'prod' }],
+                    },
+                },
+                'o/n',
+            ),
+        ).toEqual({
+            'o/n': { account: ACCT, envs: [{ env: 'prod' }], retire: [] },
+        })
+    })
+
+    test('throws without a cloudflare section', () => {
+        expect(() => toTokenRepos({ kind: 'site' }, 'o/n')).toThrow(
+            'no cloudflare section',
+        )
+    })
+})
+
+describe('adminTokenVar', () => {
+    test('defaults to CF_TOKEN_ADMIN', () => {
+        expect(adminTokenVar({ account: ACCT, envs: [] })).toBe(
+            'CF_TOKEN_ADMIN',
+        )
+        expect(
+            adminTokenVar({ account: ACCT, envs: [], adminTokenEnv: 'X_Y' }),
+        ).toBe('X_Y')
     })
 })
 

@@ -4,6 +4,7 @@
  */
 import { existsSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { checkVoidflowConfig, type VoidflowConfig } from '../../config/index.ts'
 import { capture } from './proc.ts'
 
@@ -95,7 +96,11 @@ export async function loadVoidflowConfig(
     }
     let mod: { default?: unknown }
     try {
-        mod = (await import(file)) as { default?: unknown }
+        // A relative path means the working directory, not this module's; a
+        // file URL so an absolute Windows path (C:\...) imports too.
+        mod = (await import(pathToFileURL(resolve(file)).href)) as {
+            default?: unknown
+        }
     } catch (e) {
         return fail(e instanceof Error ? e.message : String(e))
     }

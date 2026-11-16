@@ -123,7 +123,7 @@ export; a shorthand `{ orgs }` is refused, so add the repo by hand there.
 ```sh
 voidflow plan  [rulesets|tokens [provider]] [--repo <name>]   # read-only: what apply would change
 voidflow check [rulesets|tokens [provider]] [--repo <name>]   # read-only: exit 1 on drift
-voidflow apply  rulesets|tokens <provider>  (--repo <name> | --entire-fleet)
+voidflow apply  rulesets|tokens [provider]  (--repo <name> | --entire-fleet)
 ```
 
 - `plan` and `check` cover every repo by default; `--repo` narrows to one
@@ -133,8 +133,8 @@ voidflow apply  rulesets|tokens <provider>  (--repo <name> | --entire-fleet)
   tools whose config lists the repo (the others are skipped with a note),
   and exits 2 if none does.
 - `apply` writes, so it takes exactly one tool and exactly one target:
-  `rulesets` or `tokens <provider>` (`tokens` alone is refused, naming the
-  providers). `--repo <name>`, which must name a single repo (a bare name in
+  `rulesets` or `tokens [provider]` (`tokens` alone means `tokens cf`,
+  everywhere). `--repo <name>`, which must name a single repo (a bare name in
   two orgs is refused with both listed), or `--entire-fleet`. With neither,
   it lists the repos and stops. There is no default target: running it from
   a site checkout never infers that site.
@@ -201,7 +201,10 @@ apply tool *args:
 ```
 
 Keep supplying `CF_TOKEN_ADMIN` the way you do now (fnox, 1Password, the
-environment) for `tokens cf`.
+environment) for `tokens cf`. A repo can manage its own tokens instead, from
+the `cloudflare` section of its `voidflow.config.ts`, with an admin token for
+its own account; see [`config.md`](config.md#cloudflare-tokens). That is the
+way for repos in an account the fleet's `CF_TOKEN_ADMIN` does not cover.
 
 ## What belongs here, and what does not
 
