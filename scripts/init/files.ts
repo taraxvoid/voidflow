@@ -54,7 +54,7 @@ export const FILE_ITEMS: FileItem[] = [
     {
         name: 'biome',
         target: 'biome.json',
-        templates: ['common/biome.json'],
+        templates: ['{kind}/biome.json'],
         kinds: BOTH,
     },
     {

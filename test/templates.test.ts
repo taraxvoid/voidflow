@@ -62,7 +62,7 @@ describe('templates', () => {
     test('pins come from voidflow own files', () => {
         const t = buildTemplates(ROOT)
         const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
-        expect(t.get('common/biome.json')).toContain(
+        expect(t.get('tool/biome.json')).toContain(
             `schemas/${pkg.devDependencies['@biomejs/biome']}/schema.json`,
         )
         expect(t.get('common/mise.toml')).toMatch(/^lefthook = "\d/m)
@@ -71,6 +71,18 @@ describe('templates', () => {
                 '@types/bun'
             ],
         ).not.toBe('latest')
+    })
+
+    test('site biome.json also ignores .astro and svg', () => {
+        const t = buildTemplates(ROOT)
+        const site = JSON.parse(t.get('site/biome.json')!)
+        expect(site.files.includes).toEqual([
+            '**',
+            '!**/bun.lock',
+            '!.astro',
+            '!**/*.svg',
+        ])
+        expect(t.get('tool/biome.json')).not.toContain('.astro')
     })
 
     test('bunfig template keeps the install gate and the scanner', () => {
@@ -90,7 +102,7 @@ describe('templates', () => {
         symlinkSync(ROOT, join(dir, 'node_modules/@taraxvoid/voidflow'))
         // The base config sets vcs.useIgnoreFile, which wants an ignore file.
         writeFileSync(join(dir, '.gitignore'), 'node_modules/\n')
-        writeFileSync(join(dir, 'biome.json'), t.get('common/biome.json')!)
+        writeFileSync(join(dir, 'biome.json'), t.get('tool/biome.json')!)
         const checked = [
             'common/renovate.json',
             'tool/tsconfig.json',
