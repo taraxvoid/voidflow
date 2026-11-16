@@ -174,7 +174,8 @@ function planGitignore(
     const eol = existing.includes('\r\n') ? '\r\n' : '\n'
     const sep = existing === '' || existing.endsWith('\n') ? '' : eol
     const gap = existing === '' ? '' : eol
-    const block = withMarker('.gitignore', `${missing.join('\n')}\n`, ctx)
+    // No marker on merged content: we can't know where it ends up in the file.
+    const block = `${missing.join('\n')}\n`
     return {
         status: 'merge',
         content: `${existing}${sep}${gap}${block.replaceAll('\n', eol)}`,
