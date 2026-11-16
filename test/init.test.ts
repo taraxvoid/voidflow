@@ -293,11 +293,10 @@ describe('voidflow init', () => {
             ['--kind', 'tool', '--preset', 'codeowners', dir],
             fakeGh({ ownerType: 'Organization' }).gh,
         )
-        expect(r.code).toBe(0)
-        expect(readFileSync(join(dir, '.github/CODEOWNERS'), 'utf8')).toContain(
-            '/.github/ @OWNER\n',
-        )
-        expect(r.out).toContain('o is an organization')
+        expect(r.code).toBe(2)
+        expect(existsSync(join(dir, '.github/CODEOWNERS'))).toBe(false)
+        expect(r.err).toContain('o is an organization')
+        expect(r.err).toContain('pass --owner')
         const ok = repo()
         const o = await run(
             [
@@ -370,14 +369,27 @@ describe('voidflow init', () => {
         expect(bad.err).toContain('invalid --owner')
     })
 
-    test('CODEOWNERS uses a placeholder and says so without a repo', async () => {
+    test('CODEOWNERS needs --owner without a repo, never an @OWNER placeholder', async () => {
         const dir = repo(null)
         const r = await run(['--kind', 'tool', '--preset', 'codeowners', dir])
+        expect(r.code).toBe(2)
+        expect(existsSync(join(dir, '.github/CODEOWNERS'))).toBe(false)
+        expect(r.err).toContain('pass --owner')
+    })
+
+    test('a full run skips CODEOWNERS with a note when no owner resolves', async () => {
+        const dir = repo(null)
+        const r = await run([
+            '--kind',
+            'tool',
+            '--preset',
+            'files',
+            '--apply',
+            dir,
+        ])
         expect(r.code).toBe(0)
-        expect(readFileSync(join(dir, '.github/CODEOWNERS'), 'utf8')).toContain(
-            '@OWNER',
-        )
-        expect(r.out).toContain('pass --owner @handle')
+        expect(existsSync(join(dir, '.github/CODEOWNERS'))).toBe(false)
+        expect(r.out).toContain('CODEOWNERS skipped')
     })
 
     test('CODEOWNERS notes when the plan cannot enforce it', async () => {
