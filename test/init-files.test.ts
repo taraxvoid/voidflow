@@ -111,7 +111,14 @@ describe('planFiles', () => {
         expect(text).toContain('\n    "name"')
         expect(text.endsWith('}\n')).toBe(true)
     })
-    test('gitignore create has marker, merge appends only missing', () => {
+    test('gitignore create keeps the marker', () => {
+        const a = planFiles(dir, sel('tool'), ctx).find(
+            (x) => x.name === 'gitignore',
+        )
+        expect(a?.status).toBe('create')
+        expect(a?.content).toContain('# Written by voidflow v1.2.3: ')
+    })
+    test('gitignore merge appends only missing, without a marker', () => {
         writeFileSync(join(dir, '.gitignore'), 'node_modules/\nfoo\n')
         const a = planFiles(dir, sel('tool'), ctx).find(
             (x) => x.name === 'gitignore',
