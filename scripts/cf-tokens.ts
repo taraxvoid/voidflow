@@ -592,7 +592,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     const summary =
         pending === 0
             ? 'in sync'
-            : `${pending} change(s) ${values.apply ? 'applied' : 'pending (re-run with --apply)'}`
+            : `${pending} change(s) ${values.apply ? 'applied' : `pending (${process.env.VOIDFLOW_VIA_VERB ? 'run `voidflow apply` for the same target' : 're-run with --apply'})`}`
     console.log(`\n${summary}${failed ? `, ${failed} env(s) failed` : ''}`)
     if (failed > 0 || (values.check && pending > 0)) process.exit(1)
 }

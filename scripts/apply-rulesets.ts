@@ -440,7 +440,7 @@ export async function main(argv: string[], prog = 'voidflow rulesets') {
         )
     }
     console.log(
-        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${values.apply ? 'changed' : 'differ (re-run with --apply)'}`}`,
+        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${values.apply ? 'changed' : `differ (${process.env.VOIDFLOW_VIA_VERB ? 'run `voidflow apply` for the same target' : 're-run with --apply'})`}`}`,
     )
     if (values.check && drift > 0) process.exit(1)
 }

@@ -38,6 +38,9 @@ import {
     repoSlug,
 } from './lib/repo-config.ts'
 
+/** Tells the spawned tool it was run by a verb, so its hints name `voidflow apply`, not `--apply`. */
+const VIA_VERB_ENV = { ...process.env, VOIDFLOW_VIA_VERB: '1' }
+
 type Verb = 'plan' | 'check' | 'apply'
 
 /** Tools in run order, rulesets first. */
@@ -349,7 +352,7 @@ async function runRepoMode(
     const r = spawnSync(
         process.execPath,
         [cliPath(), ...repoToolArgs(verb, file, v.rest)],
-        { stdio: 'inherit' },
+        { stdio: 'inherit', env: VIA_VERB_ENV },
     )
     if (r.error) console.error(`${prog}: rulesets: ${r.error.message}`)
     process.exit(r.error || r.status === null ? 2 : r.status)
@@ -496,7 +499,7 @@ export function verbMain(verb: Verb) {
             const r = spawnSync(
                 process.execPath,
                 [cli, ...toolArgs(verb, tool, hit.file, v.rest)],
-                { stdio: 'inherit' },
+                { stdio: 'inherit', env: VIA_VERB_ENV },
             )
             if (r.error) console.error(`${prog}: ${tool}: ${r.error.message}`)
             codes.push(r.error || r.status === null ? 2 : r.status)
