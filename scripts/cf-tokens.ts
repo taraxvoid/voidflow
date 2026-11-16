@@ -109,6 +109,9 @@ export function tryChildEnv(
     delete out[adminVar]
     return {
         ...out,
+        // The value is the throwaway --try token, created at run time and
+        // deleted after the command; nothing is hard-coded here.
+        // nosemgrep
         CLOUDFLARE_API_TOKEN: value,
         CLOUDFLARE_ACCOUNT_ID: account,
     }
