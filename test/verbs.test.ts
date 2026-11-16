@@ -654,7 +654,7 @@ describe('voidflow in a repo with a voidflow.config.ts', () => {
     test('a cloudflare section is reported as not applied yet', async () => {
         const r = await inRepo(
             ['plan', 'rulesets'],
-            "export default { kind: 'site', cloudflare: { account: 'abc' } }",
+            `export default { kind: 'site', cloudflare: { account: '${'c'.repeat(32)}', envs: [{ env: 'prod' }] } }`,
         )
         expect(r.err).toContain('note: cloudflare section found')
     })
