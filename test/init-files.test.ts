@@ -118,8 +118,7 @@ describe('planFiles', () => {
         )
         expect(a?.status).toBe('merge')
         expect(a?.content.startsWith('node_modules/\nfoo\n')).toBe(true)
-        expect(a?.content).toContain('# Written by voidflow v1.2.3: ')
-        expect(a?.content).toContain('# Set up a repo the same way')
+        expect(a?.content).not.toContain('Written by voidflow')
         expect(a?.content).toContain('dist/\n')
         expect(a?.content.match(/node_modules\//g)?.length).toBe(1)
         applyFiles(dir, [a as NonNullable<typeof a>])
@@ -204,7 +203,7 @@ describe('merge edge cases', () => {
         )
         expect(a?.status).toBe('merge')
         expect(a?.content.replaceAll('\r\n', '')).not.toContain('\n')
-        expect(a?.content).toContain('# Written by voidflow')
+        expect(a?.content).not.toContain('Written by voidflow')
     })
     test('force replaces only the conflicting script', () => {
         writeFileSync(
