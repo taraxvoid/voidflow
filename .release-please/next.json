@@ -3,7 +3,6 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "release-as": "1.0.0-next.6",
       "include-component-in-tag": false,
       "versioning": "prerelease",
       "prerelease": true,
