@@ -79,6 +79,7 @@
         "lint": "biome check .",
         "format": "biome check --write .",
         "check": "tsc -p .",
+        "audit": "bun audit --audit-level high --production",
         "test": "bun test"
     },
     "peerDependencies": {
