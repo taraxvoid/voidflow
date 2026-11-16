@@ -12,13 +12,15 @@
  * `latest` (approved and live) and sorts above the current `next`, and leaves
  * a package alone when a canary for a later version already exists.
  */
+import { isStableVersion } from './lib/version-shape.ts'
+
 export const PACKAGES = ['@taraxvoid/voidflow', 'voidflow']
 
 export type Plan = { action: 'move' | 'skip'; reason: string }
 
 /** What to do for one package, given its current dist-tags. */
 export function planSync(version: string, tags: Record<string, string>): Plan {
-    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+    if (!isStableVersion(version)) {
         throw new Error(`"${version}" is not a stable X.Y.Z version`)
     }
     if (tags.latest !== version) {

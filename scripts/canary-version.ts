@@ -18,7 +18,8 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const STABLE = /^\d+\.\d+\.\d+$/
+import { isStableVersion } from './lib/version-shape.ts'
+
 const PR_TITLE = /^chore\(main\): release (?:\S+ )?(\d+\.\d+\.\d+)$/
 // release-please names the branch of main's release PR after the target branch.
 const PR_BRANCH_PREFIX = 'release-please--branches--main'
@@ -44,7 +45,7 @@ export function proposedVersion(prs: ReleasePr[]): string {
 }
 
 export function canaryVersion(proposed: string, commits: number): string {
-    if (!STABLE.test(proposed)) {
+    if (!isStableVersion(proposed)) {
         throw new Error(`proposed version "${proposed}" is not X.Y.Z`)
     }
     if (!Number.isInteger(commits) || commits < 1) {
@@ -56,8 +57,13 @@ export function canaryVersion(proposed: string, commits: number): string {
 }
 
 const replaceOnce = (text: string, re: RegExp, to: string, what: string) => {
-    if (!re.test(text)) throw new Error(`no version to replace in ${what}`)
-    return text.replace(re, to)
+    let hit = false
+    const out = text.replace(re, (_m, before: string, after: string) => {
+        hit = true
+        return `${before}${to}${after}`
+    })
+    if (!hit) throw new Error(`no version to replace in ${what}`)
+    return out
 }
 
 /** Writes the version into the files release-please bumps via extra-files. */
@@ -69,7 +75,7 @@ export function applyVersion(root: string, version: string): void {
             replaceOnce(
                 readFileSync(p, 'utf8'),
                 /("version":\s*")[^"]+(")/,
-                `$1${version}$2`,
+                version,
                 f,
             ),
         )
@@ -80,7 +86,7 @@ export function applyVersion(root: string, version: string): void {
         replaceOnce(
             readFileSync(wf, 'utf8'),
             /(VOIDFLOW:\s*")[^"]+("\s*#\s*x-release-please-version)/,
-            `$1${version}$2`,
+            version,
             'agentic/workflows/deps-review.md',
         ),
     )

@@ -14,6 +14,8 @@
  * fall-through to `latest`.
  */
 
+import { isCanaryVersion, isStableVersion } from './lib/version-shape.ts'
+
 export type ChannelKind = 'stable' | 'canary' | 'maintenance'
 
 export type Channel = {
@@ -78,19 +80,16 @@ export function resolveChannel(
     )
 }
 
-const STABLE_VERSION = /^\d+\.\d+\.\d+$/
-// scripts/canary-version.ts builds <proposed>-next.<n>. Old release-please
-// prereleases (1.0.0-next, no number) are not canaries and are not accepted.
-const CANARY_VERSION = /^\d+\.\d+\.\d+-next\.\d+$/
-
 export function assertVersionMatchesChannel(
     version: string,
     channel: Channel,
 ): void {
+    // scripts/canary-version.ts builds <proposed>-next.<n>. Old release-please
+    // prereleases (1.0.0-next, no number) are not canaries and are not accepted.
     const shapeOk =
         channel.kind === 'canary'
-            ? CANARY_VERSION.test(version)
-            : STABLE_VERSION.test(version)
+            ? isCanaryVersion(version)
+            : isStableVersion(version)
     // A maintenance branch only publishes its own line, so republishing some
     // other stable tag from it cannot land under its dist-tag.
     const lineOk =
