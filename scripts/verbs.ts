@@ -83,7 +83,8 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
         const [flag, inline] = a.startsWith('--')
             ? (a.split(/=(.*)/s, 2) as [string, string | undefined])
             : [a, undefined]
-        if (flag in REFUSED) throw new Error(`${flag}: ${REFUSED[flag]}`)
+        if (Object.hasOwn(REFUSED, flag))
+            throw new Error(`${flag}: ${REFUSED[flag]}`)
         if (flag === '--config') {
             const v = inline ?? argv[++i]
             if (v === undefined || v === '')
@@ -115,7 +116,7 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
         out.tool = 'rulesets'
     } else if (first === 'tokens') {
         const provider = second ?? DEFAULT_PROVIDER
-        if (provider in PROVIDERS) {
+        if (Object.hasOwn(PROVIDERS, provider)) {
             out.provider = provider as Provider
             out.tool = PROVIDERS[provider as Provider]
         } else {

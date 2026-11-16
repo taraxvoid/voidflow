@@ -117,6 +117,12 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         expect(r.err).toContain('providers: cf')
     })
 
+    test('tokens rejects an object prototype name as a provider', async () => {
+        const r = await voidflow(['tokens', 'constructor'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('unknown provider "constructor"')
+    })
+
     test('tokens with no provider runs cf', async () => {
         for (const args of [[], ['--check']]) {
             const r = await voidflow(['tokens', ...args])

@@ -53,6 +53,9 @@ describe('splitVerbArgs', () => {
     })
 
     test('rejects an unknown provider or extra positionals', () => {
+        expect(() => splitVerbArgs(['tokens', 'constructor'])).toThrow(
+            'unknown provider "constructor"',
+        )
         expect(() => splitVerbArgs(['tokens', 'bogus'])).toThrow(
             'unknown provider "bogus"',
         )

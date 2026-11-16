@@ -14,10 +14,13 @@ import { DEFAULT_PROVIDER, PROVIDERS, type Provider } from './lib/providers.ts'
 
 type Main = (argv: string[], prog: string) => Promise<void>
 
-/** Provider id -> its script, loaded lazily so --help stays cheap. */
-const MODULES: Record<Provider, () => Promise<{ main: Main }>> = {
-    cf: () => import('./cf-tokens.ts'),
-}
+/**
+ * Provider id -> its script, loaded lazily so --help stays cheap. A Map, so
+ * a prototype name like `constructor` is not a provider.
+ */
+const MODULES = new Map<Provider, () => Promise<{ main: Main }>>([
+    ['cf', () => import('./cf-tokens.ts')],
+])
 
 const usage = (prog: string) =>
     [
@@ -36,7 +39,7 @@ export async function main(argv: string[], prog = 'voidflow tokens') {
     const named = argv[0] !== undefined && !argv[0].startsWith('-')
     const provider = named ? argv[0] : DEFAULT_PROVIDER
     const rest = named ? argv.slice(1) : argv
-    const load = MODULES[provider as Provider]
+    const load = MODULES.get(provider as Provider)
     if (load === undefined) {
         console.error(
             `unknown provider ${JSON.stringify(provider)} (${Object.keys(PROVIDERS).join(' or ')})\n\n${usage(prog)}`,

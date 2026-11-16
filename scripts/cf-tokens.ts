@@ -101,7 +101,7 @@ CF_TOKEN_ADMIN) and gh with admin on the repos.`
 export function tryChildEnv(
     env: Record<string, string | undefined>,
     adminVar: string,
-    token: string,
+    value: string,
     account: string,
 ): Record<string, string | undefined> {
     const out = { ...env }
@@ -109,7 +109,7 @@ export function tryChildEnv(
     delete out[adminVar]
     return {
         ...out,
-        CLOUDFLARE_API_TOKEN: token,
+        CLOUDFLARE_API_TOKEN: value,
         CLOUDFLARE_ACCOUNT_ID: account,
     }
 }
