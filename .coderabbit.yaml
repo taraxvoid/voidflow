@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Anything not set here comes from the settings in the CodeRabbit UI.
+inheritance: true
+
+reviews:
+  # Put the high-level summary in the walkthrough comment, not the PR body.
+  # Appended to the body, it becomes the last paragraph of the squash commit,
+  # so a `Release-As:` footer above it is no longer parsed by release-please
+  # (see RELEASING.md).
+  high_level_summary_in_walkthrough: true
