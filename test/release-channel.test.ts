@@ -17,14 +17,22 @@ describe('resolveChannel', () => {
         })
     })
 
-    test('next is the prerelease channel on the next dist-tag', () => {
-        expect(resolveChannel('next')).toMatchObject({
-            kind: 'prerelease',
+    test('main with canary is the canary channel on the next dist-tag', () => {
+        expect(resolveChannel('main', { canary: true })).toMatchObject({
+            kind: 'canary',
+            branch: 'main',
             distTag: 'next',
-            config: '.release-please/next.json',
-            manifest: '.release-please/next-manifest.json',
             prerelease: true,
         })
+    })
+
+    test('canaries come from main only', () => {
+        expect(() => resolveChannel('release/1.x', { canary: true })).toThrow(
+            /main only/,
+        )
+        expect(() => resolveChannel('next', { canary: true })).toThrow(
+            /main only/,
+        )
     })
 
     test('release/0.9.x is maintenance with its own dist-tag, never latest', () => {
@@ -53,6 +61,7 @@ describe('resolveChannel', () => {
         'release/0.9',
         'release/0.9.x/extra',
         'worktree-foo',
+        'next',
     ])('fails closed on %p', (branch) => {
         expect(() => resolveChannel(branch)).toThrow(/no release channel/)
     })
@@ -100,29 +109,30 @@ describe('assertVersionMatchesChannel', () => {
         )
     })
 
-    test('prerelease accepts release-please numbering: -next, then -next.N', () => {
-        assertVersionMatchesChannel('0.10.0-next', resolveChannel('next'))
-        assertVersionMatchesChannel('0.10.0-next.1', resolveChannel('next'))
-        assertVersionMatchesChannel('0.10.0-next.3', resolveChannel('next'))
-        expect(() =>
-            assertVersionMatchesChannel('0.10.0', resolveChannel('next')),
-        ).toThrow(/does not belong/)
-        expect(() =>
-            assertVersionMatchesChannel(
-                '0.10.0-beta.1',
-                resolveChannel('next'),
-            ),
-        ).toThrow(/does not belong/)
+    test('canary accepts X.Y.Z-next.N only', () => {
+        const c = resolveChannel('main', { canary: true })
+        assertVersionMatchesChannel('1.1.0-next.2', c)
+        assertVersionMatchesChannel('1.0.1-next.14', c)
+        for (const v of [
+            '1.1.0',
+            '1.0.0-next',
+            '1.1.0-beta.1',
+            '1.1.0-next.1.2',
+        ]) {
+            expect(() => assertVersionMatchesChannel(v, c)).toThrow(
+                /does not belong/,
+            )
+        }
     })
 })
 
 describe('toOutputs', () => {
     test('stringifies every field the workflow reads', () => {
-        expect(toOutputs(resolveChannel('next'))).toEqual({
-            kind: 'prerelease',
+        expect(toOutputs(resolveChannel('main', { canary: true }))).toEqual({
+            kind: 'canary',
             dist_tag: 'next',
-            config: '.release-please/next.json',
-            manifest: '.release-please/next-manifest.json',
+            config: '.release-please/main.json',
+            manifest: '.release-please/main-manifest.json',
             prerelease: 'true',
         })
     })
@@ -151,6 +161,13 @@ describe('cli', () => {
 
     test('exits 1 when the version does not fit the channel', () => {
         expect(run('main', '0.10.0-next.1').exitCode).toBe(1)
-        expect(run('next', '0.10.0-next.1').exitCode).toBe(0)
+        expect(run('main', '0.10.0-next.1', '--canary').exitCode).toBe(0)
+        expect(run('main', '0.10.0', '--canary').exitCode).toBe(1)
+    })
+
+    test('a next branch fails closed', () => {
+        const r = run('next', '0.10.0-next.1')
+        expect(r.exitCode).toBe(1)
+        expect(r.stderr.toString()).toContain('no release channel')
     })
 })
