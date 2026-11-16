@@ -17,6 +17,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { checkRepos } from '../cloudflare/tokens.ts'
+import { adminTokenVar, type CloudflareConfig } from '../config/index.ts'
 import { checkFleet } from '../rulesets/index.ts'
 import { loadConfig } from './lib/config.ts'
 import {
@@ -196,8 +197,10 @@ ${
 Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone means \`tokens ${DEFAULT_PROVIDER}\`.
 
 Inside a repo with a voidflow.config.ts (and no --config or VOIDFLOW_CONFIG),
-rulesets run from that file for that repo only: --repo and --entire-fleet do
-not apply. See docs/config.md.`
+rulesets run from that file for that repo only, and so do tokens when it has a
+cloudflare section: --repo and --entire-fleet do not apply. Without a tool,
+tokens run only when the section's admin token variable is set. See
+docs/config.md.`
 
 /** Why per-repo mode refuses these arguments, or null when it takes them. */
 export function repoModeError(v: VerbArgs): string | null {
@@ -250,13 +253,48 @@ export function toolArgs(
     ]
 }
 
-/** The `voidflow rulesets` command line for one verb run on a voidflow.config.ts. */
+/** The per-tool command line for one verb run on a voidflow.config.ts. */
 export function repoToolArgs(
     verb: Verb,
     file: string,
     rest: string[],
+    tool: Tool = 'rulesets',
 ): string[] {
-    return ['rulesets', '--repo-config', file, ...VERB_FLAG[verb], ...rest]
+    const provider = providerOf(tool)
+    return [
+        ...(provider ? ['tokens', provider] : [tool]),
+        '--repo-config',
+        file,
+        ...VERB_FLAG[verb],
+        ...rest,
+    ]
+}
+
+/**
+ * The tools one verb runs on a voidflow.config.ts: a named tool alone;
+ * otherwise rulesets, then tokens when the file has a cloudflare section and
+ * its admin token variable is set (so a repo's CI, which has none, still
+ * checks rulesets), with `skipped` saying why tokens did not run.
+ */
+export function repoModeTools(
+    v: VerbArgs,
+    cf: CloudflareConfig | undefined,
+    env: Record<string, string | undefined>,
+): { run: Tool[]; skipped?: string } {
+    if (v.tool) return { run: [v.tool] }
+    if (!cf)
+        return {
+            run: ['rulesets'],
+            skipped:
+                'tokens skipped (no cloudflare section in voidflow.config.ts)',
+        }
+    const admin = adminTokenVar(cf)
+    if (!env[admin])
+        return {
+            run: ['rulesets'],
+            skipped: `tokens skipped (${admin} not set)`,
+        }
+    return { run: ['rulesets', 'cf-tokens'] }
 }
 
 /** Where discovery looked, for a "not found" message. */
@@ -315,8 +353,9 @@ function fail(msg: string): never {
 
 /**
  * One verb run on the repo's own voidflow.config.ts: loads and validates it
- * before any child runs, prints the header, then re-runs `voidflow rulesets`
- * on it. Exits the process.
+ * before any child runs, then for each tool (repoModeTools) prints the header
+ * and re-runs `voidflow rulesets` or `voidflow tokens cf` on it. Exits the
+ * process with the worst tool's code.
  */
 async function runRepoMode(
     verb: Verb,
@@ -326,32 +365,35 @@ async function runRepoMode(
 ): Promise<never> {
     const refused = repoModeError(v)
     if (refused) fail(`${prog}: ${refused}`)
-    let cloudflare: boolean
+    let cf: CloudflareConfig | undefined
     let slug: string
     try {
-        cloudflare = (await loadVoidflowConfig(file)).cloudflare !== undefined
+        cf = (await loadVoidflowConfig(file)).cloudflare
         slug = await repoSlug(process.env, dirname(file))
     } catch (e) {
         fail(`${prog}: ${(e as Error).message}`)
     }
-    if (!v.tool)
+    const { run, skipped } = repoModeTools(v, cf, process.env)
+    if (skipped) console.error(`${prog}: ${skipped}`)
+    const codes: number[] = []
+    for (const tool of run) {
+        const credential =
+            tool === 'rulesets' || !cf
+                ? credentialSource(process.env)
+                : adminTokenVar(cf)
         console.error(
-            `${prog}: tokens skipped (per-repo config manages rulesets only)`,
+            `voidflow ${version()} ${verb} ${toolName(tool)} | config ${file} (repo) | repo ${slug} | credential ${credential}`,
         )
-    if (cloudflare)
-        console.error(
-            'note: cloudflare section found; token management is not applied from voidflow.config.ts yet',
+        const r = spawnSync(
+            process.execPath,
+            [cliPath(), ...repoToolArgs(verb, file, v.rest, tool)],
+            { stdio: 'inherit' },
         )
-    console.error(
-        `voidflow ${version()} ${verb} rulesets | config ${file} (repo) | repo ${slug} | credential ${credentialSource(process.env)}`,
-    )
-    const r = spawnSync(
-        process.execPath,
-        [cliPath(), ...repoToolArgs(verb, file, v.rest)],
-        { stdio: 'inherit' },
-    )
-    if (r.error) console.error(`${prog}: rulesets: ${r.error.message}`)
-    process.exit(r.error || r.status === null ? 2 : r.status)
+        if (r.error)
+            console.error(`${prog}: ${toolName(tool)}: ${r.error.message}`)
+        codes.push(r.error || r.status === null ? 2 : r.status)
+    }
+    process.exit(worstExit(codes))
 }
 
 /** The `main` of one verb, for scripts/cli.ts. */
@@ -374,15 +416,27 @@ export function verbMain(verb: Verb) {
                 `${prog}: apply needs a tool: voidflow apply rulesets|tokens [provider]\n\n${usage(verb)}`,
             )
 
-        // Inside a repo with a voidflow.config.ts, rulesets come from that
-        // file, unless the fleet is named explicitly or a token tool is asked.
+        // Inside a repo with a voidflow.config.ts, the verbs run from that
+        // file unless the fleet is named explicitly. Tokens come from it only
+        // when it has a cloudflare section; otherwise from the fleet, as
+        // before, until the repo moves its tokens over.
         const repoFile =
-            v.config === undefined &&
-            !process.env.VOIDFLOW_CONFIG &&
-            (v.tool === 'rulesets' || !v.tool)
+            v.config === undefined && !process.env.VOIDFLOW_CONFIG
                 ? findRepoConfig(process.cwd())
                 : null
-        if (repoFile) return runRepoMode(verb, v, prog, repoFile)
+        if (repoFile) {
+            let fromRepo = v.tool !== 'cf-tokens'
+            if (!fromRepo) {
+                try {
+                    fromRepo =
+                        (await loadVoidflowConfig(repoFile)).cloudflare !==
+                        undefined
+                } catch (e) {
+                    fail(`${prog}: ${(e as Error).message}`)
+                }
+            }
+            if (fromRepo) return runRepoMode(verb, v, prog, repoFile)
+        }
 
         const wanted: Tool[] = v.tool ? [v.tool] : TOOLS
 

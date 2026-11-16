@@ -201,7 +201,10 @@ apply tool *args:
 ```
 
 Keep supplying `CF_TOKEN_ADMIN` the way you do now (fnox, 1Password, the
-environment) for `tokens cf`.
+environment) for `tokens cf`. A repo can manage its own tokens instead, from
+the `cloudflare` section of its `voidflow.config.ts`, with an admin token for
+its own account; see [`config.md`](config.md#cloudflare-tokens). That is the
+way for repos in an account the fleet's `CF_TOKEN_ADMIN` does not cover.
 
 ## What belongs here, and what does not
 

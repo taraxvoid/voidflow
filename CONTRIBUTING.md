@@ -211,7 +211,20 @@ hidden input), and confirm with `just doctor`. To use another fnox provider
 `CF_TOKEN_ADMIN` is already in the environment, the targets use it and skip
 fnox.
 
-With the infra repo found as in [`docs/fleet.md`](docs/fleet.md#discovery):
+A repo can also hold its own tokens in the `cloudflare` section of its
+`voidflow.config.ts` ([`docs/config.md`](docs/config.md#cloudflare-tokens)).
+There `cloudflare.adminTokenEnv` names the variable with the admin token
+(default `CF_TOKEN_ADMIN`), so a repo in another Cloudflare account uses a
+token for that account. Run the verbs inside the repo, with that variable
+set:
+
+```sh
+cd ../example_project
+bunx @taraxvoid/voidflow@<version> plan tokens   # tokens means tokens cf
+bunx @taraxvoid/voidflow@<version> apply tokens
+```
+
+For the fleet, with the infra repo found as in [`docs/fleet.md`](docs/fleet.md#discovery):
 
 ```sh
 vf="bunx @taraxvoid/voidflow@<version>"
@@ -237,7 +250,7 @@ bunx @taraxvoid/voidflow@<version> tokens cf --config ~/.config/voidflow/cf-toke
 The real token can't be used locally (its value only exists in GitHub), and
 a shell holding a wider token (an admin token, `wrangler login`) would hide a
 missing grant. The command gets the throwaway token as `CLOUDFLARE_API_TOKEN`,
-with `CF_TOKEN_ADMIN` removed, and the token is deleted afterwards (it
+with `CF_TOKEN_ADMIN` (and a repo's `adminTokenEnv` variable) removed, and the token is deleted afterwards (it
 expires within the hour regardless).
 
 A plan needs `gh` as well as `CF_TOKEN_ADMIN`: it reads each repo's wrangler
