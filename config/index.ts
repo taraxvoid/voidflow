@@ -11,6 +11,12 @@
  */
 
 import {
+    checkRepos,
+    type EnvConfig,
+    type Retire,
+    type RepoConfig as TokenRepoConfig,
+} from '../cloudflare/tokens.ts'
+import {
     checkFleet,
     type Fleet,
     type RawConfig,
@@ -26,12 +32,28 @@ export type VoidflowConfig = {
     kind: Kind
     /** Overrides on the kind's defaults, or a raw ruleset list. */
     rulesets?: Partial<RepoConfig> | RawConfig
-    /** Reserved: validated, not applied yet. */
-    cloudflare?: { account: string; adminTokenEnv?: string }
+    /** The repo's scoped Cloudflare deploy tokens (`voidflow tokens cf`). */
+    cloudflare?: CloudflareConfig
 }
 
+/**
+ * A fleet cf-tokens entry (cloudflare/tokens.ts) plus the variable holding
+ * the admin token for this repo's account.
+ */
+export type CloudflareConfig = {
+    /** Default account for the envs and `retire` names. */
+    account: string
+    /** Names the variable that holds the admin token. Default: CF_TOKEN_ADMIN. */
+    adminTokenEnv?: string
+    envs: EnvConfig[]
+    /** Pre-voidflow token names to delete with --prune. Default: none. */
+    retire?: Retire[]
+}
+
+export const DEFAULT_ADMIN_TOKEN_ENV = 'CF_TOKEN_ADMIN'
+
 const KEYS = ['kind', 'rulesets', 'cloudflare']
-const CLOUDFLARE_KEYS = ['account', 'adminTokenEnv']
+const CLOUDFLARE_KEYS = ['account', 'adminTokenEnv', 'envs', 'retire']
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/
 
 /** The key `rulesets` is validated under; rewritten to `rulesets` in messages. */
@@ -68,6 +90,24 @@ function rulesetProblems(kind: Kind, rulesets: unknown): string[] {
     }
 }
 
+/** checkRepos' messages for the cloudflare section, under `cloudflare.` paths. */
+function tokenProblems(cf: Record<string, unknown>): string[] {
+    try {
+        checkRepos({
+            [PLACEHOLDER]: {
+                account: cf.account,
+                envs: cf.envs,
+                retire: cf.retire ?? [],
+            },
+        })
+        return []
+    } catch (e) {
+        return (e as Error).message
+            .split('\n')
+            .map((l) => l.replace(`"${PLACEHOLDER}".`, 'cloudflare.'))
+    }
+}
+
 /** The config, or an Error listing every problem by path, one per line. */
 export function checkVoidflowConfig(x: unknown): VoidflowConfig {
     if (!isObj(x)) throw new Error('config is not an object')
@@ -101,8 +141,7 @@ export function checkVoidflowConfig(x: unknown): VoidflowConfig {
             for (const k of Object.keys(cf))
                 if (!CLOUDFLARE_KEYS.includes(k))
                     errs.push(`cloudflare.${k}: unknown field`)
-            if (typeof cf.account !== 'string' || cf.account === '')
-                errs.push('cloudflare.account: missing')
+            errs.push(...tokenProblems(cf))
             const env = cf.adminTokenEnv
             if (
                 env !== undefined &&
@@ -121,6 +160,22 @@ export function checkVoidflowConfig(x: unknown): VoidflowConfig {
 /** The one-repo fleet map the rulesets planner runs on, defaults filled in. */
 export function toFleet(cfg: VoidflowConfig, repo: string): Fleet {
     return checkFleet({ [repo]: entry(cfg.kind, cfg.rulesets ?? {}) })
+}
+
+/** The variable that holds the admin token for `cf`'s account. */
+export const adminTokenVar = (cf: CloudflareConfig): string =>
+    cf.adminTokenEnv ?? DEFAULT_ADMIN_TOKEN_ENV
+
+/** The one-repo cf-tokens map `voidflow tokens cf` runs on. */
+export function toTokenRepos(
+    cfg: VoidflowConfig,
+    repo: string,
+): Record<string, TokenRepoConfig> {
+    const cf = cfg.cloudflare
+    if (!cf) throw new Error('no cloudflare section')
+    return {
+        [repo]: { account: cf.account, envs: cf.envs, retire: cf.retire ?? [] },
+    }
 }
 
 /** The markdown table of each kind's defaults, as docs/config.md carries it. */
