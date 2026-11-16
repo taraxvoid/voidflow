@@ -278,7 +278,7 @@ that export `REPOS` (or a default). The package's `voidflow` bin runs both
 tools, so the infra repo needs a pinned release rather than a voidflow
 checkout. The `plan`, `check` and `apply` verbs find the config themselves
 (`--config`, `VOIDFLOW_CONFIG`, `~/.config/voidflow`, then the directories up
-from here); the tool commands `rulesets` and `tokens <provider>` require `--config`.
+from here); the tool commands `rulesets` and `tokens [provider]` (cf by default) require `--config`.
 [`docs/fleet.md`](docs/fleet.md) covers discovery, the org-grouped shape, the
 verbs and their exit codes.
 

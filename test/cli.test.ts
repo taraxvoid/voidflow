@@ -110,15 +110,19 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         }
     })
 
-    test('tokens needs a known provider', async () => {
-        for (const [args, want] of [
-            [[], 'needs a provider'],
-            [['bogus'], 'unknown provider "bogus"'],
-        ] as const) {
+    test('tokens rejects an unknown provider', async () => {
+        const r = await voidflow(['tokens', 'bogus'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('unknown provider "bogus"')
+        expect(r.err).toContain('providers: cf')
+    })
+
+    test('tokens with no provider runs cf', async () => {
+        for (const args of [[], ['--check']]) {
             const r = await voidflow(['tokens', ...args])
             expect(r.code).toBe(2)
-            expect(r.err).toContain(want)
-            expect(r.err).toContain('providers: cf')
+            expect(r.err).not.toContain('needs a provider')
+            expect(r.err).toContain('needs --config')
         }
     })
 

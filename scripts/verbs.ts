@@ -3,12 +3,13 @@
  *
  *   voidflow plan  [rulesets|tokens [provider]] [--repo <name>]   # read-only
  *   voidflow check [rulesets|tokens [provider]] [--repo <name>]   # exit 1 on drift
- *   voidflow apply  rulesets|tokens <provider>  --repo <name> | --entire-fleet
+ *   voidflow apply  rulesets|tokens [provider]  --repo <name> | --entire-fleet
  *
  * Each finds the tool's config (scripts/lib/discover.ts), prints a header
  * line to stderr, then runs `voidflow <tool> --config <file> [--check|--apply]`
  * as a child process with the remaining flags (token tools run as
- * `voidflow tokens <provider>`; see scripts/lib/providers.ts). See
+ * `voidflow tokens <provider>`, cf when none is named; see
+ * scripts/lib/providers.ts). See
  * docs/fleet.md.
  */
 import { spawnSync } from 'node:child_process'
@@ -27,6 +28,7 @@ import {
 } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import {
+    DEFAULT_PROVIDER,
     PROVIDERS,
     type Provider,
     providerOf,
@@ -56,8 +58,6 @@ const REFUSED: Record<string, string> = {
 export type VerbArgs = {
     tool?: Tool
     provider?: Provider
-    /** `tokens` with no provider: run every token provider. */
-    tokensAll?: boolean
     config?: string
     entireFleet: boolean
     repo?: string
@@ -113,11 +113,10 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
             )
         out.tool = 'rulesets'
     } else if (first === 'tokens') {
-        if (second === undefined) {
-            out.tokensAll = true
-        } else if (second in PROVIDERS) {
-            out.provider = second as Provider
-            out.tool = PROVIDERS[second as Provider]
+        const provider = second ?? DEFAULT_PROVIDER
+        if (provider in PROVIDERS) {
+            out.provider = provider as Provider
+            out.tool = PROVIDERS[provider as Provider]
         } else {
             throw new Error(
                 `unknown provider ${JSON.stringify(second)} (${Object.keys(PROVIDERS).join(' or ')})`,
@@ -172,7 +171,7 @@ export function worstExit(codes: number[]): 0 | 1 | 2 {
 const usage = (verb: Verb) =>
     `${
         verb === 'apply'
-            ? 'usage: voidflow apply rulesets|tokens <provider> (--repo <name> | --entire-fleet) [flags]'
+            ? 'usage: voidflow apply rulesets|tokens [provider] (--repo <name> | --entire-fleet) [flags]'
             : `usage: voidflow ${verb} [rulesets|tokens [provider]] [--repo <name>] [flags]`
     }
 
@@ -194,7 +193,7 @@ ${
           ? 'Read-only: exit 1 on drift, 2 on a config or auth error.'
           : 'Writes. Other flags (--prune, --rotate) go to the tool; see `voidflow <tool> --help`.'
 }
-Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone runs every tokens provider.
+Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone means \`tokens ${DEFAULT_PROVIDER}\`.
 
 Inside a repo with a voidflow.config.ts (and no --config or VOIDFLOW_CONFIG),
 rulesets run from that file for that repo only: --repo and --entire-fleet do
@@ -372,9 +371,7 @@ export function verbMain(verb: Verb) {
         }
         if (verb === 'apply' && !v.tool)
             fail(
-                v.tokensAll
-                    ? `${prog}: apply tokens needs a provider: voidflow apply tokens <provider> (${Object.keys(PROVIDERS).join(' or ')})\n\n${usage(verb)}`
-                    : `${prog}: apply needs a tool: voidflow apply rulesets|tokens <provider>\n\n${usage(verb)}`,
+                `${prog}: apply needs a tool: voidflow apply rulesets|tokens [provider]\n\n${usage(verb)}`,
             )
 
         // Inside a repo with a voidflow.config.ts, rulesets come from that
@@ -382,16 +379,12 @@ export function verbMain(verb: Verb) {
         const repoFile =
             v.config === undefined &&
             !process.env.VOIDFLOW_CONFIG &&
-            (v.tool === 'rulesets' || (!v.tool && !v.tokensAll))
+            (v.tool === 'rulesets' || !v.tool)
                 ? findRepoConfig(process.cwd())
                 : null
         if (repoFile) return runRepoMode(verb, v, prog, repoFile)
 
-        const wanted: Tool[] = v.tool
-            ? [v.tool]
-            : v.tokensAll
-              ? TOKEN_TOOLS
-              : TOOLS
+        const wanted: Tool[] = v.tool ? [v.tool] : TOOLS
 
         const env = process.env
         const home = homedir()

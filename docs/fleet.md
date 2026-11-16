@@ -123,7 +123,7 @@ export; a shorthand `{ orgs }` is refused, so add the repo by hand there.
 ```sh
 voidflow plan  [rulesets|tokens [provider]] [--repo <name>]   # read-only: what apply would change
 voidflow check [rulesets|tokens [provider]] [--repo <name>]   # read-only: exit 1 on drift
-voidflow apply  rulesets|tokens <provider>  (--repo <name> | --entire-fleet)
+voidflow apply  rulesets|tokens [provider]  (--repo <name> | --entire-fleet)
 ```
 
 - `plan` and `check` cover every repo by default; `--repo` narrows to one
@@ -133,8 +133,8 @@ voidflow apply  rulesets|tokens <provider>  (--repo <name> | --entire-fleet)
   tools whose config lists the repo (the others are skipped with a note),
   and exits 2 if none does.
 - `apply` writes, so it takes exactly one tool and exactly one target:
-  `rulesets` or `tokens <provider>` (`tokens` alone is refused, naming the
-  providers). `--repo <name>`, which must name a single repo (a bare name in
+  `rulesets` or `tokens [provider]` (`tokens` alone means `tokens cf`,
+  everywhere). `--repo <name>`, which must name a single repo (a bare name in
   two orgs is refused with both listed), or `--entire-fleet`. With neither,
   it lists the repos and stops. There is no default target: running it from
   a site checkout never infers that site.

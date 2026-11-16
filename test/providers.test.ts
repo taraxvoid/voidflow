@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { PROVIDERS, providerOf, TOKEN_TOOLS } from '../scripts/lib/providers.ts'
+import {
+    DEFAULT_PROVIDER,
+    PROVIDERS,
+    providerOf,
+    TOKEN_TOOLS,
+} from '../scripts/lib/providers.ts'
 
 describe('token providers', () => {
     test('cf maps to the cf-tokens tool', () => {
@@ -13,5 +18,9 @@ describe('token providers', () => {
 
     test('TOKEN_TOOLS lists every provider tool in registry order', () => {
         expect(TOKEN_TOOLS).toEqual(['cf-tokens'])
+    })
+
+    test('cf is the default provider', () => {
+        expect(DEFAULT_PROVIDER).toBe('cf')
     })
 })

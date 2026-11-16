@@ -37,11 +37,17 @@ describe('splitVerbArgs', () => {
         expect(splitVerbArgs([]).tool).toBeUndefined()
     })
 
-    test('tokens alone means every tokens provider', () => {
+    test('tokens alone means the default provider, cf', () => {
         expect(splitVerbArgs(['tokens'])).toEqual({
-            tokensAll: true,
+            tool: 'cf-tokens',
+            provider: 'cf',
             entireFleet: false,
             rest: [],
+        })
+        expect(splitVerbArgs(['tokens', '--repo', 'x'])).toMatchObject({
+            tool: 'cf-tokens',
+            provider: 'cf',
+            repo: 'x',
         })
     })
 
@@ -307,7 +313,7 @@ describe('voidflow plan|check|apply', () => {
         expect(r.err).toContain(f.cfg)
     })
 
-    test('tokens with no provider runs every tokens provider', async () => {
+    test('tokens with no provider runs cf', async () => {
         const f = fixture({
             'cf-tokens.ts': `export default { 'o/zz': { account: '${'c'.repeat(32)}', envs: [{ env: 'prod' }], retire: [] } }`,
         })
@@ -316,22 +322,23 @@ describe('voidflow plan|check|apply', () => {
         expect(r.err).toContain('CF_TOKEN_ADMIN is not set')
     })
 
-    test('tokens with no provider skips a missing provider file', async () => {
+    test('tokens with no provider and no cf-tokens.ts exits 2 saying where it looked', async () => {
         const f = fixture({ 'rulesets.ts': RULESETS })
         const r = await voidflow(['plan', 'tokens', '--config', f.cfg], f)
         expect(r.code).toBe(2)
         expect(r.err).toContain('tokens cf: no cf-tokens.ts')
-        expect(r.err).toContain('skipped')
-        expect(r.err).toContain('no fleet config found')
-        expect(r.err).toContain('(for cf-tokens.ts)')
-        expect(r.err).not.toContain('rulesets.ts or')
+        expect(r.err).toContain(f.cfg)
     })
 
-    test('apply tokens with no provider refuses', async () => {
-        const f = fixture({ 'cf-tokens.ts': 'export default {}' })
-        const r = await voidflow(['apply', 'tokens', '--config', f.cfg], f)
+    test('apply tokens with no provider applies cf', async () => {
+        const f = fixture({ 'rulesets.ts': RULESETS })
+        const r = await voidflow(
+            ['apply', 'tokens', '--config', f.cfg, '--repo', 'x'],
+            f,
+        )
         expect(r.code).toBe(2)
-        expect(r.err).toContain('apply tokens needs a provider')
+        expect(r.err).not.toContain('needs a provider')
+        expect(r.err).toContain('tokens cf: no cf-tokens.ts')
     })
 
     test('an unknown provider exits 2', async () => {
