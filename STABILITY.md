@@ -29,7 +29,7 @@ Covered by this policy:
 
 Not covered: anything the README doesn't document, `scripts/` other than the
 covered bins, the experimental parts below, tests, this repo's own CI, and
-prerelease `-next.N` versions, which may change or break between prereleases.
+canary `-next.N` versions, which may change or break between canaries.
 
 ### Experimental
 
@@ -145,5 +145,5 @@ published when callers need to act.
 Pin a release commit SHA with the version in a comment and let Renovate move
 it ([Pinning](README.md#pinning)). The floating `vN` tag follows the newest
 stable release on major N, so a `@v1` reference picks up minors and patches
-without review; it's there for trying voidflow, not for production. Prerelease
+without review; it's there for trying voidflow, not for production. Canary
 `-next.N` tags carry no stability promise.
