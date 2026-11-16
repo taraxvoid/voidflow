@@ -69,14 +69,19 @@ patch bump. Fix it by pinning the version (below), then add the missed entries
 to both the release PR's body and its `CHANGELOG.md` by hand: release-please
 builds the GitHub release notes from the PR body, not from the file.
 
-To pin the version, set `"release-as": "X.Y.Z"` on the `.` package in
-`.release-please/main.json` with a squash-merged PR to `main`. It overrides any
-commit footer, so if the file already pins a different version (check it
-first), update or remove that pin before relying on a footer for another
-version. Remove it in the first PR after that release, or every later
-release PR proposes the same version again. A `Release-As:` footer in a PR
-body isn't reliable: CodeRabbit appends its summary to the body, so the footer
-is no longer the last paragraph of the squash commit and isn't parsed.
+To pin the version, end the body of a squash-merged PR to `main` with a
+`Release-As: X.Y.Z` footer. The footer has to be the last paragraph of the
+squash commit. CodeRabbit keeps its summary in its walkthrough comment instead
+of appending it to the PR body ([`.coderabbit.yaml`](.coderabbit.yaml)), so
+nothing lands after it. Check the squash commit message in the merge dialog
+before confirming.
+
+The alternative is `"release-as": "X.Y.Z"` on the `.` package in
+`.release-please/main.json`, set with a squash-merged PR to `main`. It
+overrides any commit footer, so if the file already pins a different version
+(check it first), update or remove that pin before relying on a footer for
+another version. Remove it in the first PR after that release, or every later
+release PR proposes the same version again. A footer needs no cleanup.
 
 A `Release-As` footer on `next` reaches `main` with the promotion, and
 release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
