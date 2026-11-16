@@ -73,13 +73,14 @@ const OPTIONS = {
     'repo-config': { type: 'string' },
 } as const
 
-const usage = (prog: string) => `usage: ${prog} --repo-config <file> [flags]
-       ${prog} --config <module> [flags]
+const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
+       ${prog} --repo-config <file> [flags]
        ${prog} --config <module> --repo <name> --try <env> -- <command...>
+       ${prog} --repo-config <file> --try <env> -- <command...>
 
-  --repo-config <file>  a voidflow.config.ts: manage the repo it sits in,
-                     from its cloudflare section
   --config <module>  the fleet map: a module exporting REPOS (or a default)
+  --repo-config <file>  a voidflow.config.ts: manage the repo it sits in,
+                     from its cloudflare section (takes no --repo)
   --repo <name>      only this repo (owner/name, or just name)
   --check            exit 1 on drift or a token due to rotate
   --apply            create, update and rotate tokens; set each env's secret
