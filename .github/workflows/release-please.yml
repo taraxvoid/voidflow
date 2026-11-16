@@ -175,8 +175,12 @@ jobs:
           private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
           permission-contents: write
 
+      # main's tip as of now, not the commit that queued this run: if main
+      # advanced while the run waited, the version below comes from the
+      # current release PR and must describe the code it is built from.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -208,7 +212,15 @@ jobs:
             exit 0
           fi
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists, skipping the commit and tag."
+            # Reuse the tag only when it was cut from this very commit; a tag
+            # on some other parent would publish stale code under this version.
+            existing=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha)
+            parent=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${existing}" --jq '.parents[0].sha')
+            if [ "$parent" != "$(git rev-parse HEAD)" ]; then
+              echo "::error::Tag ${TAG} exists but was cut from ${parent}, not from $(git rev-parse HEAD). Refusing to reuse it." >&2
+              exit 1
+            fi
+            echo "Tag ${TAG} already exists for this commit, skipping the commit and tag."
           else
             git -c user.name='github-actions[bot]' \
                 -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \

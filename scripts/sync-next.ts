@@ -36,13 +36,15 @@ export function planSync(version: string, tags: Record<string, string>): Plan {
     return { action: 'skip', reason: `next is ${next}, not below ${version}` }
 }
 
-const npm = (args: string[]) => {
+// Reads capture stdout; writes inherit the terminal so npm can ask for 2FA.
+const npm = (args: string[], interactive = false) => {
     const r = Bun.spawnSync(['npm', ...args], {
-        stdout: 'pipe',
+        stdin: interactive ? 'inherit' : undefined,
+        stdout: interactive ? 'inherit' : 'pipe',
         stderr: 'inherit',
     })
     if (r.exitCode !== 0) throw new Error(`npm ${args.join(' ')} failed`)
-    return r.stdout.toString().trim()
+    return interactive ? '' : (r.stdout?.toString().trim() ?? '')
 }
 
 if (import.meta.main) {
@@ -62,7 +64,7 @@ if (import.meta.main) {
                 console.log(`${pkg}: left alone (${plan.reason})`)
                 continue
             }
-            npm(['dist-tag', 'add', `${pkg}@${version}`, 'next'])
+            npm(['dist-tag', 'add', `${pkg}@${version}`, 'next'], true)
             console.log(`${pkg}: next -> ${version} (${plan.reason})`)
         }
     } catch (e) {

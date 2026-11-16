@@ -110,6 +110,8 @@ function resolve(): string {
             'open',
             '--base',
             'main',
+            '--limit',
+            '200',
             '--json',
             'title,headRefName',
         ]),
