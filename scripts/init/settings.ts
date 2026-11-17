@@ -207,6 +207,13 @@ export function settingNames(): string[] {
 
 const PLAN_GATED = new Set(['codeql', 'secret-scanning'])
 
+/** Actionable replacement for the raw 403/422 body on a plan-gated setting. */
+function planGatedHint(name: string, info: RepoInfo): string {
+    const feature = name === 'codeql' ? 'code scanning' : 'secret scanning'
+    const kind = info.visibility === 'INTERNAL' ? 'internal' : 'private'
+    return `${feature} on ${kind} repositories needs a paid GitHub Code Security / Secret Protection plan; enable it for the org or make the repo public, then re-run (or pass --skip-setting ${name} to hide this line)`
+}
+
 function classifyError(
     name: string,
     e: unknown,
@@ -231,7 +238,11 @@ function classifyError(
         info.visibility !== 'PUBLIC' &&
         (status === 403 || status === 422)
     ) {
-        return { name, status: 'skipped-plan', detail: msg }
+        return {
+            name,
+            status: 'skipped-plan',
+            detail: planGatedHint(name, info),
+        }
     }
     return { name, status: 'failed', detail: msg }
 }
