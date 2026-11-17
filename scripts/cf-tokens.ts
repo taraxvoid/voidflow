@@ -201,9 +201,9 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
             if (!json) why.push('response was not JSON')
             const hint =
                 res.status === 401
-                    ? ' (CF_TOKEN_ADMIN is invalid or expired)'
+                    ? ` (${adminVar} is invalid or expired)`
                     : res.status === 403
-                      ? ' (CF_TOKEN_ADMIN lacks permission for this call; it needs account API token edit rights, see CONTRIBUTING.md)'
+                      ? ` (${adminVar} lacks permission for this call; it needs account API token edit rights, see CONTRIBUTING.md)`
                       : ''
             throw new Error(
                 `${method} ${path}: ${res.status} ${why.join('; ')}${hint}`,
