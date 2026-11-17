@@ -36,7 +36,7 @@ and how deprecations reach you before a removal.
 
 ### Trying a canary release
 
-Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init`
+Canaries are published on demand, not on every merge, to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init`
 (or the `bunx` form) runs the newest one. If your npm config has a release-age
 cooldown (`min-release-age` or `before`), a fresh canary is filtered
 out and `@next` silently resolves to an older version. For the unscoped mirror

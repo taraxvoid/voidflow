@@ -1,15 +1,20 @@
 name: Release Please
 
-# Branch-based release channels (see RELEASING.md):
+# Release channels (see RELEASING.md):
 #   main         stable      npm dist-tag `latest`
-#   next         prerelease  npm dist-tag `next`  (X.Y.Z-next.N)
+#   main+canary  canary      npm dist-tag `next`  (X.Y.Z-next.N, on demand)
 #   release/N.x  maintenance npm dist-tag `release-N.x`
 #
-# On every push to one of those branches release-please maintains a standing
-# release PR using that branch's config from .release-please/. Merging it bumps
-# the version files, pushes the vX.Y.Z tag and creates the GitHub release (all
-# by release-please itself), then the publish job pushes the tagged commit to
-# npm and JSR under the channel's dist-tag.
+# On every push to main or a maintenance branch release-please maintains a
+# standing release PR using that branch's config from .release-please/. Merging
+# it bumps the version files, pushes the vX.Y.Z tag and creates the GitHub
+# release (all by release-please itself), then the publish job pushes the
+# tagged commit to npm and JSR under the channel's dist-tag.
+#
+# A canary is cut on demand (`just canary`, or workflow_dispatch with canary
+# ticked, from main): the canary job commits the canary version on top of
+# main's tip, tags that commit (it never lands on main) and the same publish
+# job publishes the tag under `next`.
 #
 # token is a GitHub App installation token, not the default GITHUB_TOKEN:
 # events authored by GITHUB_TOKEN don't trigger other workflows, so the
@@ -24,19 +29,27 @@ name: Release Please
 #
 on:
   push:
-    branches: [main, next, "release/**"]
-  # Manual republish of an existing release's tag (e.g. after fixing npm
-  # trusted-publisher config); skips release-please and only runs `publish`.
-  # The channel comes from the branch the workflow is run from ("Use workflow
-  # from"): main for a stable tag, next for a prerelease tag, release/N.x for
-  # a maintenance tag. A tag whose version does not fit that channel, or whose
-  # commit is not on that branch, is rejected.
+    branches: [main, "release/**"]
+  # Manual run, from the branch you pick under "Use workflow from". Give it
+  # exactly one of:
+  #  - tag: republish an existing release's tag (e.g. after fixing npm
+  #    trusted-publisher config); skips release-please and only runs `publish`.
+  #    main takes a stable tag or a canary tag (X.Y.Z-next.N), release/N.x its
+  #    own line's tags. A tag whose version does not fit that channel, or whose
+  #    commit is not on that branch (a canary's parent, for a canary tag), is
+  #    rejected.
+  #  - canary: cut and publish a canary from main's tip.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag to publish to npm (e.g. v0.7.0)"
-        required: true
+        description: "Existing release tag to publish to npm (e.g. v0.7.0); leave empty for a canary"
+        required: false
         type: string
+      canary:
+        description: "Cut a canary X.Y.Z-next.N from main's tip and publish it under the next dist-tag"
+        required: false
+        default: false
+        type: boolean
       dry-run:
         description: "Run the publish steps with --dry-run (nothing is published)"
         required: false
@@ -72,12 +85,35 @@ jobs:
         with:
           no-cache: true
 
-      # Fails the run for any branch that is not a release channel.
+      - name: Require exactly one of tag or canary
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ inputs.tag }}
+          CANARY: ${{ inputs.canary }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAG" ] && [ "$CANARY" = "true" ]; then
+            echo "::error::Give a tag to republish or tick canary, not both." >&2
+            exit 1
+          fi
+          if [ -z "$TAG" ] && [ "$CANARY" != "true" ]; then
+            echo "::error::Give a tag to republish, or tick canary." >&2
+            exit 1
+          fi
+
+      # Fails the run for any branch that is not a release channel. main is
+      # the canary channel for a canary run or a canary tag (-next), the
+      # stable channel otherwise.
       - name: Resolve release channel from branch
         id: channel
         env:
           BRANCH: ${{ github.ref_name }}
-        run: bun scripts/release-channel.ts "$BRANCH" >> "$GITHUB_OUTPUT"
+          CANARY: ${{ inputs.canary || contains(inputs.tag, '-next') }}
+        run: |
+          set -euo pipefail
+          args=("$BRANCH")
+          if [ "$CANARY" = "true" ]; then args+=(--canary); fi
+          bun scripts/release-channel.ts "${args[@]}" >> "$GITHUB_OUTPUT"
 
   release-please:
     name: Release Please
@@ -112,13 +148,103 @@ jobs:
           config-file: ${{ needs.channel.outputs.config }}
           manifest-file: ${{ needs.channel.outputs.manifest }}
 
+  # Canary: the version is the one release-please proposes plus -next.<n>
+  # (scripts/canary-version.ts). The commit that carries it never lands on
+  # main, so release-please never sees it; only its tag is pushed.
+  canary:
+    name: Cut canary
+    needs: channel
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.canary &&
+      needs.channel.outputs.kind == 'canary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      tag_name: ${{ steps.cut.outputs.tag_name }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      # main's tip as of now, not the commit that queued this run: if main
+      # advanced while the run waited, the version below comes from the
+      # current release PR and must describe the code it is built from.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          no-cache: true
+
+      # Refuses when main has no open release PR (nothing releasable yet).
+      - name: Resolve the canary version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/canary-version.ts --apply >> "$GITHUB_OUTPUT"
+
+      # A rerun for the same commit gets the same version and finds the tag
+      # and release already there, so it changes nothing. A dry run stops here:
+      # nothing is pushed, and publish does not run.
+      - name: Commit, tag and create the prerelease
+        id: cut
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::Dry run: would cut ${TAG} from $(git rev-parse --short HEAD); nothing pushed, nothing published."
+            exit 0
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            # Reuse the tag only when it was cut from this very commit; a tag
+            # on some other parent would publish stale code under this version.
+            existing=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq .object.sha)
+            parent=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${existing}" --jq '.parents[0].sha')
+            if [ "$parent" != "$(git rev-parse HEAD)" ]; then
+              echo "::error::Tag ${TAG} exists but was cut from ${parent}, not from $(git rev-parse HEAD). Refusing to reuse it." >&2
+              exit 1
+            fi
+            echo "Tag ${TAG} already exists for this commit, skipping the commit and tag."
+          else
+            git -c user.name='github-actions[bot]' \
+                -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                commit --quiet -am "chore: canary ${VERSION}"
+            git tag "$TAG"
+            REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git push "$REMOTE" "refs/tags/${TAG}"
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists."
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease --verify-tag --title "$TAG" --generate-notes
+          fi
+          echo "tag_name=${TAG}" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Publish to npm
-    needs: [channel, release-please]
+    needs: [channel, release-please, canary]
     if: >-
       !cancelled() &&
       needs.channel.result == 'success' &&
-      (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
+      (needs.release-please.outputs.release_created == 'true' ||
+       needs.canary.outputs.tag_name != '' ||
+       (github.event_name == 'workflow_dispatch' && inputs.tag != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm
@@ -140,23 +266,40 @@ jobs:
           no-cache: true
 
       # Abort before anything is published unless the tag belongs to this
-      # channel: its version fits the channel (a -next tag on main, a stable
-      # tag on next, or another line's tag on release/N.x are rejected) and
-      # the tagged commit is on this branch (so a maintenance tag cannot be
-      # republished from main, or the reverse). Compare against the branch tip
-      # (origin/<branch>, fetched by the checkout above), not HEAD: release-please
-      # tags the branch as it is when it runs, so if the release PR merges while
-      # an earlier push's run is in flight, that run tags a commit newer than its
-      # own checkout. Checking HEAD rejected it, and the release PR's own run then
-      # saw the release as already created and skipped publishing (v0.12.2).
+      # channel: its version fits the channel (a -next tag on a stable run, a
+      # stable tag on a canary run, or another line's tag on release/N.x are
+      # rejected) and the tagged commit is on this branch (so a maintenance tag
+      # cannot be republished from main, or the reverse). A canary's commit is
+      # never on main; its parent is, and it may change only the version files.
+      # Compare against the branch tip (origin/<branch>, fetched by the checkout
+      # above), not HEAD: release-please tags the branch as it is when it runs,
+      # so if the release PR merges while an earlier push's run is in flight,
+      # that run tags a commit newer than its own checkout. Checking HEAD
+      # rejected it, and the release PR's own run then saw the release as
+      # already created and skipped publishing (v0.12.2).
       - name: Check tag belongs to this channel
         env:
           BRANCH: ${{ github.ref_name }}
-          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          KIND: ${{ needs.channel.outputs.kind }}
+          TAG: ${{ inputs.tag || needs.canary.outputs.tag_name || needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
-          bun scripts/release-channel.ts "$BRANCH" "${TAG#v}" > /dev/null
-          if ! git merge-base --is-ancestor "refs/tags/${TAG}^{commit}" "refs/remotes/origin/${BRANCH}"; then
+          args=("$BRANCH" "${TAG#v}")
+          if [ "$KIND" = "canary" ]; then args+=(--canary); fi
+          bun scripts/release-channel.ts "${args[@]}" > /dev/null
+          commit=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          if [ "$KIND" = "canary" ]; then
+            parent=$(git rev-parse "${commit}^1")
+            if ! git merge-base --is-ancestor "$parent" "refs/remotes/origin/${BRANCH}"; then
+              echo "::error::Canary ${TAG} is not built on ${BRANCH}; its parent commit is not on the branch." >&2
+              exit 1
+            fi
+            extra=$(git diff --name-only "$parent" "$commit" | grep -vxE 'package\.json|jsr\.json|agentic/workflows/deps-review\.md' || true)
+            if [ -n "$extra" ]; then
+              echo "::error::Canary ${TAG} changes more than the version files: ${extra}" >&2
+              exit 1
+            fi
+          elif ! git merge-base --is-ancestor "$commit" "refs/remotes/origin/${BRANCH}"; then
             echo "::error::Tag ${TAG} is not on branch ${BRANCH}; run this workflow from the branch that owns the tag." >&2
             exit 1
           fi
@@ -169,7 +312,7 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          ref: ${{ inputs.tag || needs.canary.outputs.tag_name || needs.release-please.outputs.tag_name }}
           persist-credentials: false
 
       # `npm stage publish` needs npm >= 11.15.0, newer than Node 24's bundled
@@ -191,7 +334,7 @@ jobs:
 
       - name: Check package.json version matches tag
         env:
-          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+          TAG: ${{ inputs.tag || needs.canary.outputs.tag_name || needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
           PKG_VERSION=$(jq -r .version package.json)
@@ -345,6 +488,24 @@ jobs:
           fi
           exit 1
 
+      # `npm stage approve` takes no extra tags and this job's token cannot
+      # move dist-tags, so @next follows a stable release by hand.
+      - name: Point at sync-next after a stable release
+        if: needs.channel.outputs.kind == 'stable' && !inputs.dry-run
+        env:
+          TAG: ${{ inputs.tag || needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### After approving both packages on npm"
+            echo
+            echo "Move \`@next\` to the stable version (the next canary moves it forward again):"
+            echo
+            echo '```bash'
+            echo "just sync-next ${TAG#v}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
   # release. Prereleases and maintenance releases never move it. Immutable
   # vX.Y.Z tags are untouched.
@@ -381,96 +542,3 @@ jobs:
             gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="$SHA"
           fi
           echo "${TAG} -> ${SHA}"
-
-  # Stable releases only: bring the release's version bump and changelog from
-  # main into next so the branches do not drift. Only version bookkeeping files
-  # may conflict and scripts/back-merge.ts resolves those; anything else fails
-  # the job loudly so a person resolves it (see RELEASING.md). The PR is set to
-  # auto-merge with a merge commit, never a squash, so the branches share history.
-  back-merge:
-    name: Open main to next back-merge PR
-    needs: [channel, release-please]
-    if: >-
-      needs.release-please.outputs.release_created == 'true' &&
-      needs.channel.outputs.kind == 'stable'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - name: Generate App token
-        id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          no-cache: true
-
-      # The merge and its conflict handling live in scripts/back-merge.ts (tested
-      # against real git repos); this step only supplies the release's identity.
-      - name: Merge the release into a back-merge branch
-        id: merge
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-          VERSION: ${{ needs.release-please.outputs.version }}
-          SHA: ${{ needs.release-please.outputs.sha }}
-        run: |
-          set -euo pipefail
-          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          bun scripts/back-merge.ts --remote "$REMOTE" --tag "$TAG" --version "$VERSION" --sha "$SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Push the branch and open the PR
-        if: steps.merge.outputs.result == 'created'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-          BRANCH: ${{ steps.merge.outputs.branch }}
-        run: |
-          set -euo pipefail
-          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force "$REMOTE" "HEAD:refs/heads/${BRANCH}"
-
-          if gh pr view "$BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Back-merge PR for ${BRANCH} already exists."
-          else
-            gh pr create --repo "$GITHUB_REPOSITORY" --base next --head "$BRANCH" \
-              --title "chore: back-merge ${TAG} into next" \
-              --body "Brings the ${TAG} version bump and changelog from main into next. Auto-merges with a merge commit once checks pass; do not squash it, or main's commits never become ancestors of next and the next back-merge conflicts on the same lines again."
-          fi
-
-          # The next ruleset allows squash for feature PRs, so a person clicking
-          # merge here would default to squash (v0.12.0 to v0.12.4 all were).
-          # Auto-merge pins the method to a real merge commit.
-          gh pr merge "$BRANCH" --repo "$GITHUB_REPOSITORY" --auto --merge
-
-      # A failed back-merge only shows as a red run, and re-running the release
-      # run turns it green by skipping this job (release_created is false the
-      # second time), as happened on v0.13.1. An issue keeps it visible.
-      - name: Open an issue when the back-merge fails
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          TITLE="Back-merge of ${TAG} into next failed"
-          if [ -n "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"${TITLE}\" in:title" --json number --jq '.[].number')" ]; then
-            echo "Issue already open: ${TITLE}"
-            exit 0
-          fi
-          gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
-            --body "The automatic main to next back-merge for ${TAG} failed: ${RUN_URL}. Merge main into next by hand (RELEASING.md, \"If the back-merge fails\") before the next promotion, or that promotion PR will conflict."
-

@@ -98,3 +98,39 @@ describe('release-please.yml publish: npm tarballs are attested', () => {
         )
     })
 })
+
+describe('release-please.yml: one trunk, canaries on demand', () => {
+    test('runs on main and maintenance branches only, no back-merge job', () => {
+        expect(wf.on.push.branches).toEqual(['main', 'release/**'])
+        expect(wf.jobs['back-merge']).toBeUndefined()
+    })
+
+    test('dispatch takes a tag or canary, neither required by the schema', () => {
+        const inputs = wf.on.workflow_dispatch.inputs
+        expect(inputs.canary.type).toBe('boolean')
+        expect(inputs.tag.required).toBe(false)
+    })
+
+    test('the canary job runs only for a canary dispatch and feeds publish', () => {
+        const canary = wf.jobs.canary
+        expect(canary.if).toContain('inputs.canary')
+        expect(canary.if).toContain("needs.channel.outputs.kind == 'canary'")
+        expect(wf.jobs.publish.needs).toContain('canary')
+        expect(wf.jobs.publish.if).toContain('needs.canary.outputs.tag_name')
+    })
+
+    test('a canary dry run pushes nothing', () => {
+        const cut: string = wf.jobs.canary.steps.find(
+            (s: any) => s.id === 'cut',
+        ).run
+        expect(cut.indexOf('DRY_RUN')).toBeLessThan(cut.indexOf('git push'))
+        expect(cut).toContain('--prerelease --verify-tag')
+    })
+
+    test('the channel check handles canary tags by their parent', () => {
+        const check: string =
+            steps[index('Check tag belongs to this channel')].run
+        expect(check).toContain('--canary')
+        expect(check).toContain('${commit}^1')
+    })
+})
