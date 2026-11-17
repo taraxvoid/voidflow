@@ -132,6 +132,12 @@ describe('policies', () => {
         )
         expect(new Set(names).size).toBe(names.length)
     })
+
+    test('canonicalizes repository casing in token names', () => {
+        expect(tokenName('TaraXVoid/Example_Project', 'prod')).toBe(
+            'voidflow:taraxvoid/example_project:prod',
+        )
+    })
 })
 
 describe('accounts', () => {
@@ -456,12 +462,20 @@ describe('tryChildEnv', () => {
         const acct = '0123456789abcdef0123456789abcdef'
         expect(
             tryChildEnv(
-                { CF_TOKEN_ADMIN_Q: 's', CF_TOKEN_ADMIN: 't', A: '1' },
+                {
+                    CF_TOKEN_ADMIN_Q: 's',
+                    CF_TOKEN_ADMIN: 't',
+                    GH_TOKEN: 'g',
+                    GITHUB_TOKEN: 'h',
+                    A: '1',
+                },
                 'CF_TOKEN_ADMIN_Q',
                 'tok',
                 acct,
             ),
         ).toEqual({
+            GH_TOKEN: 'g',
+            GITHUB_TOKEN: 'h',
             A: '1',
             CLOUDFLARE_API_TOKEN: 'tok',
             CLOUDFLARE_ACCOUNT_ID: acct,
@@ -483,11 +497,14 @@ describe('voidflow tokens cf --repo-config', () => {
         args: string[],
         config = CF,
         env: Record<string, string> = {},
+        configInBase = false,
     ) {
         const root = mkdtempSync(join(tmpdir(), 'voidflow-cf-'))
         roots.push(root)
         mkdirSync(join(root, '.git'))
-        const file = join(root, 'voidflow.config.ts')
+        const configDir = configInBase ? join(root, 'base') : root
+        if (configInBase) mkdirSync(configDir)
+        const file = join(configDir, 'voidflow.config.ts')
         writeFileSync(file, config)
         const proc = Bun.spawn(
             [
@@ -504,6 +521,7 @@ describe('voidflow tokens cf --repo-config', () => {
                     GITHUB_REPOSITORY: 'o/n',
                     CF_TOKEN_ADMIN: '',
                     CF_TOKEN_ADMIN_Q: '',
+                    VOIDFLOW_CONFIG_BASE: configInBase ? configDir : '',
                     ...env,
                 },
                 stdout: 'pipe',
@@ -540,6 +558,18 @@ describe('voidflow tokens cf --repo-config', () => {
 
     test('a relative --repo-config resolves against the working directory', async () => {
         const r = await run(['--repo-config', 'voidflow.config.ts'])
+        expect(r.err).not.toContain('Cannot find')
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+    })
+
+    test('a relative --repo-config resolves against VOIDFLOW_CONFIG_BASE', async () => {
+        const r = await run(
+            ['--repo-config', 'voidflow.config.ts'],
+            CF,
+            {},
+            true,
+        )
         expect(r.err).not.toContain('Cannot find')
         expect(r.code).toBe(2)
         expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
