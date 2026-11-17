@@ -96,4 +96,13 @@ if (!cmd) {
     console.error(`unknown command ${JSON.stringify(name)}\n\n${usage()}`)
     process.exit(2)
 }
-await (await cmd.load()).main(rest, `voidflow ${name}`)
+try {
+    await (await cmd.load()).main(rest, `voidflow ${name}`)
+} catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e))
+    console.error(`voidflow ${name}: ${err.message}`)
+    if (err.cause) console.error(`  cause: ${String(err.cause)}`)
+    if (process.env.VOIDFLOW_DEBUG) console.error(err.stack)
+    else console.error('  (set VOIDFLOW_DEBUG=1 for the stack trace)')
+    process.exit(1)
+}

@@ -186,16 +186,27 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
             },
             body: body === undefined ? undefined : JSON.stringify(body),
         })
-        const json = (await res.json()) as {
-            success: boolean
-            errors?: Array<{ code: number; message: string }>
-            result: T
-            result_info?: { total_pages?: number; total_count?: number }
-        }
-        if (!json.success) {
-            const why = (json.errors ?? []).map((e) => `${e.code} ${e.message}`)
+        const json = (await res.json().catch(() => undefined)) as
+            | {
+                  success: boolean
+                  errors?: Array<{ code: number; message: string }>
+                  result: T
+                  result_info?: { total_pages?: number; total_count?: number }
+              }
+            | undefined
+        if (!json?.success) {
+            const why = (json?.errors ?? []).map(
+                (e) => `${e.code} ${e.message}`,
+            )
+            if (!json) why.push('response was not JSON')
+            const hint =
+                res.status === 401
+                    ? ` (${adminVar} is invalid or expired)`
+                    : res.status === 403
+                      ? ` (${adminVar} lacks permission for this call; it needs account API token edit rights, see CONTRIBUTING.md)`
+                      : ''
             throw new Error(
-                `${method} ${path}: ${res.status} ${why.join('; ')}`,
+                `${method} ${path}: ${res.status} ${why.join('; ')}${hint}`,
             )
         }
         return json
@@ -594,8 +605,14 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         const cfg = REPOS[repo]
         console.log(`\n== ${repo}`)
         const tokens = new Map<string, Token[]>()
-        for (const acct of repoAccounts(cfg)) {
-            tokens.set(acct, await cfAll<Token>(`/accounts/${acct}/tokens`))
+        try {
+            for (const acct of repoAccounts(cfg)) {
+                tokens.set(acct, await cfAll<Token>(`/accounts/${acct}/tokens`))
+            }
+        } catch (e) {
+            failed++
+            console.error(`  x listing tokens: ${(e as Error).message}`)
+            continue
         }
         let envsOk = true
         for (const env of cfg.envs) {
