@@ -618,7 +618,19 @@ export async function main(
             `    voidflow plan rulesets --config ${fleetFile} --repo ${repo}`,
             `    voidflow apply rulesets --config ${fleetFile} --repo ${repo}`,
         )
-    } else if (!(preset.rulesets && values.config)) {
+    } else if (preset.rulesets && values.config) {
+        // The fleet path's own text stays until the fleet config goes away.
+    } else if (
+        fileActions.some((a) => a.name === 'config') &&
+        !fileActions.some((a) => a.status === 'conflict')
+    ) {
+        out.push(
+            '  review and commit voidflow.config.ts, then run:',
+            '    voidflow plan rulesets',
+            '    voidflow apply rulesets',
+            '  (see https://github.com/taraxvoid/voidflow/blob/main/docs/config.md)',
+        )
+    } else {
         out.push(
             '  add the repo to your fleet rulesets config: rerun with --config <path to it>, e.g. ../infra/rulesets.ts',
             `  or add this entry by hand: '${repo ?? 'OWNER/REPO'}': {},`,

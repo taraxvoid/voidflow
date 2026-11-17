@@ -111,9 +111,9 @@ version and `--force` to overwrite the ones that differ.
 `--skip` takes any file or setting name; `init --help` lists them all.
 
 - **Files:** `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`,
-  `ci`, `codeowners`, `tsconfig` (tool), `playwright` and `unlighthouse`
-  (site), `package`, `security` (with `--enable-pvr`), `agentic` (with
-  `--enable-agentic`)
+  `ci`, `codeowners`, `config`, `tsconfig` (tool), `playwright` and
+  `unlighthouse` (site), `package`, `security` (with `--enable-pvr`), `agentic`
+  (with `--enable-agentic`)
 - **Settings:** `pr-policy`, `issue-policy`, `dependabot-alerts`,
   `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan`,
   and with `--enable-agentic`: `auto-merge`, `update-branch`,
@@ -123,9 +123,13 @@ version and `--force` to overwrite the ones that differ.
 
 `lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`, `biome.json`,
 `.github/workflows/ci.yml` (the CI caller for the kind, pinned to the release
-SHA), `.github/CODEOWNERS`, and `tsconfig.json` (tool) or
-`playwright.config.js` and `unlighthouse.config.ts` (site). `.gitignore` and `package.json` are merged:
-missing lines, scripts and devDependencies are added and the rest kept.
+SHA), `.github/CODEOWNERS`, `voidflow.config.ts` (the repo's
+[per-repo config](docs/config.md), holding only `kind`), and `tsconfig.json`
+(tool) or `playwright.config.js` and `unlighthouse.config.ts` (site).
+`.gitignore` and `package.json` are merged: missing lines, scripts and
+devDependencies are added and the rest kept. `voidflow.config.ts` belongs to
+the repo: an existing one is kept as it is unless `--force`, and carries no
+version comment.
 
 If any other file exists with different content, or `package.json` has a
 script with a different value, `init` lists them, writes no files and exits 1;

@@ -24,6 +24,8 @@ export type FileItem = {
     optIn?: 'pvr' | 'agentic'
     /** Existing files that already fill this item's role; the item is left alone when one is present. */
     altTargets?: string[]
+    /** The repo owns this file: no marker, and an existing one is kept unless forced. */
+    repoOwned?: true
 }
 
 const BOTH: Kind[] = ['tool', 'site']
@@ -77,6 +79,13 @@ export const FILE_ITEMS: FileItem[] = [
         target: '.github/CODEOWNERS',
         templates: ['common/CODEOWNERS'],
         kinds: BOTH,
+    },
+    {
+        name: 'config',
+        target: 'voidflow.config.ts',
+        templates: ['common/voidflow.config.ts'],
+        kinds: BOTH,
+        repoOwned: true,
     },
     {
         name: 'tsconfig',
@@ -330,6 +339,23 @@ function planPackage(
         : { status: 'unchanged', content: raw }
 }
 
+/** A repo-owned file: created when missing, otherwise kept unless forced. */
+function planRepoOwned(
+    path: string,
+    content: string,
+    sel: Selection,
+): Pick<FileAction, 'status' | 'content' | 'detail'> {
+    if (!existsSync(path)) return { status: 'create', content }
+    const existing = readFileSync(path, 'utf8')
+    if (existing === content) return { status: 'unchanged', content }
+    if (sel.force) return { status: 'overwrite', content }
+    return {
+        status: 'unchanged',
+        content: existing,
+        detail: 'repo-owned, kept (--force overwrites)',
+    }
+}
+
 export function planFiles(
     dir: string,
     sel: Selection,
@@ -360,6 +386,13 @@ export function planFiles(
         }
         if (item.merge === 'package') {
             actions.push({ ...base, ...planPackage(dir, path, texts, sel) })
+            continue
+        }
+        if (item.repoOwned) {
+            actions.push({
+                ...base,
+                ...planRepoOwned(path, texts[0] ?? '', sel),
+            })
             continue
         }
         const content = withMarker(
