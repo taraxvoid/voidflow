@@ -9,7 +9,6 @@ import {
     envBranches,
     envDiff,
     type Fleet,
-    isPlanGated,
     mergeQueueIneligible,
     normalise,
     type RepoConfig,
@@ -17,6 +16,7 @@ import {
     tool,
     wantsMergeQueue,
 } from '../rulesets/index.ts'
+import { isPlanGated } from '../rulesets/plan-gate.ts'
 
 // A fleet as an infra repo would pass it with --config: sites on a
 // single main, and voidflow's release channels.

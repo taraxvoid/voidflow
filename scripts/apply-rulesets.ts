@@ -37,12 +37,12 @@ import {
     envBranches,
     envDiff,
     type Fleet,
-    isPlanGated,
     mergeQueueIneligible,
     normalise,
     type Ruleset,
     wantsMergeQueue,
 } from '../rulesets/index.ts'
+import { isPlanGated } from '../rulesets/plan-gate.ts'
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
 import { capture } from './lib/proc.ts'
