@@ -121,20 +121,31 @@ export function buildTemplates(root: string): Map<string, string> {
         dev['@playwright/test'],
         'devDependencies["@playwright/test"]',
     )
+    const scanner = need(
+        dev['@socketsecurity/bun-security-scanner'],
+        'devDependencies["@socketsecurity/bun-security-scanner"]',
+    )
     const tools = miseVersions(root)
     const mise = ['lefthook', 'gitleaks', 'jactionlint', 'bun']
         .map((n) => `${n} = "${need(tools[n], `mise.toml tool ${n}`)}"`)
         .join('\n')
 
     // voidflow's [install] and [install.security] blocks, without its [test] block.
+    // Consumers also exempt voidflow itself from the release-age gate, so a
+    // fresh voidflow release installs without waiting out the 3 days.
     const bunfig = `${read(root, 'bunfig.toml')
         .split(/^\[test\]/m)[0]
+        .replace(
+            /^(minimumReleaseAgeExcludes = \[)/m,
+            '$1"@taraxvoid/voidflow", ',
+        )
         .trim()}\n`
     for (const want of [
         '[install]',
         'minimumReleaseAge',
         '[install.security]',
         'scanner = ',
+        '"@taraxvoid/voidflow"',
     ]) {
         if (!bunfig.includes(want))
             throw new Error(`build-templates: bunfig.toml lacks ${want}`)
@@ -194,6 +205,7 @@ export function buildTemplates(root: string): Map<string, string> {
             devDependencies: {
                 '@taraxvoid/voidflow': '{{version}}',
                 '@biomejs/biome': biome,
+                '@socketsecurity/bun-security-scanner': scanner,
                 typescript: dev.typescript ?? '5.9.3',
                 '@types/bun': dev['@types/bun'] ?? '1.4.4',
             },
@@ -228,6 +240,7 @@ export default definePreviewConfig({ ciPort: 4141 })
                 '@taraxvoid/voidflow': '{{version}}',
                 '@biomejs/biome': biome,
                 '@playwright/test': playwright,
+                '@socketsecurity/bun-security-scanner': scanner,
             },
         }),
     )

@@ -2,7 +2,7 @@
 minimumReleaseAge = 259200 # 3 days
 
 # Packages that bypass the gate
-minimumReleaseAgeExcludes = ["@playwright/test", "playwright", "playwright-core"]
+minimumReleaseAgeExcludes = ["@taraxvoid/voidflow", "@playwright/test", "playwright", "playwright-core"]
 
 [install.security]
 scanner = "@socketsecurity/bun-security-scanner"
