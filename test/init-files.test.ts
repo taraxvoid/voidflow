@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
     existsSync,
+    mkdirSync,
     mkdtempSync,
     readdirSync,
     readFileSync,
@@ -11,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { applyFiles, fileNames, planFiles } from '../scripts/init/files.ts'
 import type { Kind, RenderCtx } from '../scripts/init/render.ts'
+import { loadVoidflowConfig } from '../scripts/lib/repo-config.ts'
 
 const ctx: RenderCtx = {
     version: '1.2.3',
@@ -42,6 +44,7 @@ const TOOL_TARGETS = [
     '.gitignore',
     '.github/workflows/ci.yml',
     '.github/CODEOWNERS',
+    'voidflow.config.ts',
     'tsconfig.json',
     'package.json',
 ]
@@ -86,6 +89,53 @@ describe('planFiles', () => {
         expect(t).not.toContain('tsconfig.json')
         expect(fileNames('site')).not.toContain('tsconfig')
         expect(fileNames('tool')).toContain('tsconfig')
+    })
+    test('config renders kind only, without a marker', () => {
+        const a = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
+            (x) => x.name === 'config',
+        )
+        expect(a?.status).toBe('create')
+        expect(a?.target).toBe('voidflow.config.ts')
+        expect(a?.content).toContain(
+            "export default { kind: 'site' } satisfies VoidflowConfig",
+        )
+        expect(a?.content).toContain(
+            "import type { VoidflowConfig } from '@taraxvoid/voidflow/config'",
+        )
+        expect(a?.content).not.toContain('Written by voidflow')
+    })
+    test('existing config is kept, force overwrites', () => {
+        const mine =
+            "export default { kind: 'tool', cloudflare: { account: 'x', envs: [] } }\n"
+        writeFileSync(join(dir, 'voidflow.config.ts'), mine)
+        const get = (force: boolean) =>
+            planFiles(dir, sel('tool', { force }), ctx).find(
+                (a) => a.name === 'config',
+            )
+        expect(get(false)?.status).toBe('unchanged')
+        expect(get(false)?.detail).toBe('repo-owned, kept (--force overwrites)')
+        applyFiles(
+            dir,
+            planFiles(dir, sel('tool'), ctx).filter((a) => a.name === 'config'),
+        )
+        expect(readFileSync(join(dir, 'voidflow.config.ts'), 'utf8')).toBe(mine)
+        expect(get(true)?.status).toBe('overwrite')
+    })
+    test('rendered config validates', async () => {
+        // Bun caches import() by URL: one subdirectory per kind.
+        for (const kind of ['tool', 'site'] as const) {
+            const sub = join(dir, kind)
+            mkdirSync(sub)
+            applyFiles(
+                sub,
+                planFiles(sub, sel(kind), { ...ctx, kind }).filter(
+                    (a) => a.name === 'config',
+                ),
+            )
+            expect(
+                await loadVoidflowConfig(join(sub, 'voidflow.config.ts')),
+            ).toEqual({ kind })
+        }
     })
     test('skip drops items', () => {
         const plan = planFiles(
