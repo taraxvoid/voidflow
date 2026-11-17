@@ -112,8 +112,9 @@ A bare `voidflow plan` or `check` runs rulesets, then tokens when the file has
 a `cloudflare` section and its admin token variable is set. Otherwise it says
 that tokens were skipped and why, and exits with the rulesets result, so a
 repo's CI (which has no admin token) still checks rulesets. Passing
-`--config`, or setting `VOIDFLOW_CONFIG`, selects a fleet config instead, and
-so does naming tokens in a repo whose file has no `cloudflare` section. Fleet
+`--config`, setting `VOIDFLOW_CONFIG`, or using `--repo` or `--entire-fleet`
+with a token verb selects a fleet config instead, and so does naming tokens in
+a repo whose file has no `cloudflare` section. Fleet
 configs are deprecated and are removed once each repo has its own file; see
 [`fleet.md`](fleet.md). To move a repo's tokens over, copy its `cf-tokens.ts`
 entry into the `cloudflare` section, run `voidflow plan tokens` in the repo

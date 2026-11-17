@@ -55,6 +55,11 @@ export const DEFAULT_ADMIN_TOKEN_ENV = 'CF_TOKEN_ADMIN'
 const KEYS = ['kind', 'rulesets', 'cloudflare']
 const CLOUDFLARE_KEYS = ['account', 'adminTokenEnv', 'envs', 'retire']
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/
+const RESERVED_ADMIN_TOKEN_ENVS = new Set([
+    'CLOUDFLARE_API_TOKEN',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+])
 
 /** The key `rulesets` is validated under; rewritten to `rulesets` in messages. */
 const PLACEHOLDER = '_/_'
@@ -90,16 +95,21 @@ function rulesetProblems(kind: Kind, rulesets: unknown): string[] {
     }
 }
 
+/** The Cloudflare token entry, with `retire` filled in. */
+function toTokenEntry(cf: CloudflareConfig): TokenRepoConfig
+function toTokenEntry(cf: Record<string, unknown>): Record<string, unknown>
+function toTokenEntry(cf: Record<string, unknown>) {
+    return {
+        account: cf.account,
+        envs: cf.envs,
+        retire: cf.retire ?? [],
+    }
+}
+
 /** checkRepos' messages for the cloudflare section, under `cloudflare.` paths. */
 function tokenProblems(cf: Record<string, unknown>): string[] {
     try {
-        checkRepos({
-            [PLACEHOLDER]: {
-                account: cf.account,
-                envs: cf.envs,
-                retire: cf.retire ?? [],
-            },
-        })
+        checkRepos({ [PLACEHOLDER]: toTokenEntry(cf) })
         return []
     } catch (e) {
         return (e as Error).message
@@ -150,6 +160,13 @@ export function checkVoidflowConfig(x: unknown): VoidflowConfig {
                 errs.push(
                     'cloudflare.adminTokenEnv: not an environment variable name',
                 )
+            else if (
+                typeof env === 'string' &&
+                RESERVED_ADMIN_TOKEN_ENVS.has(env)
+            )
+                errs.push(
+                    `cloudflare.adminTokenEnv: ${env} is reserved for deploy or GitHub credentials`,
+                )
         }
     }
 
@@ -173,9 +190,7 @@ export function toTokenRepos(
 ): Record<string, TokenRepoConfig> {
     const cf = cfg.cloudflare
     if (!cf) throw new Error('no cloudflare section')
-    return {
-        [repo]: { account: cf.account, envs: cf.envs, retire: cf.retire ?? [] },
-    }
+    return { [repo]: toTokenEntry(cf) }
 }
 
 /** The markdown table of each kind's defaults, as docs/config.md carries it. */

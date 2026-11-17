@@ -131,7 +131,8 @@ export const WORKERS_ROUTES_WRITE = '28f4b596e7d643029c524985477ae49a'
 /** Legacy account-wide Workers Scripts Write, used only for a fallback. */
 export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
 
-export const tokenName = (repo: string, env: string) => `${TAG}:${repo}:${env}`
+export const tokenName = (repo: string, env: string) =>
+    `${TAG}:${repo.toLowerCase()}:${env}`
 
 /** The account an env's Worker and token live in. */
 export const envAccount = (cfg: RepoConfig, env: EnvConfig) =>

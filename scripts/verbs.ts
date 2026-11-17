@@ -17,7 +17,11 @@ import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { checkRepos } from '../cloudflare/tokens.ts'
-import { adminTokenVar, type CloudflareConfig } from '../config/index.ts'
+import {
+    adminTokenVar,
+    type CloudflareConfig,
+    type VoidflowConfig,
+} from '../config/index.ts'
 import { checkFleet } from '../rulesets/index.ts'
 import { loadConfig } from './lib/config.ts'
 import {
@@ -199,7 +203,8 @@ Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured too
 
 Inside a repo with a voidflow.config.ts (and no --config or VOIDFLOW_CONFIG),
 rulesets run from that file for that repo only, and so do tokens when it has a
-cloudflare section: --repo and --entire-fleet do not apply. Without a tool,
+cloudflare section. For token verbs, --repo and --entire-fleet select the
+fleet instead. Without a tool,
 tokens run only when the section's admin token variable is set. See
 docs/config.md.`
 
@@ -389,23 +394,22 @@ function fail(msg: string): never {
 }
 
 /**
- * One verb run on the repo's own voidflow.config.ts: loads and validates it
- * before any child runs, then for each tool (repoModeTools) prints the header
- * and re-runs `voidflow rulesets` or `voidflow tokens cf` on it. Exits the
- * process with the worst tool's code.
+ * One verb run on the repo's own validated voidflow.config.ts: for each tool
+ * (repoModeTools) prints the header and re-runs `voidflow rulesets` or
+ * `voidflow tokens cf` on it. Exits with the worst tool's code.
  */
 async function runRepoMode(
     verb: Verb,
     v: VerbArgs,
     prog: string,
     file: string,
+    cfg: VoidflowConfig,
 ): Promise<never> {
     const refused = repoModeError(v)
     if (refused) fail(`${prog}: ${refused}`)
-    let cf: CloudflareConfig | undefined
+    const cf: CloudflareConfig | undefined = cfg.cloudflare
     let slug: string
     try {
-        cf = (await loadVoidflowConfig(file)).cloudflare
         slug = await repoSlug(process.env, dirname(file))
     } catch (e) {
         fail(`${prog}: ${(e as Error).message}`)
@@ -457,25 +461,26 @@ export function verbMain(verb: Verb) {
             )
 
         // Inside a repo with a voidflow.config.ts, the verbs run from that
-        // file unless the fleet is named explicitly. Tokens come from it only
-        // when it has a cloudflare section; otherwise from the fleet, as
-        // before, until the repo moves its tokens over.
+        // file unless the fleet is named explicitly. Token verbs also honor
+        // --repo and --entire-fleet as explicit fleet intent.
         const repoFile =
             v.config === undefined && !process.env.VOIDFLOW_CONFIG
                 ? findRepoConfig(process.cwd())
                 : null
         if (repoFile) {
-            let fromRepo = v.tool !== 'cf-tokens'
-            if (!fromRepo) {
-                try {
-                    fromRepo =
-                        (await loadVoidflowConfig(repoFile)).cloudflare !==
-                        undefined
-                } catch (e) {
-                    fail(`${prog}: ${(e as Error).message}`)
-                }
+            let cfg: VoidflowConfig
+            try {
+                cfg = await loadVoidflowConfig(repoFile)
+            } catch (e) {
+                fail(`${prog}: ${(e as Error).message}`)
             }
-            if (fromRepo) return runRepoMode(verb, v, prog, repoFile)
+            const tokenFleetTarget =
+                v.tool === 'cf-tokens' &&
+                (v.repo !== undefined || v.entireFleet)
+            const fromRepo =
+                v.tool !== 'cf-tokens' ||
+                (!tokenFleetTarget && cfg.cloudflare !== undefined)
+            if (fromRepo) return runRepoMode(verb, v, prog, repoFile, cfg)
         }
 
         const wanted: Tool[] = v.tool ? [v.tool] : TOOLS
