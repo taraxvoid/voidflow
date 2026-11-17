@@ -125,6 +125,21 @@ describe('checkVoidflowConfig', () => {
         ).toContain(
             'cloudflare.adminTokenEnv: not an environment variable name',
         )
+        for (const adminTokenEnv of [
+            'CLOUDFLARE_API_TOKEN',
+            'GH_TOKEN',
+            'GITHUB_TOKEN',
+        ])
+            expect(
+                problems({
+                    kind: 'site',
+                    cloudflare: {
+                        account: ACCT,
+                        envs: [{ env: 'prod' }],
+                        adminTokenEnv,
+                    },
+                }),
+            ).toContain(`${adminTokenEnv} is reserved`)
         expect(
             problems({
                 kind: 'site',

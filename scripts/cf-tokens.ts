@@ -30,7 +30,7 @@
  * `gh secret set` and never printed.
  */
 
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import {
     type Action,
     checkRepos,
@@ -45,6 +45,7 @@ import {
     repoAccounts,
     resolveTarget,
     retireTargets,
+    sameToken,
     type Token,
     tokenName,
     WORKER_EDITOR,
@@ -95,8 +96,8 @@ Needs the admin token (cloudflare.adminTokenEnv with --repo-config, default
 CF_TOKEN_ADMIN) and gh with admin on the repos.`
 
 /**
- * The environment for a --try command: `env` without CF_TOKEN_ADMIN or
- * `adminVar`, with the throwaway token and its account.
+ * The environment for a --try command: `env` without CF_TOKEN_ADMIN or its
+ * validated admin variable, with the throwaway token and its account.
  */
 export function tryChildEnv(
     env: Record<string, string | undefined>,
@@ -143,10 +144,14 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         REPOS = await loadOrExit(values.config, checkRepos)
     } else {
         try {
-            const cfg = await loadVoidflowConfig(repoConfig)
+            const repoConfigPath = resolve(
+                process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
+                repoConfig,
+            )
+            const cfg = await loadVoidflowConfig(repoConfigPath)
             REPOS = toTokenRepos(
                 cfg,
-                await repoSlug(process.env, dirname(repoConfig)),
+                await repoSlug(process.env, dirname(repoConfigPath)),
             )
             if (cfg.cloudflare) adminVar = adminTokenVar(cfg.cloudflare)
         } catch (e) {
@@ -499,7 +504,11 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         // The list endpoint omits policies; fetch each match in full.
         const have = await Promise.all(
             (tokens.get(acct) ?? [])
-                .filter((t) => t.name === name)
+                // A former fleet config may have spelled owner/name with
+                // different casing. Treat it as this token, then update it
+                // to the canonical lowercase name instead of minting another.
+                // Only the repo part is case-folded: env names stay exact.
+                .filter((t) => sameToken(t.name, name))
                 .map((t) =>
                     cf<Token>('GET', `/accounts/${acct}/tokens/${t.id}`),
                 ),
@@ -518,6 +527,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         for (const a of plan(want, have, now, {
             rotate: values.rotate,
             secretMissing,
+            name,
         })) {
             await act(repo, acct, env, name, want, a)
         }
@@ -538,7 +548,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     async function tryEnv(envName: string, cmd: string[]) {
         if (repos.length !== 1 || cmd.length === 0) {
             console.error(
-                '--try needs one --repo, an env, and a command after --',
+                '--try needs one configured repo, an env, and a command after --',
             )
             process.exit(2)
         }
