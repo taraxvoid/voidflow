@@ -314,6 +314,11 @@ describe('settings', () => {
         })
         const rs = await runSettings(f.gh, 'o/r', sel())
         expect(status(rs, 'codeql')).toBe('skipped-plan')
+        const detail = rs.find((r) => r.name === 'codeql')?.detail ?? ''
+        expect(detail).toContain('code scanning')
+        expect(detail).toContain('--skip codeql')
+        expect(detail).not.toContain('HTTP')
+        expect(detail).not.toContain('Advanced Security')
         expect(
             writes(f.calls).some((c) => c.path.includes('default-setup')),
         ).toBe(false)
