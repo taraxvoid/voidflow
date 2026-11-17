@@ -161,6 +161,7 @@ const TOOL_FILES = [
     '.github/workflows/ci.yml',
     'tsconfig.json',
     'package.json',
+    'voidflow.config.ts',
 ]
 
 describe('voidflow init', () => {
@@ -191,8 +192,26 @@ describe('voidflow init', () => {
         expect(r.out).toContain(
             'https://github.com/o/r/settings/security_analysis',
         )
+        expect(r.out).toContain('voidflow plan rulesets')
+        expect(r.out).toContain('voidflow apply rulesets')
+        expect(r.out).not.toContain("'o/r': {},")
+    })
+
+    test('a customized config survives a re-run', async () => {
+        const dir = repo()
+        const mine =
+            "export default { kind: 'tool', rulesets: { checks: [] } }\n"
+        writeFileSync(join(dir, 'voidflow.config.ts'), mine)
+        const r = await run(['--kind', 'tool', dir])
+        expect(r.code).toBe(0)
+        expect(readFileSync(join(dir, 'voidflow.config.ts'), 'utf8')).toBe(mine)
+        expect(r.out).toContain('repo-owned')
+    })
+
+    test('without the config item, next steps keep the fleet text', async () => {
+        const r = await run(['--kind', 'tool', '--skip', 'config', repo()])
         expect(r.out).toContain("'o/r': {},")
-        expect(r.out).toContain('--config')
+        expect(r.out).not.toContain('voidflow plan rulesets')
     })
 
     test('a conflict exits 1, writes no files, and still applies settings', async () => {
@@ -517,7 +536,7 @@ describe('voidflow init', () => {
         expect(r.code).toBe(0)
         expect(existsSync(join(dir, 'playwright.config.js'))).toBe(false)
         expect(r.out).toContain('playwright.config.ts already exists')
-        expect(r.out).toContain("': {},")
+        expect(r.out).toContain('voidflow plan rulesets')
         expect(r.out).not.toContain('tool()')
     })
 

@@ -12,6 +12,8 @@ minor ([`STABILITY.md`](../STABILITY.md#experimental)). Pin an exact version.
 
 Plain data, so it loads under Bun or Node 24 without the package installed.
 Use `import type` for the type; nothing is imported at run time.
+`voidflow init --kind <k>` writes it holding only `kind`; a re-run keeps an
+existing one unless `--force`.
 
 ```ts
 import type { VoidflowConfig } from '@taraxvoid/voidflow/config'

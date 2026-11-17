@@ -225,6 +225,16 @@ export function buildTemplates(root: string): Map<string, string> {
     t.set('common/gitignore', 'node_modules/\ndist/\n.env*\n')
     t.set('common/SECURITY.md', securityMd)
     t.set('common/CODEOWNERS', codeowners)
+    // Repo-owned: init writes it once, with no marker.
+    t.set(
+        'common/voidflow.config.ts',
+        `// voidflow settings for this repo; \`kind\` picks the defaults: https://github.com/taraxvoid/voidflow/blob/main/docs/config.md
+
+import type { VoidflowConfig } from '@taraxvoid/voidflow/config'
+
+export default { kind: '{{kind}}' } satisfies VoidflowConfig
+`,
+    )
     // The gh-aw version agentic-locks.yml compiles with; init tells you to match it.
     const ghAw = /default:\s*(v\d[\w.-]*)/.exec(
         read(root, '.github/workflows/agentic-locks.yml'),
