@@ -484,10 +484,6 @@ export function diff(have: unknown, want: unknown): string[] {
     ]
 }
 
-// ---- plan gating ------------------------------------------------------------
-
-export { isPlanGated } from './plan-gate.ts'
-
 // ---- merge queue eligibility ------------------------------------------------
 
 /** True when a fleet entry asks for a merge queue (tiered or spelled out). */

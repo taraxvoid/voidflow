@@ -265,6 +265,7 @@ export default { kind: '{{kind}}' } satisfies VoidflowConfig
                 target: 'ESNext',
                 module: 'Preserve',
                 moduleResolution: 'bundler',
+                allowImportingTsExtensions: true,
                 strict: true,
                 skipLibCheck: true,
                 noEmit: true,
