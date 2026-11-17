@@ -93,6 +93,17 @@ describe('templates', () => {
         expect(b).toContain('[install.security]')
         expect(b).toMatch(/^scanner = /m)
         expect(b).not.toContain('[test]')
+        expect(b).toMatch(
+            /^minimumReleaseAgeExcludes = \["@taraxvoid\/voidflow", /m,
+        )
+        for (const k of ['tool', 'site']) {
+            const dev = JSON.parse(
+                buildTemplates(ROOT).get(`${k}/package.json`)!,
+            ).devDependencies
+            expect(dev['@socketsecurity/bun-security-scanner']).toMatch(
+                /^\d+\.\d+\.\d+$/,
+            )
+        }
     })
 
     test('biome-formatted files pass biome check with the base config', async () => {
