@@ -16,6 +16,7 @@ import {
     resolveTarget,
     retireTargets,
     routeHost,
+    sameToken,
     type Token,
     tokenName,
     WORKERS_ROUTES_WRITE,
@@ -250,6 +251,25 @@ describe('plan', () => {
         expect(
             plan(want, [], now, { secretMissing: true }).map((a) => a.kind),
         ).toEqual(['create'])
+    })
+
+    test('a legacy-cased name is renamed even when policies match', () => {
+        const legacy = token({
+            name: 'voidflow:TaraXVoid/Example_Project:prod',
+        })
+        const [a] = plan(want, [legacy], now, {
+            name: tokenName('taraxvoid/example_project', 'prod'),
+        })
+        expect(a.kind).toBe('update')
+    })
+
+    test('sameToken folds the repo case but keeps the env exact', () => {
+        expect(
+            sameToken('voidflow:Owner/Repo:prod', 'voidflow:owner/repo:prod'),
+        ).toBe(true)
+        expect(
+            sameToken('voidflow:owner/repo:PROD', 'voidflow:owner/repo:prod'),
+        ).toBe(false)
     })
 
     test('a rotation replaces the token it found', () => {

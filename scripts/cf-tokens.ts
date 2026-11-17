@@ -45,6 +45,7 @@ import {
     repoAccounts,
     resolveTarget,
     retireTargets,
+    sameToken,
     type Token,
     tokenName,
     WORKER_EDITOR,
@@ -506,7 +507,8 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
                 // A former fleet config may have spelled owner/name with
                 // different casing. Treat it as this token, then update it
                 // to the canonical lowercase name instead of minting another.
-                .filter((t) => t.name.toLowerCase() === name.toLowerCase())
+                // Only the repo part is case-folded: env names stay exact.
+                .filter((t) => sameToken(t.name, name))
                 .map((t) =>
                     cf<Token>('GET', `/accounts/${acct}/tokens/${t.id}`),
                 ),
@@ -525,6 +527,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         for (const a of plan(want, have, now, {
             rotate: values.rotate,
             secretMissing,
+            name,
         })) {
             await act(repo, acct, env, name, want, a)
         }

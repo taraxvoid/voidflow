@@ -467,19 +467,19 @@ export function verbMain(verb: Verb) {
             v.config === undefined && !process.env.VOIDFLOW_CONFIG
                 ? findRepoConfig(process.cwd())
                 : null
-        if (repoFile) {
+        // Explicit fleet intent for token verbs skips the repo file entirely,
+        // so an invalid local cloudflare section can't block a fleet run.
+        const tokenFleetTarget =
+            v.tool === 'cf-tokens' && (v.repo !== undefined || v.entireFleet)
+        if (repoFile && !tokenFleetTarget) {
             let cfg: VoidflowConfig
             try {
                 cfg = await loadVoidflowConfig(repoFile)
             } catch (e) {
                 fail(`${prog}: ${(e as Error).message}`)
             }
-            const tokenFleetTarget =
-                v.tool === 'cf-tokens' &&
-                (v.repo !== undefined || v.entireFleet)
             const fromRepo =
-                v.tool !== 'cf-tokens' ||
-                (!tokenFleetTarget && cfg.cloudflare !== undefined)
+                v.tool !== 'cf-tokens' || cfg.cloudflare !== undefined
             if (fromRepo) return runRepoMode(verb, v, prog, repoFile, cfg)
         }
 

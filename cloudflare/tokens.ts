@@ -134,6 +134,21 @@ export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
 export const tokenName = (repo: string, env: string) =>
     `${TAG}:${repo.toLowerCase()}:${env}`
 
+/**
+ * Whether two token names are the same token: the tag and repo compare
+ * case-insensitively (a former config may have cased the repo differently),
+ * the env after the last colon compares exactly.
+ */
+export function sameToken(a: string, b: string): boolean {
+    const split = (n: string) => {
+        const i = n.lastIndexOf(':')
+        return [n.slice(0, i).toLowerCase(), n.slice(i + 1)]
+    }
+    const [ar, ae] = split(a)
+    const [br, be] = split(b)
+    return ar === br && ae === be
+}
+
 /** The account an env's Worker and token live in. */
 export const envAccount = (cfg: RepoConfig, env: EnvConfig) =>
     env.account ?? cfg.account
@@ -433,7 +448,7 @@ export function plan(
     want: Policy[],
     have: Token[],
     now: Date,
-    opts: { rotate?: boolean; secretMissing?: boolean } = {},
+    opts: { rotate?: boolean; secretMissing?: boolean; name?: string } = {},
 ): Action[] {
     if (have.length === 0) return [{ kind: 'create', reason: 'missing' }]
     if (have.length > 1) {
@@ -466,6 +481,11 @@ export function plan(
     }
     if (normalise(token.policies) !== normalise(want)) {
         return [{ kind: 'update', token, reason: 'policies differ' }]
+    }
+    // A token found under a differently cased repo name is renamed to the
+    // canonical one (the update PUT sets the name).
+    if (opts.name !== undefined && token.name !== opts.name) {
+        return [{ kind: 'update', token, reason: 'name differs' }]
     }
     return [{ kind: 'ok', token }]
 }

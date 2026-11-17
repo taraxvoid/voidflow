@@ -786,6 +786,18 @@ describe('voidflow in a repo with a voidflow.config.ts', () => {
         }
     })
 
+    test('token fleet targets ignore an invalid repo cloudflare section', async () => {
+        const BAD = `export default { kind: 'site', cloudflare: { account: 'nope' } }`
+        for (const args of [
+            ['plan', 'tokens', 'cf', '--repo', 'other'],
+            ['apply', 'tokens', 'cf', '--entire-fleet'],
+        ]) {
+            const r = await inRepo(args, BAD)
+            expect(r.err).toContain('no cf-tokens.ts')
+            expect(r.err).not.toContain('cloudflare.')
+        }
+    })
+
     test('a bare plan skips tokens when the admin variable is unset', async () => {
         const r = await inRepo(['plan'], CF)
         const rulesetsOnly = await inRepo(['plan', 'rulesets'], CF)
