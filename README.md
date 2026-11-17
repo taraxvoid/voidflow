@@ -102,7 +102,7 @@ version and `--force` to overwrite the ones that differ.
 | `--enable-agentic` | opt in, experimental: [deps-review](#deps-review) and the repo settings and labels it relies on. The `COPILOT_GITHUB_TOKEN` secret is a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets |
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to the repo's `checks` in your fleet rulesets config |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
-| `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos `init` writes `@OWNER` and asks for `--owner`) |
+| `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos, or with no repo to read, a full run skips CODEOWNERS with a note and `--preset codeowners` fails until you pass `--owner`) |
 | `--apply` | write the files and change the settings. Without it `init` only plans and changes nothing |
 | `-f`, `--force` | with `--apply`, overwrite files that differ |
 

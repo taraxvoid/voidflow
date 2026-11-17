@@ -330,12 +330,13 @@ export async function main(
         const picked = preset.files === 'all' ? null : new Set(preset.files)
         // An organization cannot be a code owner, only its users and teams.
         let ownerHandle = owner ?? null
-        if (
-            owner === undefined &&
-            repo &&
+        const codeownersWanted =
             (picked === null || picked.has('codeowners')) &&
             !values.skip.includes('codeowners')
-        ) {
+        let ownerWhy: string | null = null
+        if (owner === undefined && codeownersWanted && !repo)
+            ownerWhy = 'there is no repo to take the owner from'
+        if (owner === undefined && codeownersWanted && repo) {
             const login = repo.split('/')[0] as string
             const gh = deps.gh ?? ghCli()
             const type =
@@ -343,9 +344,7 @@ export async function main(
                     ? await ownerType(gh, login)
                     : null
             if (type === 'Organization') {
-                notes.push(
-                    `${login} is an organization, which cannot be a code owner: CODEOWNERS uses the placeholder @OWNER; pass --owner @${login}/team or @user (needs write access)`,
-                )
+                ownerWhy = `${login} is an organization, which cannot be a code owner`
             } else {
                 ownerHandle = `@${login}`
                 if (type === null)
@@ -353,6 +352,15 @@ export async function main(
                         `could not tell whether ${login} is a user; if it is an organization, pass --owner @${login}/team or @user for CODEOWNERS`,
                     )
             }
+        }
+        // No usable owner: a placeholder would ship a CODEOWNERS that owns
+        // nothing, so require --owner instead of writing it.
+        const dropCodeowners = ownerWhy !== null
+        if (ownerWhy !== null) {
+            const need = `${ownerWhy}; pass --owner @user or @org/team (needs write access)`
+            if (preset.files !== 'all' && picked?.size === 1)
+                fail(`cannot write CODEOWNERS: ${need}`, prog)
+            notes.push(`CODEOWNERS skipped: ${need}`)
         }
         const ctx: RenderCtx = {
             version,
@@ -366,6 +374,7 @@ export async function main(
         }
         const skip = new Set([
             ...values.skip,
+            ...(dropCodeowners ? ['codeowners'] : []),
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
         fileActions = planFiles(
@@ -430,10 +439,6 @@ export async function main(
             applyFiles(dir, fileActions)
         }
         if (fileActions.some((a) => a.name === 'codeowners')) {
-            if (ctx.owner == null && !repo)
-                notes.push(
-                    'CODEOWNERS uses the placeholder @OWNER (no repo to take the owner from); pass --owner @handle',
-                )
             const gh = deps.gh ?? ghCli()
             if (
                 repo &&
