@@ -345,7 +345,7 @@ const PLAN_GATED = new Set(['codeql', 'secret-scanning'])
 function planGatedHint(name: string, info: RepoInfo): string {
     const feature = name === 'codeql' ? 'code scanning' : 'secret scanning'
     const kind = info.visibility === 'INTERNAL' ? 'internal' : 'private'
-    return `${feature} on ${kind} repositories needs a paid GitHub Code Security / Secret Protection plan; enable it for the org or make the repo public, then re-run (or pass --skip-setting ${name} to hide this line)`
+    return `${feature} on ${kind} repositories needs a paid GitHub Code Security / Secret Protection plan; enable it for the org or make the repo public, then re-run (or pass --skip ${name} to hide this line)`
 }
 
 function classifyError(
