@@ -197,6 +197,7 @@ pre-push:
           esac
         done
         [ "$release" = true ] || exit 0
+        grep -q '"check:voidflow"' package.json || exit 0
         unset $(git rev-parse --local-env-vars)
         code=0
         {pm} run --if-present check:voidflow || code=$?
