@@ -146,15 +146,25 @@ const row = (status: string, name: string, extra = '') => {
     return `  ${style ? paint(style, label) : label}${extra ? `${name.padEnd(28)} ${extra}` : name}`
 }
 
-/** The cron minute from a voidflow-written ci.yml, so a re-run stays unchanged. */
+/**
+ * The cron minute from a voidflow-written ci.yml, or else verify-lockfile.yml
+ * (which shares it), so a re-run stays unchanged even when ci.yml is skipped.
+ */
 function existingCronMinute(dir: string): number | null {
-    const path = join(dir, '.github/workflows/ci.yml')
-    if (!existsSync(path)) return null
-    const text = readFileSync(path, 'utf8')
-    if (!text.includes('Written by voidflow v')) return null
-    const m = /cron:\s*'(\d{1,2}) 6 \* \* \*'/.exec(text)
-    const n = m ? Number(m[1]) : Number.NaN
-    return n >= 0 && n <= 59 ? n : null
+    const sources: [string, RegExp][] = [
+        ['ci.yml', /cron:\s*'(\d{1,2}) 6 \* \* \*'/],
+        ['verify-lockfile.yml', /cron:\s*'(\d{1,2}) 7 \* \* 1'/],
+    ]
+    for (const [file, re] of sources) {
+        const path = join(dir, '.github/workflows', file)
+        if (!existsSync(path)) continue
+        const text = readFileSync(path, 'utf8')
+        if (!text.includes('Written by voidflow v')) continue
+        const m = re.exec(text)
+        const n = m ? Number(m[1]) : Number.NaN
+        if (n >= 0 && n <= 59) return n
+    }
+    return null
 }
 
 async function defaultGhAw(

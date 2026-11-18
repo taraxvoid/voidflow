@@ -315,7 +315,8 @@ jobs:
         env:
           TOKEN: \${{ steps.app-token.outputs.token }}
         run: |
-          if git diff --quiet -- .github/workflows; then
+          # --porcelain also lists an untracked actions.lock (a first lock).
+          if [ -z "$(git status --porcelain -- .github/workflows)" ]; then
             echo "Lockfile already in step."
             exit 0
           fi

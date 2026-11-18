@@ -175,6 +175,12 @@ describe('templates', () => {
             expect(template(f)).toContain(`VERSION: ${version} #`)
     })
 
+    test('relock commits a first, untracked actions.lock', () => {
+        const t = template('relock-actions.yml')
+        expect(t).toContain('git status --porcelain -- .github/workflows')
+        expect(t).not.toContain('git diff --quiet')
+    })
+
     test('verify runs on the default branch only, not next', () => {
         expect(template('verify-lockfile.yml')).toContain('branches: [main]')
     })
@@ -525,6 +531,29 @@ describe('voidflow init --enable-actions-relock', () => {
         )
         expect(relock).toContain('.github/workflows/deploy.yml \\')
         expect(relock).not.toContain('deps-review.lock.yml')
+    })
+
+    test('a re-run keeps the verify cron minute when ci.yml is skipped', async () => {
+        repo()
+        const argv = [
+            '--kind',
+            'tool',
+            '--preset',
+            'files',
+            '--skip',
+            'ci',
+            '--enable-actions-lock',
+            '--apply',
+        ]
+        const path = join(dir, '.github/workflows/verify-lockfile.yml')
+        expect((await run(argv, okLock)).code).toBe(0)
+        const first = readFileSync(path, 'utf8')
+        for (let i = 0; i < 5; i++) {
+            const r = await run(argv, okLock)
+            expect(r.code).toBe(0)
+            expect(r.out).toMatch(/unchanged\s+actions-lock/)
+        }
+        expect(readFileSync(path, 'utf8')).toBe(first)
     })
 
     test('a missing extension is a manual step and exits 0', async () => {
