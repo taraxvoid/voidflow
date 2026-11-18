@@ -175,6 +175,28 @@ describe('templates', () => {
             expect(template(f)).toContain(`VERSION: ${version} #`)
     })
 
+    test('relock runs from the base branch and reads the PR head as data', () => {
+        const t = template('relock-actions.yml')
+        // The base branch's workflow and actions.lock, so a PR bumping an
+        // action relock itself uses cannot block the relock at startup.
+        expect(t).toMatch(/^ {2}pull_request_target:$/m)
+        expect(t).not.toMatch(/^ {2}pull_request:$/m)
+        expect(t).toContain('# zizmor: ignore[dangerous-triggers]')
+        expect(t).toContain('ref: ${{ github.event.pull_request.head.sha }}')
+        expect(t).toContain(
+            'github.event.pull_request.head.repo.full_name == github.repository',
+        )
+    })
+
+    test('the template matches voidflow own relock-actions.yml from on: down', () => {
+        const own = readFileSync(
+            join(ROOT, '.github/workflows/relock-actions.yml'),
+            'utf8',
+        )
+        const body = (t: string) => t.slice(t.indexOf('\non:\n'))
+        expect(body(template('relock-actions.yml'))).toBe(body(own))
+    })
+
     test('relock commits a first, untracked actions.lock', () => {
         const t = template('relock-actions.yml')
         expect(t).toContain('git status --porcelain -- .github/workflows')

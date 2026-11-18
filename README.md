@@ -195,6 +195,12 @@ branch. Same-repo pull requests only.
 - **Safety.** Only the lockfile tooling runs: nothing from the pull request is
   installed or executed, the checkout keeps no credentials, and it never passes
   `--accept-moved` (check why a pin moved before accepting it, by hand).
+- **`pull_request_target`.** The workflow runs as it is on the base branch,
+  against the base branch's `actions.lock`. Under `pull_request`, a PR that
+  bumps an action relock-actions itself uses would have the Require lockfile
+  policy refuse the relock run at startup. The PR head is checked out by SHA as
+  data, and fork PRs never run it. zizmor's `dangerous-triggers` finding is
+  ignored inline with that reason.
 - **gh-aw.** If the repo has gh-aw workflows (a `*.lock.yml`, or
   `--enable-agentic`), both workflows and the one-off run are limited to the
   repo's other workflows, listed by name when `init` runs: `gh actions-lock`

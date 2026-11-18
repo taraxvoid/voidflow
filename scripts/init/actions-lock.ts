@@ -21,7 +21,8 @@ export const RELOCK_LABEL = {
 }
 
 export const APP_VARIABLE = 'RELEASE_BOT_CLIENT_ID'
-export const APP_SECRET = 'RELEASE_BOT_APP_PRIVATE_KEY'
+/** The name of the Actions secret holding the App's private key (not the key). */
+export const APP_KEY_NAME = 'RELEASE_BOT_APP_PRIVATE_KEY'
 
 /**
  * The workflows `gh actions-lock` should be limited to, or null for a plain
@@ -150,7 +151,11 @@ const INSTALL = 'gh extension install github/gh-actions-lock'
 
 /** True when gh reports `actions-lock` as an unknown command (extension not installed). */
 function missingExtension(err: string, code: number): boolean {
-    return code === 127 || /unknown command "?actions-lock"?/i.test(err)
+    const e = err.toLowerCase()
+    return (
+        code === 127 ||
+        (e.includes('unknown command') && e.includes('actions-lock'))
+    )
 }
 
 /**
@@ -235,10 +240,10 @@ export async function relockCredentials(
         ),
         hasName(
             gh,
-            `repos/${repo}/actions/secrets/${APP_SECRET}`,
+            `repos/${repo}/actions/secrets/${APP_KEY_NAME}`,
             `repos/${repo}/actions/organization-secrets?per_page=100`,
             'secrets',
-            APP_SECRET,
+            APP_KEY_NAME,
         ),
     ])
     return { variable, secret }
@@ -251,7 +256,7 @@ export function credentialNotes(
 ): string[] {
     const missing: string[] = []
     if (c.variable !== true) missing.push(`the ${APP_VARIABLE} variable`)
-    if (c.secret !== true) missing.push(`the ${APP_SECRET} secret`)
+    if (c.secret !== true) missing.push(`the ${APP_KEY_NAME} secret`)
     if (missing.length === 0) return []
     const unknown = c.variable === null || c.secret === null
     return [
