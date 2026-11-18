@@ -282,6 +282,7 @@ export default { kind: '{{kind}}' } satisfies VoidflowConfig
                 check: 'tsc --noEmit',
                 test: 'bun test',
                 'check:licenses': 'check-licenses',
+                'check:voidflow': 'voidflow check',
             },
             devDependencies: {
                 '@taraxvoid/voidflow': '{{version}}',
@@ -312,6 +313,7 @@ export default definePreviewConfig({ ciPort: 4141 })
                 prepare: PREPARE,
                 lint: 'biome check .',
                 'check:licenses': 'check-licenses',
+                'check:voidflow': 'voidflow check',
                 'test:e2e:all': 'playwright test',
                 'test:e2e:a11y': 'playwright test --grep @a11y',
                 'test:e2e:lighthouse':

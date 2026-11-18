@@ -4,7 +4,8 @@
         "lint": "biome check .",
         "check": "tsc --noEmit",
         "test": "bun test",
-        "check:licenses": "check-licenses"
+        "check:licenses": "check-licenses",
+        "check:voidflow": "voidflow check"
     },
     "devDependencies": {
         "@taraxvoid/voidflow": "{{version}}",
