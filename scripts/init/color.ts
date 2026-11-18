@@ -48,6 +48,8 @@ const STATUS_STYLE: Record<string, keyof typeof CODES> = {
     conflict: 'red',
     failed: 'red',
     unavailable: 'red',
+    manual: 'yellow',
+    missing: 'yellow',
 }
 
 /** The style for a status word, ignoring a leading "would ". */

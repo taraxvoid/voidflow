@@ -2,6 +2,7 @@
  * GitHub repo settings for `voidflow init`: read current state, change only
  * what differs. The table is data so a drift check can reuse it.
  */
+import { RELOCK_LABEL } from './actions-lock.ts'
 import type { Gh, GhResult } from './gh.ts'
 
 export type SettingStatus =
@@ -27,7 +28,7 @@ export type RepoInfo = {
 
 type Setting = {
     name: string
-    optIn?: 'pvr' | 'ai-scan' | 'agentic'
+    optIn?: 'pvr' | 'ai-scan' | 'agentic' | 'actions-relock'
     read(gh: Gh, repo: string, info: RepoInfo): Promise<boolean>
     write(gh: Gh, repo: string, info: RepoInfo): Promise<void>
 }
@@ -335,6 +336,14 @@ function agenticSettings(): Setting[] {
 
 SETTINGS.push(...agenticSettings())
 
+// The label that asks relock-actions to relock a non-Renovate pull request.
+SETTINGS.push({
+    name: `label-${RELOCK_LABEL.name}`,
+    optIn: 'actions-relock',
+    read: (gh, repo) => labelExists(gh, repo, RELOCK_LABEL.name),
+    write: (gh, repo) => send(gh, 'POST', `repos/${repo}/labels`, RELOCK_LABEL),
+})
+
 export function settingNames(): string[] {
     return SETTINGS.map((s) => s.name)
 }
@@ -389,6 +398,7 @@ export async function runSettings(
         enablePvr: boolean
         enableAiScan: boolean
         enableAgentic?: boolean
+        enableActionsRelock?: boolean
         dryRun: boolean
     },
 ): Promise<SettingResult[]> {
@@ -397,6 +407,7 @@ export async function runSettings(
         if (s.optIn === 'pvr') return sel.enablePvr
         if (s.optIn === 'ai-scan') return sel.enableAiScan
         if (s.optIn === 'agentic') return sel.enableAgentic
+        if (s.optIn === 'actions-relock') return sel.enableActionsRelock
         return true
     })
     let info: RepoInfo
@@ -451,9 +462,15 @@ export function manualReminders(
     repo: string,
     enableAiScan: boolean,
     enableAgentic = false,
+    enableActionsLock = false,
 ): string[] {
     const url = `https://github.com/${repo}/settings/security_analysis`
     const lines = [`Turn on Dependabot malware alerts (no API setting): ${url}`]
+    if (enableActionsLock) {
+        lines.push(
+            `Once actions.lock is committed and verify-lockfile passes, turn on the Require lockfile policy (no API setting): Evaluate first where offered (Enterprise Cloud), then Active. See https://docs.github.com/en/actions/how-tos/administer/enforce-workflow-lockfiles`,
+        )
+    }
     if (enableAgentic) {
         lines.push(
             `Add the COPILOT_GITHUB_TOKEN secret for the deps-review engine (cannot be created from nothing), as an Actions secret (https://github.com/${repo}/settings/secrets/actions) and again as a Dependabot secret (https://github.com/${repo}/settings/secrets/dependabot)`,

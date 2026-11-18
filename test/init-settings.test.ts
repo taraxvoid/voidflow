@@ -116,6 +116,7 @@ describe('settings', () => {
             'fork-pr-approval',
             'label-low-risk',
             'label-needs-you',
+            'label-relock-actions',
         ])
     })
 

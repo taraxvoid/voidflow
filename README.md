@@ -101,6 +101,8 @@ version and `--force` to overwrite the ones that differ.
 | `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
 | `--enable-agentic` | opt in, experimental: [deps-review](#deps-review) and the repo settings and labels it relies on. The `COPILOT_GITHUB_TOKEN` secret is a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets |
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to the repo's `checks` in your fleet rulesets config |
+| `--enable-actions-lock` | opt in: [actions.lock](#actionslock) for the repo's own workflows. Writes `verify-lockfile.yml`, then runs `gh actions-lock` once |
+| `--enable-actions-relock` | opt in, implies `--enable-actions-lock`: also writes [`relock-actions.yml`](#relock-actions), which relocks and pushes `actions.lock` on Renovate PRs and PRs labelled `relock-actions`. Needs a GitHub App |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
 | `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos, or with no repo to read, a full run skips CODEOWNERS with a note and `--preset codeowners` fails until you pass `--owner`) |
 | `--apply` | write the files and change the settings. Without it `init` only plans and changes nothing |
@@ -113,11 +115,13 @@ version and `--force` to overwrite the ones that differ.
 - **Files:** `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`,
   `ci`, `codeowners`, `config`, `tsconfig` (tool), `playwright` and
   `unlighthouse` (site), `package`, `security` (with `--enable-pvr`), `agentic`
-  (with `--enable-agentic`)
+  (with `--enable-agentic`), `actions-lock` and `actions-relock` (with
+  `--enable-actions-lock` / `--enable-actions-relock`)
 - **Settings:** `pr-policy`, `issue-policy`, `dependabot-alerts`,
   `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan`,
   and with `--enable-agentic`: `auto-merge`, `update-branch`,
-  `delete-branch-on-merge`, `actions-permissions`
+  `delete-branch-on-merge`, `actions-permissions`; with
+  `--enable-actions-relock`: `label-relock-actions`
 
 ### Files
 
@@ -152,6 +156,52 @@ With `--enable-agentic`, `init` also installs deps-review with `gh aw add`
 `.github/workflows/agentic.yml`. Moving from `shadow` to `gate` merges both
 files, no `--force` needed.
 
+### actions.lock
+
+A caller's [`actions.lock`](https://gh.io/actions-lockfile) covers its own
+workflows' `uses:` steps (the call into voidflow's reusable workflows is not
+locked, an upstream limitation). With the Require lockfile policy on, a stale
+lock fails the run at startup with no jobs and no logs, so keep it current.
+
+`--enable-actions-lock` writes `.github/workflows/verify-lockfile.yml`, which
+runs `gh actions-lock --verify` on pull requests, pushes to `main` and weekly,
+then runs `gh actions-lock` once so every workflow, the new one included, is
+locked; commit `.github/workflows`. Without the
+[gh-actions-lock](https://github.com/github/gh-actions-lock) extension the run
+is a `manual` row with the command to run; any other failure exits 1. `init`
+prints the Require lockfile policy as a manual step: turn it on once the lock
+is committed and verify passes (Evaluate first where your plan offers it).
+
+#### relock-actions
+
+Verify only fails the PR. `--enable-actions-relock` also writes
+`.github/workflows/relock-actions.yml`, which fixes it: on a pull request that
+touches `.github/workflows/` and is opened by `renovate[bot]` or labelled
+`relock-actions`, it runs `gh actions-lock` and pushes the result to the PR
+branch. Same-repo pull requests only.
+
+- **GitHub App.** The push uses an App token, since a push with
+  `GITHUB_TOKEN` would not re-trigger CI. The App needs Contents and Workflows
+  read and write on the repo. Set its client ID as the `RELEASE_BOT_CLIENT_ID`
+  Actions variable and its private key as the `RELEASE_BOT_APP_PRIVATE_KEY`
+  secret (repo or organization level). `init` checks for both and prints a
+  setup note when either is missing; it does not fail.
+- **The `relock-actions` label.** The settings half creates it. Add it to any
+  non-Renovate pull request that changes a `uses:` line, such as a hand edit
+  or a rebase that moved one.
+- **Renovate.** The hosted Renovate app has no `postUpgradeTasks`, so it
+  cannot run `gh actions-lock` itself; relock-actions runs on its PRs instead.
+  The shared preset bumps the pinned gh-actions-lock version in both workflows.
+- **Safety.** Only the lockfile tooling runs: nothing from the pull request is
+  installed or executed, the checkout keeps no credentials, and it never passes
+  `--accept-moved` (check why a pin moved before accepting it, by hand).
+- **gh-aw.** If the repo has gh-aw workflows (a `*.lock.yml`, or
+  `--enable-agentic`), both workflows and the one-off run are limited to the
+  repo's other workflows, listed by name when `init` runs: `gh actions-lock`
+  rewrites SHA pins to tags, and gh-aw's compiled locks must stay as gh-aw
+  wrote them. Add a workflow you create later to both lists by hand. Without
+  gh-aw workflows nothing is listed and every run covers the whole directory.
+
 ### Settings
 
 Always applied: pull requests and issues limited to collaborators (bots with
@@ -166,6 +216,7 @@ with push protection, and CodeQL default setup. Opt-ins are never turned off.
   branches, delete head branches on merge, a read-only workflow token with
   Actions unable to approve PRs, and the `low-risk` and `needs-you`
   labels.
+- `--enable-actions-relock` adds the `relock-actions` label.
 - Settings with no API (Dependabot malware alerts, the AI previews, the
   `COPILOT_GITHUB_TOKEN` secret) are printed as manual steps with a link.
 
@@ -175,7 +226,8 @@ private repo on a plan without rulesets is `skipped-plan`.
 
 ### Exit codes
 
-0 done, 1 a file conflict or a failed setting, 2 a usage error. None of the
+0 done, 1 a file conflict, a failed setting or a failed `gh actions-lock`
+run, 2 a usage error. None of the
 `skipped-*` statuses set 1. A file conflict doesn't stop the settings, and a
 missing `gh` or `origin` doesn't stop the files.
 

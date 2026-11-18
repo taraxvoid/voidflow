@@ -170,6 +170,162 @@ Do not open a public issue for a security problem. Expect an acknowledgement
 within a few days.
 `
 
+/**
+ * Pins the actions-lock templates share with voidflow's own verify-lockfile
+ * and relock-actions workflows, so Renovate bumps there carry over.
+ */
+function lockPins(root: string) {
+    const verify = read(root, '.github/workflows/verify-lockfile.yml')
+    const relock = read(root, '.github/workflows/relock-actions.yml')
+    const version =
+        /^\s*VERSION: (v\S+) # renovate: datasource=github-releases depName=github\/gh-actions-lock$/m
+    return {
+        lockVersion: need(
+            version.exec(verify)?.[1],
+            'verify-lockfile.yml gh-actions-lock VERSION',
+        ),
+        checkout: need(
+            /uses: actions\/checkout@(\S+)/.exec(verify)?.[1],
+            'verify-lockfile.yml actions/checkout',
+        ),
+        appToken: need(
+            /uses: actions\/create-github-app-token@(\S+)/.exec(relock)?.[1],
+            'relock-actions.yml actions/create-github-app-token',
+        ),
+    }
+}
+
+type LockPins = ReturnType<typeof lockPins>
+
+const versionLine = (v: string) =>
+    `VERSION: ${v} # renovate: datasource=github-releases depName=github/gh-actions-lock`
+
+/*
+ * The actions-lock lines below are exact: `voidflow init` rewrites them to
+ * name the caller's workflows when it has gh-aw ones (scripts/init/actions-lock.ts).
+ */
+const verifyLockfile = (
+    p: LockPins,
+) => `# Fails when .github/workflows/actions.lock is out of sync with this repo's
+# workflows, or a locked pin no longer verifies upstream. The weekly run
+# catches tags that were re-pointed upstream after they were locked.
+#
+# Relock locally with \`gh actions-lock\` (or \`--relock\` to advance moved refs)
+# and commit .github/workflows. Never run \`--accept-moved\` from automation.
+# Docs: https://gh.io/actions-lockfile
+
+name: verify-lockfile
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '{{cron_minute}} 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: \${{ github.token }}
+      ${versionLine(p.lockVersion)}
+    steps:
+      - uses: actions/checkout@${p.checkout}
+        with:
+          persist-credentials: false
+      - run: gh extension install github/gh-actions-lock --pin "$VERSION"
+      - run: gh actions-lock --verify
+`
+
+const relockActions = (
+    p: LockPins,
+) => `# Keeps .github/workflows/actions.lock in step with workflow edits that
+# cannot run gh actions-lock themselves. Renovate (the hosted app has no
+# postUpgradeTasks) bumps an action tag; this relocks and pushes the result
+# so verify-lockfile passes without a human.
+#
+# Runs for pull requests opened by renovate[bot], or any same-repo pull
+# request carrying the \`relock-actions\` label (apply it after a rebase or a
+# hand edit). The push uses a GitHub App token so the new commit triggers CI;
+# commits pushed with GITHUB_TOKEN would not. The app needs Contents and
+# Workflows read and write on this repo; set its client ID as the
+# RELEASE_BOT_CLIENT_ID variable and its private key as the
+# RELEASE_BOT_APP_PRIVATE_KEY secret.
+#
+# Only the lockfile tooling runs here; nothing from the pull request is
+# executed. Never run \`gh actions-lock --accept-moved\` from automation.
+
+name: relock-actions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '.github/workflows/**'
+
+permissions: {}
+
+concurrency:
+  group: relock-actions-\${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  relock:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.pull_request.user.login == 'renovate[bot]' ||
+      contains(github.event.pull_request.labels.*.name, 'relock-actions'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ${versionLine(p.lockVersion)}
+      HEAD_REF: \${{ github.event.pull_request.head.ref }}
+      REPO: \${{ github.repository }}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@${p.appToken}
+        with:
+          client-id: \${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: \${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
+      - uses: actions/checkout@${p.checkout}
+        with:
+          ref: \${{ github.event.pull_request.head.ref }}
+          persist-credentials: false
+
+      - name: Install gh-actions-lock
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: gh extension install github/gh-actions-lock --pin "$VERSION"
+
+      - name: Relock
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: gh actions-lock
+
+      - name: Commit and push
+        env:
+          TOKEN: \${{ steps.app-token.outputs.token }}
+        run: |
+          if git diff --quiet -- .github/workflows; then
+            echo "Lockfile already in step."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows
+          git commit -m "chore(deps): relock workflow actions"
+          git push "https://x-access-token:\${TOKEN}@github.com/\${REPO}.git" "HEAD:refs/heads/\${HEAD_REF}"
+`
+
 const PREPARE =
     "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'"
 
@@ -256,6 +412,9 @@ export default { kind: '{{kind}}' } satisfies VoidflowConfig
     )
     t.set('common/agentic-shadow.yml', agenticCaller(false))
     t.set('common/agentic-gate.yml', agenticCaller(true))
+    const pins = lockPins(root)
+    t.set('common/verify-lockfile.yml', verifyLockfile(pins))
+    t.set('common/relock-actions.yml', relockActions(pins))
 
     t.set('tool/ci.yml', toolCi)
     t.set(
