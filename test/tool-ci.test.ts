@@ -93,7 +93,7 @@ describe('tool-ci.yml optional inputs', () => {
 describe('tool-ci.yml script steps', () => {
     test('detects exactly the scripts it runs', () => {
         expect(step('Detect package scripts').run).toContain(
-            'for name in lint check build test check:licenses; do',
+            'for name in lint check build test check:licenses check:voidflow; do',
         )
     })
 

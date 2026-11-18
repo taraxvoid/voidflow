@@ -173,3 +173,36 @@ pre-push:
 
         unset $(git rev-parse --local-env-vars)
         {pm} run --if-present test:push
+    voidflow-sync:
+      # Pushes to a release branch (main, next, release/*) only: keep GitHub
+      # and Cloudflare in sync with voidflow.config.ts. Needs the repo's
+      # voidflow.config.ts; skipped without one.
+      #   check:voidflow  voidflow check: exit 1 on ruleset drift (and token
+      #                   drift when the cloudflare section's admin token
+      #                   variable is set, else tokens are skipped with a note).
+      #   try:deploy      optional repo script, e.g. `voidflow tokens cf
+      #                   --repo-config voidflow.config.ts --try prod -- bunx
+      #                   wrangler deploy --dry-run`; proves the token policies
+      #                   are enough. Guard it on the admin token being set.
+      # Exit 2 from the check (no gh admin, config error) warns, never blocks.
+      use_stdin: true
+      run: |
+        [ -f voidflow.config.ts ] || exit 0
+        [ -d node_modules ] || exit 0
+        release=false
+        while read -r _local_ref local_sha remote_ref _remote_sha; do
+          case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+          case "$remote_ref" in
+            refs/heads/main|refs/heads/next|refs/heads/release/*) release=true ;;
+          esac
+        done
+        [ "$release" = true ] || exit 0
+        unset $(git rev-parse --local-env-vars)
+        code=0
+        {pm} run --if-present check:voidflow || code=$?
+        if [ "$code" = 2 ]; then
+          echo "pre-push: voidflow check could not run (exit 2), not blocking the push."
+        elif [ "$code" != 0 ]; then
+          exit "$code"
+        fi
+        {pm} run --if-present try:deploy

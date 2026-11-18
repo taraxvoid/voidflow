@@ -373,7 +373,7 @@ jobs:
         if: steps.decide.outputs.validate == 'true'
         # Fail open: a check whose script the caller doesn't define is skipped, not failed.
         run: |
-          for name in lint check build test:unit check:licenses test:e2e:all test:e2e:full test:e2e:a11y test:e2e:lighthouse; do
+          for name in lint check build test:unit check:licenses check:voidflow test:e2e:all test:e2e:full test:e2e:a11y test:e2e:lighthouse; do
             if jq -e --arg n "$name" '.scripts // {} | has($n)' package.json >/dev/null; then
               echo "${name//:/_}=true" >> "$GITHUB_OUTPUT"
             else
@@ -434,6 +434,22 @@ jobs:
       - name: TypeCheck Code
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.check == 'true'
         run: '"$PM" run check'
+
+      - name: Check voidflow config drift
+        if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.check_voidflow == 'true'
+        # Exit 1 is drift and fails the job. Exit 2 (no admin on the repo for
+        # the default token, or a config error) only warns: CI has no admin
+        # token, so it cannot always read rulesets. Tokens are never checked here.
+        run: |
+          code=0
+          "$PM" run check:voidflow || code=$?
+          if [ "$code" = 2 ]; then
+            echo "::warning::voidflow check could not run (exit 2: auth or config error). Run 'voidflow check' locally."
+          elif [ "$code" != 0 ]; then
+            exit "$code"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build Code
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.build == 'true' && inputs.build

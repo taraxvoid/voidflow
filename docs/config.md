@@ -122,5 +122,26 @@ configs are deprecated and are removed once each repo has its own file; see
 entry into the `cloudflare` section, run `voidflow plan tokens` in the repo
 (it should show no changes), then delete the fleet entry.
 
+### Keeping it in sync
+
+The tool and site templates add a `check:voidflow` script (`voidflow check`).
+It runs in two places, both skipped when a repo does not define the script:
+
+- CI (`tool-ci.yml`, `site-ci.yml`): drift (exit 1) fails the job. Exit 2 (the
+  default token cannot read rulesets, or a config error) only warns. CI never
+  checks tokens, since it has no admin token.
+- The `pre-push` hook in `lefthook/base.yml`, on pushes to `main`, `next` and
+  `release/*` when `voidflow.config.ts` exists. Tokens are checked too when
+  the `cloudflare` section's admin token variable is set. The hook then runs
+  the repo's optional `try:deploy` script, so a missing token grant shows up
+  before CI depends on it:
+
+  ```json
+  "try:deploy": "voidflow tokens cf --repo-config voidflow.config.ts --try prod -- bunx wrangler deploy --dry-run"
+  ```
+
+  `--try` creates and deletes a real Cloudflare token, so guard the script on
+  the admin token being set.
+
 A file that does not load, or fails validation, exits 2 naming the file, before
 anything is sent to GitHub.
