@@ -516,7 +516,7 @@ another way.
 | Action | Inputs |
 |---|---|
 | `actions/cloudflare-deploy` | `env`, `cloudflare-api-token`, `cloudflare-account-id`, `migrate-d1`, `package-manager` (runs the migration: `bun`, `pnpm` or `aube`), `working-directory`, `command`, `token-fallback` ([details](CONTRIBUTING.md)) |
-| `actions/cloudflare-preview` | `cloudflare-api-token`, `cloudflare-account-id`, `working-directory`, `name` (default `pr-<number>`), `secrets` (dotenv lines), `github-token`, `delete` |
+| `actions/cloudflare-preview` | `cloudflare-api-token`, `cloudflare-account-id`, `working-directory`, `env` (wrangler environment for `--env`), `name` (default `pr-<number>`), `secrets` (dotenv lines), `github-token`, `delete` |
 
 **Worker Previews:** `cloudflare-preview` runs `wrangler preview` per pull
 request and outputs `preview-url` and `deployment-url`. With `github-token`
@@ -526,11 +526,14 @@ skip forks, which get no secrets. Give the job `environment: preview` so it
 reads the `preview` environment's token, not a repository secret every job can
 read. A job with an environment still falls back to a repository secret of the
 same name, so once the environment has its own token, delete the repo-wide
-`CLOUDFLARE_API_TOKEN` (`apply tokens cf --prune` does). The `preview`
-environment has to accept PR branches, so anyone who can push a branch can
-write a job that reads its token, and since a Worker Preview runs on the prod
-Worker, that token can deploy to prod. Add required reviewers to the `preview`
-environment to gate it, or use a separate Worker to keep previews off prod (see
+`CLOUDFLARE_API_TOKEN` (`apply tokens cf --prune` does).
+
+The `preview` environment has to accept PR branches, so anyone who can push a
+branch can write a job that reads its token. Previews of the prod Worker need
+a token that can deploy to prod, so put them under a separate Worker instead:
+add an `env.preview` block to the wrangler config (Worker `<name>-preview`, no
+routes, its own `previews` block) and pass `env: preview`. Its token is then
+scoped to that Worker only; both Workers can live in one account (see
 [Where the secret goes](CONTRIBUTING.md#where-the-secret-goes)).
 
 ```yaml
@@ -551,6 +554,7 @@ environment to gate it, or use a separate Worker to keep previews off prod (see
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          env: preview # Previews under <name>-preview, not the prod Worker
           github-token: ${{ github.token }}
           delete: ${{ github.event.action == 'closed' }}
 ```
