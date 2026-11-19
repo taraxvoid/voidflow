@@ -522,7 +522,11 @@ another way.
 request and outputs `preview-url` and `deployment-url`. With `github-token`
 (and `pull-requests: write`) it keeps one PR comment with the URL, updated on
 later pushes. Add `closed` to `on.pull_request.types` so the cleanup runs, and
-skip forks, which get no secrets:
+skip forks, which get no secrets. Give the job `environment: preview` so it
+reads the `preview` environment's token, not a repository secret every job can
+read. A Worker Preview runs on the prod Worker, so that token can still deploy
+to prod; to keep previews off it entirely, use a separate Worker (see
+[Where the secret goes](CONTRIBUTING.md#where-the-secret-goes)).
 
 ```yaml
   preview:
@@ -531,6 +535,7 @@ skip forks, which get no secrets:
       github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    environment: preview
     permissions:
       contents: read
       pull-requests: write

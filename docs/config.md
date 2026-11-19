@@ -69,7 +69,7 @@ export default {
         adminTokenEnv: 'CF_TOKEN_ADMIN_EXAMPLE',
         envs: [
             { env: 'prod' },
-            { env: 'preview', secret: 'repo', zones: [] },
+            { env: 'preview', zones: [] },
         ],
     },
 } satisfies VoidflowConfig
@@ -82,7 +82,10 @@ export default {
   variable, so repos in different accounts each use a token for their own.
 - `envs` is required and lists the tokens: one per env, named
   `voidflow:<owner/name>:<env>`, its value set as that GitHub environment's
-  `CLOUDFLARE_API_TOKEN` (or the repo's, with `secret: 'repo'`).
+  `CLOUDFLARE_API_TOKEN` (or the repo's, with `secret: 'repo'`). Keep each
+  env's token in its environment: a repository secret is readable by every
+  job, and a Worker Preview token can deploy to the prod Worker (see
+  [Where the secret goes](../CONTRIBUTING.md#where-the-secret-goes)).
 - `retire` lists pre-voidflow token names to delete with `--prune`. Default:
   none.
 
