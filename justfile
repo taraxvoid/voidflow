@@ -1,7 +1,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # renovate: datasource=github-releases depName=zizmorcore/zizmor
-zizmor_version := "1.30.1"
+zizmor_version := "1.32.0"
 # renovate: datasource=github-releases depName=jdx/jactionlint
 jactionlint_version := "2.3.0"
 # renovate: datasource=pypi depName=check-jsonschema

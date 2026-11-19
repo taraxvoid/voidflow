@@ -13,6 +13,14 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
+import {
+    credentialNotes,
+    defaultGhActionsLock,
+    type GhActionsLock,
+    lockScope,
+    relockCredentials,
+    runActionsLock,
+} from './init/actions-lock.ts'
 import { colorEnabled, type Paint, painter, statusStyle } from './init/color.ts'
 import {
     applyFiles,
@@ -20,6 +28,7 @@ import {
     type FileAction,
     fileNames,
     planFiles,
+    selectedItems,
 } from './init/files.ts'
 import { addToFleet } from './init/fleet.ts'
 import {
@@ -76,6 +85,8 @@ const OPTIONS = {
     'enable-ai-scan': { type: 'boolean', default: false },
     'enable-agentic': { type: 'boolean', default: false },
     'agentic-stage': { type: 'string', default: 'shadow' },
+    'enable-actions-lock': { type: 'boolean', default: false },
+    'enable-actions-relock': { type: 'boolean', default: false },
     repo: { type: 'string' },
     owner: { type: 'string' },
     config: { type: 'string' },
@@ -94,6 +105,8 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --enable-ai-scan        opt in: AI Scan for pull requests
   --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
+  --enable-actions-lock   opt in: verify-lockfile.yml, then run gh actions-lock once to write .github/workflows/actions.lock
+  --enable-actions-relock opt in (implies --enable-actions-lock): relock-actions.yml, which relocks and pushes actions.lock on Renovate PRs and PRs labelled relock-actions; needs a GitHub App
   --repo owner/name       the GitHub repo (default: the origin remote)
   --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
   --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
@@ -115,6 +128,8 @@ type Deps = {
         dir: string,
     ) => Promise<{ code: number; err: string }>
     resolveSha?: (version: string) => Promise<string | null>
+    /** Runs `gh actions-lock` in dir; for tests. */
+    ghActionsLock?: GhActionsLock
 }
 
 function fail(msg: string, prog: string): never {
@@ -131,15 +146,25 @@ const row = (status: string, name: string, extra = '') => {
     return `  ${style ? paint(style, label) : label}${extra ? `${name.padEnd(28)} ${extra}` : name}`
 }
 
-/** The cron minute from a voidflow-written ci.yml, so a re-run stays unchanged. */
+/**
+ * The cron minute from a voidflow-written ci.yml, or else verify-lockfile.yml
+ * (which shares it), so a re-run stays unchanged even when ci.yml is skipped.
+ */
 function existingCronMinute(dir: string): number | null {
-    const path = join(dir, '.github/workflows/ci.yml')
-    if (!existsSync(path)) return null
-    const text = readFileSync(path, 'utf8')
-    if (!text.includes('Written by voidflow v')) return null
-    const m = /cron:\s*'(\d{1,2}) 6 \* \* \*'/.exec(text)
-    const n = m ? Number(m[1]) : Number.NaN
-    return n >= 0 && n <= 59 ? n : null
+    const sources: [string, RegExp][] = [
+        ['ci.yml', /cron:\s*'(\d{1,2}) 6 \* \* \*'/],
+        ['verify-lockfile.yml', /cron:\s*'(\d{1,2}) 7 \* \* 1'/],
+    ]
+    for (const [file, re] of sources) {
+        const path = join(dir, '.github/workflows', file)
+        if (!existsSync(path)) continue
+        const text = readFileSync(path, 'utf8')
+        if (!text.includes('Written by voidflow v')) continue
+        const m = re.exec(text)
+        const n = m ? Number(m[1]) : Number.NaN
+        if (n >= 0 && n <= 59) return n
+    }
+    return null
 }
 
 async function defaultGhAw(
@@ -297,6 +322,10 @@ export async function main(
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
     const enableAgentic = values['enable-agentic']
+    const enableActionsRelock = values['enable-actions-relock']
+    // Relock without verify is half a feature: relock implies lock.
+    const enableActionsLock =
+        values['enable-actions-lock'] || enableActionsRelock
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -377,17 +406,27 @@ export async function main(
             ...(dropCodeowners ? ['codeowners'] : []),
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
-        fileActions = planFiles(
-            dir,
-            {
-                kind,
-                skip,
-                force: values.force,
-                enablePvr,
-                enableAgentic: values['enable-agentic'],
-            },
-            ctx,
-        )
+        const sel = {
+            kind,
+            skip,
+            force: values.force,
+            enablePvr,
+            enableAgentic: values['enable-agentic'],
+            enableActionsLock,
+            enableActionsRelock,
+        }
+        const scope = enableActionsLock
+            ? lockScope(
+                  dir,
+                  selectedItems(sel).map((i) => i.target),
+                  enableAgentic,
+              )
+            : { paths: null, skipped: [] }
+        if (scope.skipped.length > 0)
+            notes.push(
+                `actions-lock is limited to plainly named workflows; lock these by hand: ${scope.skipped.join(', ')}`,
+            )
+        fileActions = planFiles(dir, { ...sel, lockPaths: scope.paths }, ctx)
         const conflicts = fileActions.filter((a) => a.status === 'conflict')
         const blocked = conflicts.length > 0
         // Rows that would change a file read "would ..." whenever nothing is
@@ -467,6 +506,41 @@ export async function main(
             out.push(row(r.status, r.name, r.detail))
             if (r.status === 'failed' && !dryRun) exitCode = 1
         }
+        // Lock last, after every workflow (deps-review included) is in place.
+        const lockPlanned = fileActions.some((a) => a.name === 'actions-lock')
+        if (enableActionsLock && (!lockPlanned || conflicts.length > 0)) {
+            notes.push(
+                conflicts.length > 0
+                    ? 'gh actions-lock was not run (file conflicts, nothing written)'
+                    : 'gh actions-lock was not run (the files half did not include actions-lock)',
+            )
+        } else if (enableActionsLock) {
+            const r = await runActionsLock(
+                dir,
+                scope.paths,
+                dryRun,
+                deps.ghActionsLock ?? defaultGhActionsLock,
+            )
+            out.push('actions-lock:')
+            out.push(row(r.status, r.name, r.detail))
+            if (r.status === 'failed' && !dryRun) exitCode = 1
+        }
+        if (
+            enableActionsRelock &&
+            !fileActions.some((a) => a.name === 'actions-relock')
+        )
+            notes.push(
+                'relock-actions.yml was not written (the files half did not include actions-relock)',
+            )
+        else if (enableActionsRelock) {
+            const gh = deps.gh ?? ghCli()
+            const unavailable = repoError ?? (await ghAvailable(gh))
+            const creds =
+                repo && unavailable === null
+                    ? await relockCredentials(gh, repo)
+                    : { variable: null, secret: null }
+            notes.push(...credentialNotes(repo ?? 'OWNER/REPO', creds))
+        }
     }
 
     // Settings half.
@@ -484,6 +558,7 @@ export async function main(
                 enablePvr,
                 enableAiScan,
                 enableAgentic,
+                enableActionsRelock,
                 dryRun,
             })
             for (const r of settingResults)
@@ -541,6 +616,17 @@ export async function main(
         }
     }
 
+    const relockPlanned = fileActions.some((a) => a.name === 'actions-relock')
+    if (relockPlanned && !preset.settings) {
+        notes.push(
+            "the relock-actions label was not created (the settings half did not run); create it, or rely on Renovate's PRs alone",
+        )
+    }
+    if (relockPlanned) {
+        notes.push(
+            'relock-actions runs on renovate[bot] PRs by itself; label any other PR that changes a uses: line relock-actions. The hosted Renovate app has no postUpgradeTasks, so it cannot relock on its own',
+        )
+    }
     if (enableAgentic && !preset.settings) {
         notes.push(
             'agentic settings were not applied (the settings half did not run)',
@@ -557,7 +643,12 @@ export async function main(
 
     if (repo && preset.settings) {
         out.push('manual:')
-        for (const l of manualReminders(repo, enableAiScan, enableAgentic))
+        for (const l of manualReminders(
+            repo,
+            enableAiScan,
+            enableAgentic,
+            enableActionsLock,
+        ))
             out.push(`  ${l}`)
     }
     if (notes.length > 0) {

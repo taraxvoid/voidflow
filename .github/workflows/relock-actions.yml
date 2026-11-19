@@ -11,11 +11,19 @@
 #
 # Only the lockfile tooling runs here; nothing from the pull request is
 # executed. Never run `gh actions-lock --accept-moved` from automation.
+#
+# pull_request_target, not pull_request: the workflow then runs as it is on
+# the base branch, checked against the base branch's actions.lock. Under
+# pull_request a PR that bumps an action this workflow uses (Renovate groups
+# every action bump) would have the Require lockfile policy refuse this very
+# run at startup, the stale lock it exists to fix. The PR head is checked out
+# by SHA as data, without credentials, and only same-repo PRs run.
 
 name: relock-actions
 
 on:
-  pull_request:
+  # zizmor: ignore[dangerous-triggers] same-repo PRs only; the PR's files are read as data, never run
+  pull_request_target:
     types: [opened, synchronize, reopened, labeled]
     paths:
       - '.github/workflows/**'
@@ -51,7 +59,7 @@ jobs:
 
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: Install gh-actions-lock
@@ -68,7 +76,8 @@ jobs:
         env:
           TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          if git diff --quiet -- .github/workflows; then
+          # --porcelain also lists an untracked actions.lock (a first lock).
+          if [ -z "$(git status --porcelain -- .github/workflows)" ]; then
             echo "Lockfile already in step."
             exit 0
           fi

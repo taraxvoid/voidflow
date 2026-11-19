@@ -37,6 +37,10 @@ from automation. zizmor requires a ref pin (`.github/zizmor.yml`) and Renovate
 bumps the tags; digest pinning is off in the preset because the lockfile holds
 the commits.
 
+`verify-lockfile.yml` and `relock-actions.yml` are also the source of the
+caller templates `init --enable-actions-lock` / `--enable-actions-relock`
+write: run `just templates` after changing either.
+
 ### Running CI locally
 
 `just dry-run` runs `ci.yml` under [`act`](https://github.com/nektos/act)

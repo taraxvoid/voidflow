@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { packageRoot } from '../lib/package-root.ts'
 import { json } from '../lib/template-format.ts'
+import { scopeLockWorkflow } from './actions-lock.ts'
 import {
     type Kind,
     type RenderCtx,
@@ -21,7 +22,7 @@ export type FileItem = {
     templates: string[]
     kinds: Kind[]
     merge?: 'package' | 'gitignore'
-    optIn?: 'pvr' | 'agentic'
+    optIn?: 'pvr' | 'agentic' | 'actions-lock' | 'actions-relock'
     /** Existing files that already fill this item's role; the item is left alone when one is present. */
     altTargets?: string[]
     /** The repo owns this file: no marker, and an existing one is kept unless forced. */
@@ -131,6 +132,20 @@ export const FILE_ITEMS: FileItem[] = [
         kinds: BOTH,
         optIn: 'agentic',
     },
+    {
+        name: 'actions-lock',
+        target: '.github/workflows/verify-lockfile.yml',
+        templates: ['common/verify-lockfile.yml'],
+        kinds: BOTH,
+        optIn: 'actions-lock',
+    },
+    {
+        name: 'actions-relock',
+        target: '.github/workflows/relock-actions.yml',
+        templates: ['common/relock-actions.yml'],
+        kinds: BOTH,
+        optIn: 'actions-relock',
+    },
 ]
 
 /** Renovate preset that automerges low-risk updates once deps-review is required. */
@@ -190,6 +205,34 @@ type Selection = {
     force: boolean
     enablePvr: boolean
     enableAgentic?: boolean
+    /** Implied by enableActionsRelock. */
+    enableActionsLock?: boolean
+    enableActionsRelock?: boolean
+    /** Workflows the lockfile workflows are limited to; null or unset runs on the whole directory. */
+    lockPaths?: string[] | null
+}
+
+/** The file items `sel` selects, in FILE_ITEMS order. */
+export function selectedItems(sel: Selection): FileItem[] {
+    return FILE_ITEMS.filter((item) => {
+        if (!item.kinds.includes(sel.kind) || sel.skip.has(item.name))
+            return false
+        switch (item.optIn) {
+            case 'pvr':
+                return sel.enablePvr
+            case 'agentic':
+                return sel.enableAgentic === true
+            case 'actions-lock':
+                return (
+                    sel.enableActionsLock === true ||
+                    sel.enableActionsRelock === true
+                )
+            case 'actions-relock':
+                return sel.enableActionsRelock === true
+            default:
+                return true
+        }
+    })
 }
 
 /** Names of the file items that apply to `kind`. */
@@ -362,10 +405,7 @@ export function planFiles(
     ctx: RenderCtx,
 ): FileAction[] {
     const actions: FileAction[] = []
-    for (const item of FILE_ITEMS) {
-        if (!item.kinds.includes(sel.kind) || sel.skip.has(item.name)) continue
-        if (item.optIn === 'pvr' && !sel.enablePvr) continue
-        if (item.optIn === 'agentic' && !sel.enableAgentic) continue
+    for (const item of selectedItems(sel)) {
         const path = join(dir, item.target)
         const alt = item.altTargets?.find((t) => existsSync(join(dir, t)))
         if (alt && !existsSync(path)) {
@@ -378,7 +418,15 @@ export function planFiles(
             })
             continue
         }
-        const texts = templateTexts(item, ctx)
+        let texts = templateTexts(item, ctx)
+        if (item.name === 'actions-lock' || item.name === 'actions-relock')
+            texts = texts.map((t) =>
+                scopeLockWorkflow(
+                    item.name as 'actions-lock' | 'actions-relock',
+                    t,
+                    sel.lockPaths ?? null,
+                ),
+            )
         const base = { name: item.name, target: item.target }
         if (item.merge === 'gitignore') {
             actions.push({ ...base, ...planGitignore(path, texts, ctx) })
