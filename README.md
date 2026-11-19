@@ -524,8 +524,13 @@ request and outputs `preview-url` and `deployment-url`. With `github-token`
 later pushes. Add `closed` to `on.pull_request.types` so the cleanup runs, and
 skip forks, which get no secrets. Give the job `environment: preview` so it
 reads the `preview` environment's token, not a repository secret every job can
-read. A Worker Preview runs on the prod Worker, so that token can still deploy
-to prod; to keep previews off it entirely, use a separate Worker (see
+read. A job with an environment still falls back to a repository secret of the
+same name, so once the environment has its own token, delete the repo-wide
+`CLOUDFLARE_API_TOKEN` (`apply tokens cf --prune` does). The `preview`
+environment has to accept PR branches, so anyone who can push a branch can
+write a job that reads its token, and since a Worker Preview runs on the prod
+Worker, that token can deploy to prod. Add required reviewers to the `preview`
+environment to gate it, or use a separate Worker to keep previews off prod (see
 [Where the secret goes](CONTRIBUTING.md#where-the-secret-goes)).
 
 ```yaml
