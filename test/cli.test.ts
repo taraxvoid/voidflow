@@ -88,6 +88,17 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         expect((await voidflow(['--help'])).code).toBe(0)
     })
 
+    test('--version and -v print the package version', async () => {
+        const { version } = JSON.parse(
+            readFileSync(join(ROOT, 'package.json'), 'utf8'),
+        )
+        for (const f of ['--version', '-v']) {
+            const r = await voidflow([f])
+            expect(r.code).toBe(0)
+            expect(r.out.trim()).toBe(version)
+        }
+    })
+
     test('an unknown command exits 2', async () => {
         const r = await voidflow(['nope'])
         expect(r.code).toBe(2)
