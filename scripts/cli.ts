@@ -8,6 +8,7 @@
  *   bunx @taraxvoid/voidflow@<version> tokens cf --config cf-tokens.ts [--apply ...]
  *   bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts [--check ...]
  *   bunx @taraxvoid/voidflow@<version> init --kind tool|site [...]
+ *   bunx @taraxvoid/voidflow@<version> --version
  *
  * plan, check and apply find the config themselves and re-run the tool
  * commands (scripts/verbs.ts). Each tool command takes the same flags as its
@@ -16,6 +17,10 @@
  * resolves from VOIDFLOW_CONFIG_BASE when that is set, else the current
  * directory.
  */
+
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { packageRoot } from './lib/package-root.ts'
 
 type Main = (argv: string[], prog: string) => Promise<void>
 
@@ -75,15 +80,20 @@ const usage = () =>
             .filter(([, c]) => !c.hidden)
             .map(([name, c]) => `  ${name.padEnd(10)} ${c.about}`),
         '',
-        'Run `voidflow <command> --help` for its flags.',
+        'Run `voidflow <command> --help` for its flags, or `voidflow --version`.',
     ].join('\n')
-
-export {}
 
 const [name, ...rest] = process.argv.slice(2)
 if (name === undefined || name === '-h' || name === '--help') {
     console.log(usage())
     process.exit(name === undefined ? 2 : 0)
+}
+if (name === '-v' || name === '--version') {
+    console.log(
+        JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8'))
+            .version as string,
+    )
+    process.exit(0)
 }
 if (name.startsWith('-')) {
     console.error(
