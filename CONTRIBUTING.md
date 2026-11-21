@@ -137,8 +137,10 @@ repo (see [Fleet config](#fleet-config---config)), one token per repo and
 env. Each token is owned by its env's account and scoped to
 one Worker (the Workers Editor role on it), plus Workers Routes Write on the
 zones of its routes only, with a 90-day expiry. An env whose Worker lives in
-another account (say a separate preview Worker kept apart from prod) sets its
-own `account`; otherwise it uses the repo's.
+another account sets its own `account`; otherwise it uses the repo's. A
+separate account is not needed to keep a preview token off prod: a separate
+Worker in the same account is enough (see
+[Where the secret goes](#where-the-secret-goes)).
 
 The Worker and zones come from the repo's own wrangler config on its default
 branch (`wrangler.jsonc`, or the env's `wrangler` path), read the way wrangler
@@ -184,7 +186,7 @@ the repo's `environments` in the rulesets config (see
 ```ts
 envs: [
     { env: 'prod' },                // Worker and zones from wrangler.jsonc
-    { env: 'preview', zones: [] },  // Worker Previews: same Worker, no routes
+    { env: 'preview', zones: [] },  // env.preview's Worker, no routes
 ],
 ```
 
@@ -195,9 +197,46 @@ leftover repository `CLOUDFLARE_API_TOKEN` (a pre-voidflow token that jobs
 without an environment still deploy with), and `--prune` deletes it along
 with the `retire` tokens.
 
-A Worker Preview runs on the same Worker as prod, so unless Cloudflare grows a
-preview-only permission, the preview token can deploy to prod too. Keeping it
-in its own environment still scopes and rotates it on its own.
+The `preview` environment has to accept PR branches, so anyone who can push
+a branch can read its token. Cloudflare has no Preview-only permission, so
+what that token can reach is set by which Worker it is scoped to:
+
+- **Previews of the prod Worker** (no `env.preview` block in wrangler):
+  the token is scoped to the prod Worker and can deploy to prod.
+- **Previews of a separate Worker** (recommended): add an `env.preview`
+  block, with no routes and its own `previews` block, and pass
+  `env: preview` to `cloudflare-preview`. The Previews then live under
+  `<name>-preview` (`wrangler preview --env preview`), and the token above
+  resolves to that Worker from the same block, so it has no rights on the
+  prod Worker. Both Workers can stay in one account.
+
+```jsonc
+// wrangler.jsonc
+{
+    "name": "site",
+    "routes": [{ "pattern": "example.com", "custom_domain": true }],
+    "kv_namespaces": [{ "binding": "CACHE", "id": "<prod id>" }],
+    "env": {
+        "preview": {
+            // Worker "site-preview": no routes, and nothing bound to prod data
+            "kv_namespaces": [{ "binding": "CACHE", "id": "<preview id>" }],
+            "previews": {
+                "kv_namespaces": [{ "binding": "CACHE", "id": "<preview id>" }]
+            }
+        }
+    }
+}
+```
+
+Point every binding in `env.preview` and its `previews` block at separate
+resources. That keeps preview code off prod data, but it does not narrow a
+token: Cloudflare grants KV and D1 for the whole account (R2 can be granted
+per bucket), so a token with D1 Write (`d1: true`) can write the prod
+databases whatever its Worker. Leave `d1` off for `preview`.
+
+The token is scoped by the Worker's id, so `<name>-preview` has to exist
+before the first apply: create it once with your own login
+(`wrangler deploy --env preview`), then apply.
 
 The targets need `CF_TOKEN_ADMIN`: a user-owned token (account-owned tokens
 reach only their own account) that includes every account in the config, with
