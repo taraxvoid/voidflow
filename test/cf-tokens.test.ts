@@ -7,6 +7,8 @@ import {
     D1_WRITE,
     expiresOn,
     fromWrangler,
+    missingWorkerMessage,
+    missingZoneMessage,
     type Policy,
     plan,
     policies,
@@ -21,6 +23,7 @@ import {
     tokenName,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
+    wranglerWarnings,
     zoneOf,
 } from '../cloudflare/tokens.ts'
 import { tryChildEnv } from '../scripts/cf-tokens.ts'
@@ -442,12 +445,27 @@ describe('wrangler config', () => {
             worker: 'site-staging',
             hosts: ['old.example.com'],
             zones: [],
+            block: 'staging',
         })
     })
 
     test('wranglerEnv picks a block, and a missing one fails', () => {
         expect(fromWrangler(multi, 'live', 'prod').worker).toBe('site-prod')
+        expect(fromWrangler(multi, 'live', 'prod').block).toBe('prod')
         expect(() => fromWrangler(multi, 'prod', 'nope')).toThrow('env.nope')
+    })
+
+    test("account_id comes from the env block, else the top level's", () => {
+        const a = 'a'.repeat(32)
+        const b = 'b'.repeat(32)
+        const cfg = {
+            name: 's',
+            account_id: a,
+            env: { preview: {}, other: { account_id: b } },
+        }
+        expect(fromWrangler(cfg, 'preview').account).toBe(a)
+        expect(fromWrangler(cfg, 'other').account).toBe(b)
+        expect(fromWrangler(single, 'prod').account).toBeUndefined()
     })
 
     test('resolveTarget maps routes to deduplicated account zones', () => {
@@ -474,6 +492,86 @@ describe('wrangler config', () => {
                 [],
             ),
         ).toEqual({ worker: 'w', zones: ['a.org'] })
+    })
+
+    test('no zones at all points at Zone Read, not a missing zone', () => {
+        expect(() => resolveTarget({ env: 'prod' }, single, [])).toThrow(
+            'lacks Zone Read',
+        )
+        expect(() =>
+            resolveTarget({ env: 'prod' }, single, ['example.com']),
+        ).toThrow('Zone Read does not include it')
+    })
+})
+
+describe('error messages', () => {
+    const a = 'a'.repeat(32)
+
+    test('an empty scripts list blames the permission before the Worker', () => {
+        const m = missingWorkerMessage('site-preview', a, 0, 'preview')
+        expect(m).toContain('lists no Workers')
+        expect(m).toContain('Workers Metadata Read-Only')
+        expect(m).toContain('wrangler deploy --env preview')
+    })
+
+    test('a Worker missing from a non-empty list names the deploy command', () => {
+        const m = missingWorkerMessage('site-preview', a, 3, 'preview')
+        expect(m).not.toContain('Read-Only')
+        expect(m).toContain('wrangler deploy --env preview')
+        expect(m).toContain(`account_id ${a}`)
+        expect(m).toContain('only Previews')
+        expect(missingWorkerMessage('site', a, 3)).toContain(
+            '(wrangler deploy, with',
+        )
+    })
+
+    test('a missing zone hints at Zone Read either way', () => {
+        expect(missingZoneMessage('x.com', a, [])).toContain('lacks Zone Read')
+        expect(missingZoneMessage('x.com', a, ['y.com'])).toContain(
+            'does not include it',
+        )
+    })
+})
+
+describe('wranglerWarnings', () => {
+    const a = 'a'.repeat(32)
+    const b = 'b'.repeat(32)
+    const used = { worker: 'site', hosts: ['example.com'], zones: [] }
+    const base = { env: 'preview', account: a, file: 'wrangler.jsonc', used }
+
+    test('quiet when the account matches and there is no local copy', () => {
+        expect(wranglerWarnings(base)).toEqual([])
+        expect(
+            wranglerWarnings({ ...base, used: { ...used, account: a } }),
+        ).toEqual([])
+    })
+
+    test("an account_id other than the env's account", () => {
+        const [w] = wranglerWarnings({
+            ...base,
+            used: { ...used, account: b },
+        })
+        expect(w).toContain(`account_id ${b}, not the env's account ${a}`)
+    })
+
+    test('a local copy that resolves to another Worker', () => {
+        const [w] = wranglerWarnings({
+            ...base,
+            local: { ...used, worker: 'site-preview', block: 'preview' },
+        })
+        expect(w).toContain('Worker site-preview')
+        expect(w).toContain('which the plan uses')
+        expect(
+            wranglerWarnings({ ...base, local: { ...used, block: 'x' } }),
+        ).toEqual([])
+    })
+
+    test('a local copy that does not resolve', () => {
+        const [w] = wranglerWarnings({
+            ...base,
+            local: new Error('wrangler config has no name'),
+        })
+        expect(w).toContain('does not resolve (wrangler config has no name)')
     })
 })
 

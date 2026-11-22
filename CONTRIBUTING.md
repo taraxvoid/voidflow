@@ -236,13 +236,28 @@ databases whatever its Worker. Leave `d1` off for `preview`.
 
 The token is scoped by the Worker's id, so `<name>-preview` has to exist
 before the first apply: create it once with your own login
-(`wrangler deploy --env preview`), then apply.
+(`wrangler deploy --env preview`), then apply. A Worker the dashboard shows
+with only Previews and no deployed script does not count: the scripts list
+the plan reads leaves it out. Pin `account_id` in the wrangler config to the
+account voidflow manages, so that deploy (which otherwise uses your login's
+account) lands there; a plan warns when the two differ. The plan reads the
+wrangler config from the default branch, so an `env.preview` block on an
+unmerged branch is not seen yet (it warns when the local file resolves
+differently): merge it first, or set `worker` and `zones` on the env.
 
 The targets need `CF_TOKEN_ADMIN`: a user-owned token (account-owned tokens
-reach only their own account) that includes every account in the config, with
-Account API Tokens Edit, Workers Scripts Read and Zone Read on each, a short
-expiry and an IP filter. Adding a repo in a new account means adding that
-account to this token. It can mint
+reach only their own account) that includes every account in the config, a
+short expiry and an IP filter, with these on each account:
+
+- Account API Tokens Edit
+- Workers Scripts Read, shown in the dashboard as Workers Metadata Read-Only
+  (account-wide, or on every Worker the config scopes a token to)
+- Zone Read
+
+Cloudflare answers a list the token lacks the permission for with an empty
+list, not an error, so a plan that sees no Workers or no zones in an account
+says the token likely lacks that permission. Adding a repo in a new account
+means adding that account to this token. It can mint
 deploy tokens, so it stays on a maintainer's machine and never goes into CI.
 [fnox](https://github.com/jdx/fnox) (installed by `mise install`) supplies
 it: the committed [`fnox.toml`](fnox.toml) declares the secret, but no value,

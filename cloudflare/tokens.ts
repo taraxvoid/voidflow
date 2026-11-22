@@ -57,7 +57,11 @@ export type EnvConfig = {
      * because it shares a wrangler config with prod.
      */
     d1?: boolean
-    /** Wrangler config path in the repo (default branch). Default: wrangler.jsonc. */
+    /**
+     * Wrangler config path in the repo, read from its default branch (a plan
+     * inside a checkout warns when the local file resolves differently).
+     * Default: wrangler.jsonc.
+     */
     wrangler?: string
     /**
      * Wrangler `env.<name>` block to read. Default: the block named like
@@ -171,6 +175,17 @@ export const repoAccounts = (cfg: RepoConfig) => [
 
 type Route = string | { pattern: string; zone_name?: string }
 
+/** What an env deploys, as read from its wrangler config. */
+export type WranglerTarget = {
+    worker: string
+    hosts: string[]
+    zones: string[]
+    /** The `env.<name>` block used, if any: what `wrangler --env` takes. */
+    block?: string
+    /** `account_id`, when the config pins one (env block, else top level). */
+    account?: string
+}
+
 /**
  * The Worker name and route hostnames an env deploys, read from a parsed
  * wrangler config the way wrangler reads it: an `env.<name>` block's `name`,
@@ -181,8 +196,13 @@ export function fromWrangler(
     config: unknown,
     env: string,
     wranglerEnv?: string,
-): { worker: string; hosts: string[]; zones: string[] } {
-    type Block = { name?: string; route?: Route; routes?: Route[] }
+): WranglerTarget {
+    type Block = {
+        name?: string
+        route?: Route
+        routes?: Route[]
+        account_id?: string
+    }
     const top = config as Block & { env?: Record<string, Block> }
     const block = wranglerEnv ?? (top.env?.[env] ? env : undefined)
     const sub = block === undefined ? undefined : top.env?.[block]
@@ -199,7 +219,11 @@ export function fromWrangler(
         if (typeof r !== 'string' && r.zone_name) zones.push(r.zone_name)
         else hosts.push(routeHost(typeof r === 'string' ? r : r.pattern))
     }
-    return { worker, hosts, zones }
+    const out: WranglerTarget = { worker, hosts, zones }
+    if (block !== undefined) out.block = block
+    const account = sub?.account_id ?? top.account_id
+    if (account) out.account = account
+    return out
 }
 
 /** `*.example.com/api/*` and `https://example.com:443/` to their hostname. */
@@ -233,10 +257,89 @@ export function resolveTarget(
     const { hosts, zones } = from()
     for (const h of hosts) {
         const z = zoneOf(h, zoneNames)
-        if (!z) throw new Error(`route host ${h} is in no zone of the account`)
+        if (!z) throw new Error(noZoneMessage(h, zoneNames))
         zones.push(z)
     }
     return { worker, zones: [...new Set(zones)].sort() }
+}
+
+// ---- error messages ---------------------------------------------------------
+//
+// Cloudflare answers a list call the admin token lacks the permission for with
+// success and an empty list, not a 403, so "not found" may mean "not visible".
+
+/** A route host in none of the zones the admin token sees in the account. */
+export function noZoneMessage(host: string, zoneNames: string[]): string {
+    return zoneNames.length === 0
+        ? `route host ${host}: the account lists no zones to the admin token; it likely lacks Zone Read on this account`
+        : `route host ${host} is in none of the account's zones (${zoneNames.join(', ')}); if its zone is in this account, the admin token's Zone Read does not include it`
+}
+
+/** A zone name the admin token does not see in the account. */
+export function missingZoneMessage(
+    zone: string,
+    account: string,
+    zoneNames: string[],
+): string {
+    return zoneNames.length === 0
+        ? `zone ${zone}: account ${account} lists no zones to the admin token; it likely lacks Zone Read on this account`
+        : `zone ${zone} not found in account ${account}; if it is there, the admin token's Zone Read does not include it`
+}
+
+/** The command that deploys an env's Worker, `block` being its wrangler env. */
+export const deployCommand = (block?: string) =>
+    block === undefined ? 'wrangler deploy' : `wrangler deploy --env ${block}`
+
+/**
+ * A Worker missing from the account's scripts list. `scripts` is how many the
+ * list had: none at all usually means the admin token can't list them.
+ */
+export function missingWorkerMessage(
+    worker: string,
+    account: string,
+    scripts: number,
+    block?: string,
+): string {
+    const deploy = `deploy it once with your own login (${deployCommand(block)}, with account_id ${account} in the wrangler config so it lands in this account), then re-run. A Worker the dashboard shows with only Previews and no deployed script does not count`
+    if (scripts === 0) {
+        return `Worker "${worker}": account ${account} lists no Workers to the admin token. It likely lacks Workers Scripts Read (Workers Metadata Read-Only in the dashboard) on this account; if the account has no Workers yet, ${deploy}`
+    }
+    return `Worker "${worker}" is not among the ${scripts} Worker(s) in account ${account}: ${deploy}`
+}
+
+/**
+ * Warnings about an env's wrangler config: an `account_id` other than the
+ * env's account (wrangler would deploy there), and a local copy that resolves
+ * to another Worker or zones than the one the plan read.
+ */
+export function wranglerWarnings(opts: {
+    env: string
+    account: string
+    file: string
+    used: WranglerTarget
+    local?: WranglerTarget | Error
+}): string[] {
+    const { env, account, file, used, local } = opts
+    const out: string[] = []
+    if (used.account && used.account !== account) {
+        out.push(
+            `${env}: ${file} sets account_id ${used.account}, not the env's account ${account}; wrangler deploys there`,
+        )
+    }
+    if (local === undefined) return out
+    const show = (t: WranglerTarget) =>
+        `Worker ${t.worker}, routes ${[...t.hosts, ...t.zones].join(', ') || 'none'}${t.account ? `, account_id ${t.account}` : ''}`
+    const sameAs = (t: WranglerTarget) => show(t) === show(used)
+    if (local instanceof Error) {
+        out.push(
+            `${env}: the local ${file} does not resolve (${local.message}); the plan uses the default branch's`,
+        )
+    } else if (!sameAs(local)) {
+        out.push(
+            `${env}: the local ${file} (${show(local)}) differs from the default branch's (${show(used)}), which the plan uses. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+        )
+    }
+    return out
 }
 
 // ---- config from elsewhere --------------------------------------------------
