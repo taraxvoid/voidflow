@@ -6,11 +6,5 @@ export default {
     kind: 'tool',
     // This repo's CI jobs are named "Validation" and "Unit tests" (ci.yml),
     // not the tool-ci default "validate / Validate".
-    // codeowners and linearHistory are off to match the live `main (prod)`
-    // ruleset; flip them (and `voidflow apply rulesets`) to tighten it.
-    rulesets: {
-        checks: ['Validation', 'Unit tests'],
-        codeowners: false,
-        linearHistory: false,
-    },
+    rulesets: { checks: ['Validation', 'Unit tests'] },
 } satisfies VoidflowConfig
