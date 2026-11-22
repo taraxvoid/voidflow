@@ -217,13 +217,11 @@ describe('voidflow init', () => {
         )
     })
 
-    test('flags add their settings to an existing config, keeping its data', async () => {
+    test('flags add their settings to a config init wrote, keeping its data', async () => {
         const dir = repo()
         const file = join(dir, 'voidflow.config.ts')
-        writeFileSync(
-            file,
-            "// mine\nexport default { kind: 'tool', rulesets: { checks: ['ci'] } }\n",
-        )
+        // A file exactly as init writes it for this data.
+        await run(['--kind', 'tool', '--preset', 'files', dir])
         const plan = await run([
             '--preset',
             'settings',
@@ -239,19 +237,38 @@ describe('voidflow init', () => {
         )
         const r = await run(['--kind', 'tool', '--enable-pvr', dir])
         expect(r.code).toBe(0)
-        expect(r.out).toContain(
-            'settings.enable + pvr; comments in the file are not kept',
-        )
+        expect(r.out).toMatch(/merge\s+config\s+.*settings\.enable \+ pvr/)
         expect(r.out).not.toContain("add 'pvr'")
         const { default: cfg } = await import(`${file}?v=1`)
-        expect(cfg).toEqual({
-            kind: 'tool',
-            rulesets: { checks: ['ci'] },
-            settings: { enable: ['pvr'] },
-        })
+        expect(cfg).toEqual({ kind: 'tool', settings: { enable: ['pvr'] } })
         // Same settings again: the file is left alone.
         const again = await run(['--kind', 'tool', '--enable-pvr', dir])
         expect(again.out).toMatch(/unchanged\s+config/)
+    })
+
+    test('a config edited by hand is never rewritten; the settings to add are notes', async () => {
+        const dir = repo()
+        const file = join(dir, 'voidflow.config.ts')
+        const mine =
+            "// mine: CI job names\nexport default { kind: 'tool', rulesets: { checks: ['ci'] } }\n"
+        writeFileSync(file, mine)
+        const r = await run(['--kind', 'tool', '--enable-pvr', dir])
+        expect(r.code).toBe(0)
+        expect(readFileSync(file, 'utf8')).toBe(mine)
+        expect(r.out).toMatch(/unchanged\s+config\s+.*edited by hand, kept/)
+        expect(r.out).toContain(
+            "add 'pvr' to settings.enable in voidflow.config.ts so voidflow check covers it",
+        )
+        // --force still overwrites, on request.
+        const forced = await run([
+            '--kind',
+            'tool',
+            '--enable-pvr',
+            '--force',
+            dir,
+        ])
+        expect(forced.out).toMatch(/overwrite\s+config/)
+        expect(readFileSync(file, 'utf8')).not.toContain('// mine')
     })
 
     test('the file settings run in the settings half without flags', async () => {

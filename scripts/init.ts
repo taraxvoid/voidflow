@@ -430,8 +430,9 @@ export async function main(
             enableActionsRelock,
             configChange:
                 existingConfig && merged.added.length > 0
-                    ? `${merged.added.join(', ')}; comments in the file are not kept`
+                    ? merged.added.join(', ')
                     : undefined,
+            configBefore: existingConfig,
         }
         const scope = enableActionsLock
             ? lockScope(
