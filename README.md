@@ -779,7 +779,9 @@ to run less on commit. Don't set `parallel: true` on `pre-commit`; it breaks
 the shared steps' ordering.
 
 Upgrading from `lefthook/site.yml` (≤ v0.13): switch `configs` to
-`lefthook/base.yml`.## Used by
+`lefthook/base.yml`.
+
+## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),
 [Synth Omaha](https://synthomaha.net), [Soundry](https://soundryomaha.org).
