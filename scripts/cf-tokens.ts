@@ -70,6 +70,7 @@ import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
 import { capture, inherit } from './lib/proc.ts'
 import { loadVoidflowConfig, repoSlug } from './lib/repo-config.ts'
+import { parseWranglerConfig } from './lib/wrangler-config.ts'
 
 const OPTIONS = {
     apply: { type: 'boolean', default: false },

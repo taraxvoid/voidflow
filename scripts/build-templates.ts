@@ -390,13 +390,17 @@ export function buildTemplates(root: string): Map<string, string> {
         }),
     )
     t.set('common/bunfig.toml', bunfig)
-    t.set(
-        'common/biome.json',
+    const biomeConfig = (includes: string[]) =>
         json({
             $schema: `https://biomejs.dev/schemas/${biome}/schema.json`,
             extends: ['@taraxvoid/voidflow/biome'],
-            files: { includes: ['**', '!**/bun.lock'] },
-        }),
+            files: { includes },
+        })
+    t.set('tool/biome.json', biomeConfig(['**', '!**/bun.lock']))
+    // Sites are Astro: skip its generated dir and svg assets.
+    t.set(
+        'site/biome.json',
+        biomeConfig(['**', '!**/bun.lock', '!.astro', '!**/*.svg']),
     )
     t.set('common/gitignore', 'node_modules/\ndist/\n.env*\n')
     t.set('common/SECURITY.md', securityMd)
