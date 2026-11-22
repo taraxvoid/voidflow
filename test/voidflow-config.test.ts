@@ -3,6 +3,8 @@ import {
     adminTokenVar,
     checkVoidflowConfig,
     defaultsFor,
+    enabledGroups,
+    GROUPS,
     renderDefaultsTable,
     toFleet,
     toTokenRepos,
@@ -61,6 +63,52 @@ describe('checkVoidflowConfig', () => {
         expect(problems({ kind: 'tool', tires: [] })).toContain(
             'tires: unknown field',
         )
+    })
+
+    test('accepts a settings section with every group', () => {
+        const cfg = checkVoidflowConfig({
+            kind: 'tool',
+            settings: {
+                enable: [...GROUPS],
+                skip: ['codeql', 'label-low-risk', 'label-relock-actions'],
+            },
+        })
+        expect(cfg.settings?.enable).toEqual([...GROUPS])
+        expect(checkVoidflowConfig({ kind: 'tool', settings: {} })).toBeTruthy()
+    })
+
+    test('settings problems are reported under settings', () => {
+        const p = (settings: unknown) => problems({ kind: 'tool', settings })
+        expect(p([])).toContain('settings: not an object')
+        expect(p({ enabel: [] })).toContain('settings.enabel: unknown field')
+        expect(p({ enable: 'agentic' })).toContain(
+            'settings.enable: not a list of strings',
+        )
+        expect(p({ skip: [1] })).toContain(
+            'settings.skip: not a list of strings',
+        )
+        expect(p({ enable: ['agentik'] })).toContain(
+            'settings.enable: unknown group "agentik"',
+        )
+        expect(p({ enable: ['pvr', 'pvr'] })).toContain(
+            'settings.enable: pvr is listed twice',
+        )
+        expect(p({ skip: ['codeqll'] })).toContain(
+            'settings.skip: unknown setting "codeqll"',
+        )
+        expect(p({ skip: ['codeql', 'codeql'] })).toContain(
+            'settings.skip: codeql is listed twice',
+        )
+        expect(p({ skip: ['label-low-risk'] })).toContain(
+            'settings.skip: label-low-risk is in agentic, which settings.enable does not list',
+        )
+    })
+
+    test('actions-relock enables actions-lock', () => {
+        expect([...enabledGroups(['actions-relock'])]).toEqual([
+            'actions-relock',
+            'actions-lock',
+        ])
     })
 
     test('rulesets problems are reported under rulesets', () => {
