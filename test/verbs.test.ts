@@ -603,6 +603,61 @@ describe('repoToolArgs', () => {
     })
 })
 
+describe('settings in the verbs', () => {
+    test('settings is a tool that takes no provider', () => {
+        expect(splitVerbArgs(['settings']).tool).toBe('settings')
+        expect(() => splitVerbArgs(['settings', 'cf'])).toThrow(
+            'settings takes no provider',
+        )
+    })
+
+    test('the child gets --if-admin only on a bare run', () => {
+        const f = '/r/voidflow.config.ts'
+        expect(repoToolArgs('check', f, [], 'settings', true)).toEqual([
+            'settings',
+            '--repo-config',
+            f,
+            '--check',
+            '--if-admin',
+        ])
+        expect(repoToolArgs('check', f, [], 'settings')).toEqual([
+            'settings',
+            '--repo-config',
+            f,
+            '--check',
+        ])
+        expect(repoToolArgs('check', f, [], 'rulesets', true)).not.toContain(
+            '--if-admin',
+        )
+    })
+
+    test('a bare run forwards settings only its own flags', () => {
+        const f = '/r/voidflow.config.ts'
+        const rest = ['--prune', '--no-color', '--rotate']
+        expect(repoToolArgs('check', f, rest, 'settings', true)).toEqual([
+            'settings',
+            '--repo-config',
+            f,
+            '--check',
+            '--if-admin',
+            '--no-color',
+        ])
+        expect(repoToolArgs('check', f, rest, 'rulesets', true)).toContain(
+            '--prune',
+        )
+        // Named, settings gets everything, so a wrong flag is an error.
+        expect(repoToolArgs('apply', f, ['--prune'], 'settings')).toContain(
+            '--prune',
+        )
+    })
+
+    test('the apply hint names settings', () => {
+        expect(applyHint('settings', undefined, [], false)).toBe(
+            'voidflow apply settings',
+        )
+    })
+})
+
 describe('repoModeTools', () => {
     const cf = {
         account: '0123456789abcdef0123456789abcdef',
@@ -613,21 +668,21 @@ describe('repoModeTools', () => {
 
     test('a bare verb runs tokens after rulesets when the admin variable is set', () => {
         expect(repoModeTools(bare, cf, { Q: 's' })).toEqual({
-            run: ['rulesets', 'cf-tokens'],
+            run: ['rulesets', 'settings', 'cf-tokens'],
         })
     })
 
     test('a bare verb skips tokens when the admin variable is unset or empty', () => {
         for (const env of [{}, { Q: '' }])
             expect(repoModeTools(bare, cf, env)).toEqual({
-                run: ['rulesets'],
+                run: ['rulesets', 'settings'],
                 skipped: 'tokens skipped (Q not set)',
             })
     })
 
     test('a bare verb skips tokens without a cloudflare section', () => {
         expect(repoModeTools(bare, undefined, {})).toEqual({
-            run: ['rulesets'],
+            run: ['rulesets', 'settings'],
             skipped:
                 'tokens skipped (no cloudflare section in voidflow.config.ts)',
         })
@@ -643,6 +698,9 @@ describe('repoModeTools', () => {
         ).toEqual({ run: ['cf-tokens'] })
         expect(repoModeTools({ ...bare, tool: 'rulesets' }, cf, {})).toEqual({
             run: ['rulesets'],
+        })
+        expect(repoModeTools({ ...bare, tool: 'settings' }, cf, {})).toEqual({
+            run: ['settings'],
         })
     })
 })
@@ -715,10 +773,20 @@ describe('voidflow in a repo with a voidflow.config.ts', () => {
         expect(r.ghCalled).toBe(false)
     })
 
-    test('a bare plan runs rulesets only and says tokens were skipped', async () => {
+    test('a bare plan runs rulesets and settings and says tokens were skipped', async () => {
         const r = await inRepo(['plan'], TOOL)
         expect(r.err).toContain('plan rulesets')
+        expect(r.err).toContain(
+            `plan settings | config ${r.file} (repo) | repo o/n | credential gh auth`,
+        )
         expect(r.err).toContain('tokens skipped')
+    })
+
+    test('plan settings outside a repo with a config exits 2', async () => {
+        const f = fixture({ 'rulesets.ts': RULESETS })
+        const r = await voidflow(['plan', 'settings', '--config', f.cfg], f)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('settings are per-repo')
     })
 
     test('an explicit --config or VOIDFLOW_CONFIG selects the fleet path', async () => {

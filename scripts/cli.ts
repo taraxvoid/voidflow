@@ -66,6 +66,10 @@ const COMMANDS: Record<
         load: () => import('./apply-rulesets.ts'),
         about: 'plan or apply branch rulesets',
     },
+    settings: {
+        load: () => import('./settings.ts'),
+        about: "plan or apply a voidflow.config.ts's repo settings",
+    },
     init: {
         load: () => import('./init.ts'),
         about: 'write starter files and apply repo settings',

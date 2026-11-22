@@ -33,6 +33,8 @@ export default {
   the tiers. Unknown fields are errors, reported by path.
 - `cloudflare` is optional: the repo's scoped Cloudflare deploy tokens, for
   `voidflow plan|check|apply tokens` (see [Cloudflare tokens](#cloudflare-tokens)).
+- `settings` is optional: the repo settings to check on top of the baseline,
+  for `voidflow plan|check|apply settings` (see [Settings](#settings)).
 
 There is no `owner/name` key. The repo is the `origin` remote of the checkout,
 or `GITHUB_REPOSITORY` (set in Actions) when the checkout has no GitHub origin.
@@ -93,6 +95,58 @@ The admin token can mint tokens, so it stays on a maintainer's machine:
 token commands run locally, never from CI. Like a fleet run, a plan needs `gh`
 with admin on the repo; it reads the wrangler config from the default branch.
 
+## Settings
+
+GitHub repo settings (the ones `voidflow init` applies) are checked like
+rulesets. Every repo gets the baseline; `settings` adds opt-in groups and
+leaves settings out:
+
+```ts
+export default {
+    kind: 'tool',
+    settings: {
+        enable: ['agentic', 'actions-relock'],
+        skip: ['codeql'],
+    },
+} satisfies VoidflowConfig
+```
+
+- `enable` names opt-in groups by their `init` flag: `--enable-agentic` is
+  `agentic`. `actions-relock` implies `actions-lock`, which has no settings of
+  its own (it adds files only).
+- `skip` names settings to leave alone. A skipped setting must be in the
+  baseline or an enabled group.
+- `init` writes both: a fresh config records the run's `--enable-*` flags and
+  setting `--skip`s. In a repo that already has a config, the file's settings
+  run along with the flags', and when the flags add any, `init` writes the file
+  back from its data. Comments in it are not kept (its row says so), so review
+  the diff before committing. With `--skip config`, it prints the lines to add
+  instead.
+
+<!-- settings:start -->
+| group | settings |
+|-------|----------|
+| baseline | `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql` |
+| pvr | `pvr` |
+| ai-scan | `ai-scan` |
+| agentic | `auto-merge`, `update-branch`, `delete-branch-on-merge`, `actions-permissions`, `fork-pr-approval`, `label-low-risk`, `label-needs-you` |
+| actions-lock | none (files only) |
+| actions-relock | `label-relock-actions` |
+<!-- settings:end -->
+
+Settings are enable-only. Each has one target state, and taking a group out
+of `enable` stops checking it without turning anything off.
+
+Reading them needs `gh` authenticated as an admin of the repo. voidflow checks
+that first: without admin, a 403 would look like a plan limit and hide drift.
+A private repo without GitHub Code Security or Secret Protection cannot use
+`codeql` or `secret-scanning`, and AI Scan needs a public repo owned by an
+organization or Code Security; those settings show as `skipped-plan` and
+never count as drift. `codeql` shows `skipped-no-code` until the first push.
+Some settings have no API (Dependabot malware alerts, the Require lockfile
+policy, code scanning for AI applications); `apply settings` prints them as
+manual steps.
+
 ## Running it
 
 From inside the repo, with no `--config` and no `VOIDFLOW_CONFIG`:
@@ -101,6 +155,8 @@ From inside the repo, with no `--config` and no `VOIDFLOW_CONFIG`:
 voidflow plan rulesets      # what apply would change, read-only
 voidflow check rulesets     # exit 1 on drift
 voidflow apply rulesets     # make GitHub match the file
+voidflow plan settings      # the settings section, on top of the baseline
+voidflow apply settings     # turn on the settings that differ
 voidflow plan tokens        # the cloudflare section's tokens (tokens means tokens cf)
 voidflow apply tokens       # create, update and rotate them; set each env's secret
 voidflow apply tokens --prune    # also delete `retire` tokens
@@ -113,10 +169,14 @@ voidflow version, the repo, and the name of the credential `gh` uses (never its
 value; for tokens, the name of the admin token variable). `apply` writes only
 the repo the file sits in, so `--repo` and `--entire-fleet` are refused.
 
-A bare `voidflow plan` or `check` runs rulesets, then tokens when the file has
-a `cloudflare` section and its admin token variable is set. Otherwise it says
-that tokens were skipped and why, and exits with the rulesets result, so a
-repo's CI (which has no admin token) still checks rulesets. Passing
+A bare `voidflow plan` or `check` runs rulesets, then settings, then tokens
+when the file has a `cloudflare` section and its admin token variable is set.
+Settings are skipped, with the reason, when `gh` lacks admin on the repo (or
+is missing); tokens are skipped, with the reason, otherwise. Neither skip
+changes the exit code, so a repo's CI (which has neither) still checks
+rulesets. Naming the tool (`voidflow check settings`) makes a missing admin an
+error (exit 2) instead. Settings exist only in a repo's own file: outside
+one, `voidflow plan settings` exits 2. Passing
 `--config`, setting `VOIDFLOW_CONFIG`, or using `--repo` or `--entire-fleet`
 with a token verb selects a fleet config instead, and so does naming tokens in
 a repo whose file has no `cloudflare` section. Fleet
@@ -131,11 +191,13 @@ The tool and site templates add a `check:voidflow` script (`voidflow check`).
 It runs in two places, both skipped when a repo does not define the script:
 
 - CI (`tool-ci.yml`, `site-ci.yml`): drift (exit 1) fails the job. Exit 2 (the
-  default token cannot read rulesets, or a config error) only warns. CI never
-  checks tokens, since it has no admin token.
+  default token cannot read rulesets, or a config error) only warns. CI skips
+  settings and tokens, since its token is not an admin and it has no admin
+  token.
 - The `pre-push` hook in `lefthook/base.yml`, on pushes to `main`, `next` and
-  `release/*` when `voidflow.config.ts` exists. Tokens are checked too when
-  the `cloudflare` section's admin token variable is set. The hook then runs
+  `release/*` when `voidflow.config.ts` exists. Settings are checked too when
+  `gh` is an admin of the repo, and tokens when the `cloudflare` section's
+  admin token variable is set. The hook then runs
   the repo's optional `try:deploy` script, so a missing token grant shows up
   before CI depends on it:
 

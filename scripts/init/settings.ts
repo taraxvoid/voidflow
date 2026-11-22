@@ -2,6 +2,7 @@
  * GitHub repo settings for `voidflow init`: read current state, change only
  * what differs. The table is data so a drift check can reuse it.
  */
+import { SETTING_GROUPS, type SettingsGroup } from '../../config/settings.ts'
 import { RELOCK_LABEL } from './actions-lock.ts'
 import type { Gh, GhResult } from './gh.ts'
 
@@ -24,11 +25,13 @@ export type RepoInfo = {
     visibility: 'PUBLIC' | 'PRIVATE' | 'INTERNAL'
     pullRequestCreationPolicy?: string
     issueCreationPolicy?: string
+    /** The credential's role on the repo: ADMIN, MAINTAIN, WRITE, TRIAGE, READ. */
+    viewerPermission?: string
 }
 
+/** One setting; its group comes from SETTING_GROUPS in config/settings.ts. */
 type Setting = {
     name: string
-    optIn?: 'pvr' | 'ai-scan' | 'agentic' | 'actions-relock'
     read(gh: Gh, repo: string, info: RepoInfo): Promise<boolean>
     write(gh: Gh, repo: string, info: RepoInfo): Promise<void>
 }
@@ -177,7 +180,6 @@ export const SETTINGS: Setting[] = [
     },
     {
         name: 'pvr',
-        optIn: 'pvr',
         async read(gh, repo) {
             const r = await get(
                 gh,
@@ -189,18 +191,34 @@ export const SETTINGS: Setting[] = [
             send(gh, 'PUT', `repos/${repo}/private-vulnerability-reporting`),
     },
     {
+        // AI Scan for pull requests and for the repository: one endpoint, the
+        // same eligibility, changed together. `repository_scan` is a preview;
+        // a repo whose GET lacks it is checked on `pr_scan` alone, so the
+        // preview reaching it later shows up as drift.
         name: 'ai-scan',
-        optIn: 'ai-scan',
         async read(gh, repo) {
-            const r = await get(gh, `repos/${repo}/code-scanning/ai-scan`)
-            return object(r.body)?.pr_scan === 'enabled'
+            const b = await aiScan(gh, repo)
+            return (
+                b?.pr_scan === 'enabled' &&
+                (!('repository_scan' in (b ?? {})) ||
+                    b?.repository_scan === 'enabled')
+            )
         },
-        write: (gh, repo) =>
-            send(gh, 'PATCH', `repos/${repo}/code-scanning/ai-scan`, {
+        async write(gh, repo) {
+            const b = await aiScan(gh, repo)
+            await send(gh, 'PATCH', `repos/${repo}/code-scanning/ai-scan`, {
                 pr_scan: 'enabled',
-            }),
+                ...(b && 'repository_scan' in b
+                    ? { repository_scan: 'enabled' }
+                    : {}),
+            })
+        },
     },
 ]
+
+async function aiScan(gh: Gh, repo: string) {
+    return object((await get(gh, `repos/${repo}/code-scanning/ai-scan`)).body)
+}
 
 /**
  * Labels the deps-review agent applies, created up front. Names follow
@@ -244,7 +262,6 @@ function repoFlag(
 ): Setting {
     return {
         name,
-        optIn: 'agentic',
         async read(gh, repo) {
             return (
                 object((await get(gh, `repos/${repo}`)).body)?.[field] === true
@@ -262,7 +279,6 @@ function agenticSettings(): Setting[] {
         repoFlag('delete-branch-on-merge', 'delete_branch_on_merge'),
         {
             name: 'actions-permissions',
-            optIn: 'agentic',
             // Read-only token, and Actions must never approve PRs: deps-review
             // must not be able to approve what it reviews.
             async read(gh, repo) {
@@ -287,7 +303,6 @@ function agenticSettings(): Setting[] {
         },
         {
             name: 'fork-pr-approval',
-            optIn: 'agentic',
             // Runs from any outside contributor's fork PR wait for approval,
             // so agent-driven workflows never run untrusted code unprompted.
             async read(gh, repo) {
@@ -312,7 +327,6 @@ function agenticSettings(): Setting[] {
         ...AGENTIC_LABELS.map(
             (label): Setting => ({
                 name: `label-${label.name}`,
-                optIn: 'agentic',
                 read: (gh, repo) => labelExists(gh, repo, label.name),
                 async write(gh, repo) {
                     const { name, color, description } = label
@@ -339,7 +353,6 @@ SETTINGS.push(...agenticSettings())
 // The label that asks relock-actions to relock a non-Renovate pull request.
 SETTINGS.push({
     name: `label-${RELOCK_LABEL.name}`,
-    optIn: 'actions-relock',
     read: (gh, repo) => labelExists(gh, repo, RELOCK_LABEL.name),
     write: (gh, repo) => send(gh, 'POST', `repos/${repo}/labels`, RELOCK_LABEL),
 })
@@ -350,11 +363,17 @@ export function settingNames(): string[] {
 
 const PLAN_GATED = new Set(['codeql', 'secret-scanning'])
 
+/** GitHub's 403 text for a token missing a scope or fine-grained permission. */
+const TOKEN_SCOPE = /not accessible by (personal access token|integration)/i
+
+const AI_SCAN_HINT =
+    'AI Scan needs a public repo owned by an organization, or GitHub Code Security, and the organization and enterprise policies must allow it. Turning it on starts no scan; scans run on demand and use Code Security AI credits (or skip it: settings.skip in voidflow.config.ts, or --skip ai-scan)'
+
 /** Actionable replacement for the raw 403/422 body on a plan-gated setting. */
 function planGatedHint(name: string, info: RepoInfo): string {
     const feature = name === 'codeql' ? 'code scanning' : 'secret scanning'
     const kind = info.visibility === 'INTERNAL' ? 'internal' : 'private'
-    return `${feature} on ${kind} repositories needs a paid GitHub Code Security / Secret Protection plan; enable it for the org or make the repo public, then re-run (or pass --skip ${name} to hide this line)`
+    return `${feature} on ${kind} repositories needs a paid GitHub Code Security / Secret Protection plan; enable it for the org or make the repo public, then re-run (or skip it: settings.skip in voidflow.config.ts, or --skip ${name})`
 }
 
 function classifyError(
@@ -373,7 +392,20 @@ function classifyError(
         return {
             name,
             status: 'skipped-no-code',
-            detail: 're-run voidflow init --preset settings after your first push',
+            detail: 're-run voidflow apply settings (or voidflow init --preset settings) after your first push',
+        }
+    }
+    if (name === 'ai-scan' && status === 422) {
+        return { name, status: 'skipped-plan', detail: AI_SCAN_HINT }
+    }
+    // An admin's token can still lack a scope (a fine-grained token without
+    // Code scanning alerts, say). GitHub says so in the message; that is a
+    // failed read, not a plan limit, or check would hide the drift.
+    if (status === 403 && TOKEN_SCOPE.test(msg)) {
+        return {
+            name,
+            status: 'failed',
+            detail: `the credential lacks a permission this setting needs: ${msg}`,
         }
     }
     if (
@@ -390,31 +422,37 @@ function classifyError(
     return { name, status: 'failed', detail: msg }
 }
 
+/** What one run did; `notAdmin` (the credential's role) means nothing was read. */
+export type SettingsRun = { results: SettingResult[]; notAdmin?: string }
+
+/** The settings a selection covers: baseline plus enabled groups, minus skips. */
+export function selectSettings(
+    enabled: ReadonlySet<SettingsGroup>,
+    skip: ReadonlySet<string>,
+): string[] {
+    return SETTINGS.map((s) => s.name).filter((name) => {
+        if (skip.has(name)) return false
+        const group = SETTING_GROUPS[name]
+        return group === 'baseline' || enabled.has(group)
+    })
+}
+
 export async function runSettings(
     gh: Gh,
     repo: string,
     sel: {
-        skip: Set<string>
-        enablePvr: boolean
-        enableAiScan: boolean
-        enableAgentic?: boolean
-        enableActionsRelock?: boolean
+        enabled: ReadonlySet<SettingsGroup>
+        skip: ReadonlySet<string>
         dryRun: boolean
     },
-): Promise<SettingResult[]> {
-    const chosen = SETTINGS.filter((s) => {
-        if (sel.skip.has(s.name)) return false
-        if (s.optIn === 'pvr') return sel.enablePvr
-        if (s.optIn === 'ai-scan') return sel.enableAiScan
-        if (s.optIn === 'agentic') return sel.enableAgentic
-        if (s.optIn === 'actions-relock') return sel.enableActionsRelock
-        return true
-    })
+): Promise<SettingsRun> {
+    const names = new Set(selectSettings(sel.enabled, sel.skip))
+    const chosen = SETTINGS.filter((s) => names.has(s.name))
     let info: RepoInfo
     try {
         const { owner, name } = split(repo)
         const data = await gh.graphql(
-            'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id visibility pullRequestCreationPolicy issueCreationPolicy } }',
+            'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id visibility pullRequestCreationPolicy issueCreationPolicy viewerPermission } }',
             { owner, name },
         )
         const repository = object(object(data)?.repository)
@@ -435,11 +473,25 @@ export async function runSettings(
                 typeof repository.issueCreationPolicy === 'string'
                     ? repository.issueCreationPolicy
                     : undefined,
+            viewerPermission:
+                typeof repository.viewerPermission === 'string'
+                    ? repository.viewerPermission
+                    : undefined,
         }
     } catch (e) {
         const detail = `cannot read ${repo}: ${e instanceof Error ? e.message : String(e)}`
-        return chosen.map((s) => ({ name: s.name, status: 'failed', detail }))
+        return {
+            results: chosen.map((s) => ({
+                name: s.name,
+                status: 'failed',
+                detail,
+            })),
+        }
     }
+    // Most settings need admin, and a weak credential's 403 would read as a
+    // plan-gated skip and hide drift, so check before reading any.
+    if (info.viewerPermission !== 'ADMIN')
+        return { results: [], notAdmin: info.viewerPermission ?? 'none' }
     const results: SettingResult[] = []
     for (const s of chosen) {
         try {
@@ -455,30 +507,27 @@ export async function runSettings(
             results.push(classifyError(s.name, e, info))
         }
     }
-    return results
+    return { results }
 }
 
 export function manualReminders(
     repo: string,
-    enableAiScan: boolean,
-    enableAgentic = false,
-    enableActionsLock = false,
+    enabled: ReadonlySet<SettingsGroup>,
 ): string[] {
     const url = `https://github.com/${repo}/settings/security_analysis`
     const lines = [`Turn on Dependabot malware alerts (no API setting): ${url}`]
-    if (enableActionsLock) {
+    if (enabled.has('actions-lock')) {
         lines.push(
             `Once actions.lock is committed and verify-lockfile passes, turn on the Require lockfile policy (no API setting): Evaluate first where offered (Enterprise Cloud), then Active. See https://docs.github.com/en/actions/how-tos/administer/enforce-workflow-lockfiles`,
         )
     }
-    if (enableAgentic) {
+    if (enabled.has('agentic')) {
         lines.push(
             `Add the COPILOT_GITHUB_TOKEN secret for the deps-review engine (cannot be created from nothing), as an Actions secret (https://github.com/${repo}/settings/secrets/actions) and again as a Dependabot secret (https://github.com/${repo}/settings/secrets/dependabot)`,
         )
     }
-    if (enableAiScan) {
+    if (enabled.has('ai-scan')) {
         lines.push(
-            `Turn on AI Scan for repositories (preview, no API setting): ${url}`,
             `Turn on code scanning for AI applications (preview, no API setting): ${url}`,
         )
     }

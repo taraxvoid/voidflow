@@ -24,6 +24,15 @@ import {
     site,
     tool,
 } from '../rulesets/index.ts'
+import { type SettingsConfig, settingsProblems } from './settings.ts'
+
+export {
+    enabledGroups,
+    GROUPS,
+    SETTING_GROUPS,
+    type SettingsConfig,
+    type SettingsGroup,
+} from './settings.ts'
 
 export const KINDS = ['site', 'tool'] as const
 export type Kind = (typeof KINDS)[number]
@@ -34,6 +43,8 @@ export type VoidflowConfig = {
     rulesets?: Partial<RepoConfig> | RawConfig
     /** The repo's scoped Cloudflare deploy tokens (`voidflow tokens cf`). */
     cloudflare?: CloudflareConfig
+    /** Repo settings to check: opt-in groups and skips (`voidflow settings`). */
+    settings?: SettingsConfig
 }
 
 /**
@@ -52,7 +63,7 @@ export type CloudflareConfig = {
 
 export const DEFAULT_ADMIN_TOKEN_ENV = 'CF_TOKEN_ADMIN'
 
-const KEYS = ['kind', 'rulesets', 'cloudflare']
+const KEYS = ['kind', 'rulesets', 'cloudflare', 'settings']
 const CLOUDFLARE_KEYS = ['account', 'adminTokenEnv', 'envs', 'retire']
 const ENV_NAME = /^[A-Z_][A-Z0-9_]*$/
 const RESERVED_ADMIN_TOKEN_ENVS = new Set([
@@ -169,6 +180,8 @@ export function checkVoidflowConfig(x: unknown): VoidflowConfig {
                 )
         }
     }
+
+    if (x.settings !== undefined) errs.push(...settingsProblems(x.settings))
 
     if (errs.length > 0) throw new Error(errs.join('\n'))
     return x as VoidflowConfig

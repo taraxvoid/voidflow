@@ -12,6 +12,8 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { VoidflowConfig } from '../config/index.ts'
+import { enabledGroups } from '../config/settings.ts'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
     credentialNotes,
@@ -22,6 +24,7 @@ import {
     runActionsLock,
 } from './init/actions-lock.ts'
 import { colorEnabled, type Paint, painter, statusStyle } from './init/color.ts'
+import { mergeSettings, withSettings } from './init/config-settings.ts'
 import {
     applyFiles,
     FILE_ITEMS,
@@ -32,6 +35,7 @@ import {
 } from './init/files.ts'
 import { addToFleet } from './init/fleet.ts'
 import {
+    credentialSource,
     type Gh,
     ghAvailable,
     ghCli,
@@ -56,6 +60,7 @@ import { loadOrExit } from './lib/config.ts'
 import { configPath } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import { capture } from './lib/proc.ts'
+import { CONFIG_FILE, loadVoidflowConfig } from './lib/repo-config.ts'
 
 /**
  * Presets are data: each names the file items it selects and whether the
@@ -102,7 +107,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --preset <name>         ${Object.keys(PRESETS).join('|')}(default full)
   --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
-  --enable-ai-scan        opt in: AI Scan for pull requests
+  --enable-ai-scan        opt in: AI Scan for pull requests and the repository
   --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --enable-actions-lock   opt in: verify-lockfile.yml, then run gh actions-lock once to write .github/workflows/actions.lock
@@ -326,6 +331,40 @@ export async function main(
     // Relock without verify is half a feature: relock implies lock.
     const enableActionsLock =
         values['enable-actions-lock'] || enableActionsRelock
+    const flagGroups = (
+        [
+            [enablePvr, 'pvr'],
+            [enableAiScan, 'ai-scan'],
+            [enableAgentic, 'agentic'],
+            [enableActionsLock, 'actions-lock'],
+            [enableActionsRelock, 'actions-relock'],
+        ] as const
+    )
+        .filter(([on]) => on)
+        .map(([, g]) => g)
+    // A repo's voidflow.config.ts adds its settings to the flags', and gets
+    // the flags' written back. A broken one stops here: the rewrite would
+    // throw it away.
+    const configFile = join(dir, CONFIG_FILE)
+    let existingConfig: VoidflowConfig | undefined
+    if (existsSync(configFile)) {
+        try {
+            existingConfig = await loadVoidflowConfig(configFile)
+        } catch (e) {
+            console.error((e as Error).message)
+            process.exit(2)
+        }
+    }
+    const merged = mergeSettings(
+        existingConfig?.settings,
+        flagGroups,
+        values.skip,
+    )
+    const enabled = enabledGroups(merged.settings?.enable)
+    const settingSkip = new Set([
+        ...values.skip,
+        ...(merged.settings?.skip ?? []),
+    ])
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -400,6 +439,7 @@ export async function main(
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
             stage,
             owner: ownerHandle,
+            config: withSettings(existingConfig ?? { kind }, merged.settings),
         }
         const skip = new Set([
             ...values.skip,
@@ -414,6 +454,10 @@ export async function main(
             enableAgentic: values['enable-agentic'],
             enableActionsLock,
             enableActionsRelock,
+            configChange:
+                existingConfig && merged.added.length > 0
+                    ? `${merged.added.join(', ')}; comments in the file are not kept`
+                    : undefined,
         }
         const scope = enableActionsLock
             ? lockScope(
@@ -553,14 +597,22 @@ export async function main(
             out.push(row('unavailable', 'settings', unavailable))
             if (!dryRun) exitCode = 1
         } else if (repo) {
-            settingResults = await runSettings(gh, repo, {
-                skip: new Set(values.skip),
-                enablePvr,
-                enableAiScan,
-                enableAgentic,
-                enableActionsRelock,
+            const run = await runSettings(gh, repo, {
+                enabled,
+                skip: settingSkip,
                 dryRun,
             })
+            settingResults = run.results
+            if (run.notAdmin !== undefined) {
+                out.push(
+                    row(
+                        'unavailable',
+                        'settings',
+                        `settings need admin on ${repo} (${credentialSource(process.env)} has ${run.notAdmin})`,
+                    ),
+                )
+                if (!dryRun) exitCode = 1
+            }
             for (const r of settingResults)
                 out.push(row(r.status, r.name, r.detail))
             if (settingResults.some((r) => r.status === 'failed')) exitCode = 1
@@ -603,6 +655,23 @@ export async function main(
         }
     }
 
+    // Settings the flags add, when the file is not being rewritten with them.
+    // A conflict anywhere writes no files, the config included.
+    const configWritten =
+        !fileActions.some((a) => a.status === 'conflict') &&
+        fileActions.some(
+            (a) =>
+                a.name === 'config' &&
+                (a.status === 'merge' || a.status === 'overwrite'),
+        )
+    if (existingConfig && !configWritten)
+        for (const a of merged.added) {
+            const [path, value] = a.split(' + ')
+            notes.push(
+                `add '${value}' to ${path} in ${CONFIG_FILE} so voidflow check covers it`,
+            )
+        }
+
     // Opt-ins act only on the halves that ran; say what was left out.
     if (enablePvr) {
         if (!securityPlanned())
@@ -643,13 +712,7 @@ export async function main(
 
     if (repo && preset.settings) {
         out.push('manual:')
-        for (const l of manualReminders(
-            repo,
-            enableAiScan,
-            enableAgentic,
-            enableActionsLock,
-        ))
-            out.push(`  ${l}`)
+        for (const l of manualReminders(repo, enabled)) out.push(`  ${l}`)
     }
     if (notes.length > 0) {
         out.push('notes:')
@@ -717,8 +780,9 @@ export async function main(
     ) {
         out.push(
             '  review and commit voidflow.config.ts, then run:',
-            '    voidflow plan rulesets',
+            '    voidflow plan',
             '    voidflow apply rulesets',
+            '    voidflow apply settings',
             '  (see https://github.com/taraxvoid/voidflow/blob/main/docs/config.md)',
         )
     } else {
