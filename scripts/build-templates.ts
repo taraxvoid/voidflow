@@ -67,6 +67,32 @@ jobs:
 
 ${sarifJob}`
 
+/**
+ * The caller for voidflow-drift.yml: after each push to main and weekly, check
+ * GitHub against voidflow.config.ts and keep one issue open while they differ.
+ */
+const voidflowDrift = `# Checks GitHub against voidflow.config.ts after each push to main and weekly,
+# and keeps one issue open while they differ (closed once back in sync).
+# Review with \`voidflow plan\`, then \`voidflow apply <preset>\`.
+name: voidflow drift
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '{{cron_minute}} 5 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  drift:
+    permissions:
+      contents: read
+      issues: write # the drift issue
+      actions: read # environments
+    uses: taraxvoid/voidflow/.github/workflows/voidflow-drift.yml@{{sha}} # v{{version}}
+`
+
 const siteCi = `name: CI
 on:
   push:
@@ -430,6 +456,7 @@ export default { kind: '{{kind}}' } satisfies VoidflowConfig
     const pins = lockPins(root)
     t.set('common/verify-lockfile.yml', verifyLockfile(pins))
     t.set('common/relock-actions.yml', relockActions(pins))
+    t.set('common/voidflow-drift.yml', voidflowDrift)
 
     t.set('tool/ci.yml', toolCi)
     t.set(

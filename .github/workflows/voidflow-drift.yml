@@ -1,0 +1,91 @@
+name: voidflow drift
+
+# Checks GitHub against the caller's voidflow.config.ts and keeps one issue
+# open while they differ: opened (or updated) on drift, closed once a later
+# run is in sync. Exit 2 (the token cannot read something, or the config does
+# not load) only warns and leaves the issue as it is.
+#
+# Runs the voidflow version the caller's package.json pins, with npx, so it
+# needs no install. Callers trigger it on push to main, a weekly schedule and
+# workflow_dispatch, and must grant `contents: read`, `issues: write` and
+# `actions: read` (environments). Settings and tokens are never checked here:
+# GITHUB_TOKEN is not an admin and there is no Cloudflare admin token.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label for the drift job.
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: voidflow-drift-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Drift
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Check, and open or close the drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='voidflow: GitHub differs from voidflow.config.ts'
+          # The version the repo pins; voidflow's own repo runs its release.
+          version=$(jq -r '(.devDependencies // {})["@taraxvoid/voidflow"] // (.dependencies // {})["@taraxvoid/voidflow"] // (if .name == "@taraxvoid/voidflow" then .version else empty end)' package.json)
+          if [ -z "$version" ]; then
+            echo "::error file=package.json::no @taraxvoid/voidflow dependency to run"
+            exit 1
+          fi
+          out="$RUNNER_TEMP/voidflow-check.txt"
+          code=0
+          npx --yes "@taraxvoid/voidflow@$version" check --no-color > "$out" 2>&1 || code=$?
+          cat "$out"
+          open=$(gh issue list --state open --search "in:title voidflow.config.ts" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          case "$code" in
+            0)
+              if [ -n "$open" ]; then
+                gh issue close "$open" --comment "In sync again as of $GITHUB_SHA ($RUN_URL)."
+              fi
+              ;;
+            1)
+              body="$RUNNER_TEMP/voidflow-drift.md"
+              {
+                echo "\`voidflow check\` on \`$GITHUB_SHA\` found GitHub differs from \`voidflow.config.ts\` ([run]($RUN_URL)):"
+                echo
+                echo '```'
+                head -c 60000 "$out"
+                echo '```'
+                echo
+                echo "Review with \`voidflow plan\` in a checkout of main, then \`voidflow apply <preset>\`. This issue closes itself when a later run is in sync."
+              } > "$body"
+              if [ -n "$open" ]; then
+                gh issue edit "$open" --body-file "$body"
+              else
+                gh issue create --title "$title" --body-file "$body"
+              fi
+              echo "::warning::GitHub differs from voidflow.config.ts; see the drift issue"
+              ;;
+            *)
+              echo "::warning::voidflow check could not run (exit $code); the drift issue was left as it is"
+              ;;
+          esac

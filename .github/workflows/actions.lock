@@ -11,6 +11,7 @@ workflows:
         - 'astral-sh/setup-uv@v10.3.0'
         - 'oven-sh/setup-bun@v2.2.0'
     '.github/workflows/deps-review-gate.yml': []
+    '.github/workflows/drift.yml': []
     '.github/workflows/release-please.yml':
         - 'actions/attest@v4.2.2'
         - 'actions/checkout@v7.0.1'
@@ -59,6 +60,9 @@ workflows:
     '.github/workflows/verify-releases.yml':
         - 'actions/checkout@v7.0.1'
         - 'oven-sh/setup-bun@v2.2.0'
+    '.github/workflows/voidflow-drift.yml':
+        - 'actions/checkout@v7.0.1'
+        - 'actions/setup-node@v7.1.0'
 dependencies:
     'actions/attest@v4.2.2':
         ref: 'v4.2.2'
