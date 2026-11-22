@@ -297,6 +297,20 @@ describe('voidflow init', () => {
         expect(f.writes.length).toBeGreaterThan(0)
     })
 
+    test('a conflict that blocks the config write prints the settings to add', async () => {
+        const dir = repo()
+        writeFileSync(join(dir, 'mise.toml'), '[tools]\n')
+        writeFileSync(
+            join(dir, 'voidflow.config.ts'),
+            "export default { kind: 'tool' }\n",
+        )
+        const r = await run(['--kind', 'tool', '--enable-pvr', dir])
+        expect(r.code).toBe(1)
+        expect(r.out).toContain(
+            "add 'pvr' to settings.enable in voidflow.config.ts so voidflow check covers it",
+        )
+    })
+
     test('a refusal leads the output and no row claims a change was made', async () => {
         const dir = repo()
         writeFileSync(join(dir, 'mise.toml'), '[tools]\n')

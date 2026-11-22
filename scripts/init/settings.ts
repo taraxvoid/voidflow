@@ -363,6 +363,9 @@ export function settingNames(): string[] {
 
 const PLAN_GATED = new Set(['codeql', 'secret-scanning'])
 
+/** GitHub's 403 text for a token missing a scope or fine-grained permission. */
+const TOKEN_SCOPE = /not accessible by (personal access token|integration)/i
+
 const AI_SCAN_HINT =
     'AI Scan needs a public repo owned by an organization, or GitHub Code Security, and the organization and enterprise policies must allow it. Turning it on starts no scan; scans run on demand and use Code Security AI credits (or skip it: settings.skip in voidflow.config.ts, or --skip ai-scan)'
 
@@ -394,6 +397,16 @@ function classifyError(
     }
     if (name === 'ai-scan' && status === 422) {
         return { name, status: 'skipped-plan', detail: AI_SCAN_HINT }
+    }
+    // An admin's token can still lack a scope (a fine-grained token without
+    // Code scanning alerts, say). GitHub says so in the message; that is a
+    // failed read, not a plan limit, or check would hide the drift.
+    if (status === 403 && TOKEN_SCOPE.test(msg)) {
+        return {
+            name,
+            status: 'failed',
+            detail: `the credential lacks a permission this setting needs: ${msg}`,
+        }
     }
     if (
         PLAN_GATED.has(name) &&

@@ -317,9 +317,16 @@ export function repoToolArgs(
         file,
         ...VERB_FLAG[verb],
         ...(tool === 'settings' && bare ? ['--if-admin'] : []),
-        ...rest,
+        // A bare run forwards one set of flags to every tool; settings takes
+        // none of the others' (--prune, --rotate), so it gets only its own.
+        ...(tool === 'settings' && bare
+            ? rest.filter((a) => SETTINGS_FLAGS.has(a))
+            : rest),
     ]
 }
+
+/** The forwarded flags `voidflow settings` takes. */
+const SETTINGS_FLAGS = new Set(['--no-color'])
 
 /**
  * The tools one verb runs on a voidflow.config.ts: a named tool alone;

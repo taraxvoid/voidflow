@@ -631,6 +631,26 @@ describe('settings in the verbs', () => {
         )
     })
 
+    test('a bare run forwards settings only its own flags', () => {
+        const f = '/r/voidflow.config.ts'
+        const rest = ['--prune', '--no-color', '--rotate']
+        expect(repoToolArgs('check', f, rest, 'settings', true)).toEqual([
+            'settings',
+            '--repo-config',
+            f,
+            '--check',
+            '--if-admin',
+            '--no-color',
+        ])
+        expect(repoToolArgs('check', f, rest, 'rulesets', true)).toContain(
+            '--prune',
+        )
+        // Named, settings gets everything, so a wrong flag is an error.
+        expect(repoToolArgs('apply', f, ['--prune'], 'settings')).toContain(
+            '--prune',
+        )
+    })
+
     test('the apply hint names settings', () => {
         expect(applyHint('settings', undefined, [], false)).toBe(
             'voidflow apply settings',

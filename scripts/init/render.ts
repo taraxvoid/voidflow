@@ -29,8 +29,20 @@ export type RenderCtx = {
  */
 export const CONFIG_LITERAL = "{ kind: '{{kind}}' }"
 
-/** Fill the init-time placeholders. A null sha pins the tag instead. */
+/**
+ * Fill the init-time placeholders. A null sha pins the tag instead. The
+ * config literal goes in last and verbatim, so its values never meet a
+ * placeholder or a `$` replacement pattern.
+ */
 export function render(template: string, ctx: RenderCtx): string {
+    const head = `export default ${CONFIG_LITERAL}`
+    const parts = template.split(head)
+    if (parts.length === 1) return fill(template, ctx)
+    const literal = `export default ${configSource(ctx.config ?? { kind: ctx.kind })}`
+    return parts.map((p) => fill(p, ctx)).join(literal)
+}
+
+function fill(template: string, ctx: RenderCtx): string {
     const pinned =
         ctx.sha === null
             ? template.replaceAll('@{{sha}} # v{{version}}', '@v{{version}}')
@@ -38,10 +50,6 @@ export function render(template: string, ctx: RenderCtx): string {
     return pinned
         .replaceAll('{{version}}', ctx.version)
         .replaceAll('{{sha}}', ctx.sha ?? '')
-        .replaceAll(
-            `export default ${CONFIG_LITERAL}`,
-            `export default ${configSource(ctx.config ?? { kind: ctx.kind })}`,
-        )
         .replaceAll('{{kind}}', ctx.kind)
         .replaceAll('{{cron_minute}}', String(ctx.cronMinute))
         .replaceAll('{{repo}}', ctx.repo ?? 'OWNER/REPO')

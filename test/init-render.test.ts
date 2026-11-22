@@ -37,6 +37,17 @@ describe('render', () => {
     test('null repo becomes OWNER/REPO', () => {
         expect(render('{{repo}}', { ...ctx, repo: null })).toBe('OWNER/REPO')
     })
+    test('the config literal goes in verbatim', () => {
+        const t =
+            "// {{repo}}\nexport default { kind: '{{kind}}' } satisfies X\n"
+        const config = {
+            kind: 'tool',
+            rulesets: { checks: ["$& $' {{repo}}"] },
+        }
+        expect(render(t, { ...ctx, config })).toBe(
+            "// o/r\nexport default {\n    kind: 'tool',\n    rulesets: { checks: ['$& $\\' {{repo}}'] },\n} satisfies X\n",
+        )
+    })
 })
 
 describe('render (null sha, repeated)', () => {

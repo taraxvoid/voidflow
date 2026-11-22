@@ -656,11 +656,14 @@ export async function main(
     }
 
     // Settings the flags add, when the file is not being rewritten with them.
-    const configWritten = fileActions.some(
-        (a) =>
-            a.name === 'config' &&
-            (a.status === 'merge' || a.status === 'overwrite'),
-    )
+    // A conflict anywhere writes no files, the config included.
+    const configWritten =
+        !fileActions.some((a) => a.status === 'conflict') &&
+        fileActions.some(
+            (a) =>
+                a.name === 'config' &&
+                (a.status === 'merge' || a.status === 'overwrite'),
+        )
     if (existingConfig && !configWritten)
         for (const a of merged.added) {
             const [path, value] = a.split(' + ')

@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import type { VoidflowConfig } from '../config/index.ts'
 import type { Gh, GhResult } from '../scripts/init/gh.ts'
 import { settingsCommand } from '../scripts/settings.ts'
@@ -169,6 +172,25 @@ describe('voidflow settings', () => {
         })
     })
 
+    test('a token missing a scope fails instead of reading as plan-gated', async () => {
+        const gh = fake({
+            override: {
+                'GET repos/o/r/code-scanning/default-setup': {
+                    status: 403,
+                    body: {
+                        message:
+                            'Resource not accessible by personal access token',
+                    },
+                },
+            },
+        })
+        const r = await run(gh, 'check')
+        expect(r.code).toBe(2)
+        expect(r.lines.join('\n')).toMatch(
+            /failed\s+codeql\s+the credential lacks/,
+        )
+    })
+
     test('a failed read is 2; a failed write is 1', async () => {
         const read = fake({
             override: {
@@ -191,5 +213,73 @@ describe('voidflow settings', () => {
         const r = await run(write, 'apply')
         expect(r.code).toBe(1)
         expect(r.lines).not.toContain('manual:')
+    })
+})
+
+describe('voidflow settings (the command line)', () => {
+    const CLI = resolve(import.meta.dir, '..', 'scripts', 'cli.ts')
+    const dirs: string[] = []
+    afterEach(() => {
+        for (const d of dirs.splice(0))
+            rmSync(d, { recursive: true, force: true })
+    })
+    async function cli(args: string[], config?: string) {
+        const dir = mkdtempSync(join(tmpdir(), 'voidflow-settings-'))
+        dirs.push(dir)
+        mkdirSync(join(dir, '.git'))
+        const file = join(dir, 'voidflow.config.ts')
+        if (config !== undefined) writeFileSync(file, config)
+        const proc = Bun.spawn(
+            [
+                'bun',
+                CLI,
+                'settings',
+                ...args.map((a) => a.replace('FILE', file)),
+            ],
+            {
+                cwd: dir,
+                env: { ...process.env, GITHUB_REPOSITORY: 'o/r' },
+                stdout: 'pipe',
+                stderr: 'pipe',
+            },
+        )
+        const [code, err] = await Promise.all([
+            proc.exited,
+            new Response(proc.stderr).text(),
+        ])
+        return { code, err }
+    }
+
+    test('--repo-config is required', async () => {
+        const r = await cli([])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('--repo-config is required')
+    })
+
+    test('--check and --apply are alternatives', async () => {
+        const r = await cli(
+            ['--repo-config', 'FILE', '--check', '--apply'],
+            "export default { kind: 'tool' }\n",
+        )
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('alternatives')
+    })
+
+    test('an invalid config exits 2 naming the file', async () => {
+        const r = await cli(
+            ['--repo-config', 'FILE'],
+            "export default { kind: 'tool', settings: { skip: ['nope'] } }\n",
+        )
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('voidflow.config.ts')
+        expect(r.err).toContain('settings.skip: unknown setting "nope"')
+    })
+
+    test('an unknown flag exits 2', async () => {
+        const r = await cli(
+            ['--repo-config', 'FILE', '--prune'],
+            "export default { kind: 'tool' }\n",
+        )
+        expect(r.code).toBe(2)
     })
 })
