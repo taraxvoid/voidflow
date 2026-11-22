@@ -21,8 +21,11 @@
  * Needs an admin token: in the variable the repo's `cloudflare.adminTokenEnv`
  * names (default CF_TOKEN_ADMIN) with --repo-config, else CF_TOKEN_ADMIN
  * covering every account in the fleet config (envs can sit in different
- * accounts). It needs Account API Tokens Edit, Workers Scripts Read (Worker tags) and Zone
- * Read (zone ids) on each. Keep it local; never put it in CI.
+ * accounts). It needs Account API Tokens Edit, Workers Scripts Read (Worker
+ * tags; Workers Metadata Read-Only in the dashboard) and Zone Read (zone ids)
+ * on each. Without a read permission Cloudflare lists nothing rather than
+ * refusing, so the errors for a missing Worker or zone say so. Keep it local;
+ * never put it in CI.
  *
  * GitHub goes through the `gh` CLI, with admin on the repos: even a plan reads
  * each repo's wrangler config (for envs that don't spell out worker and zones)
@@ -30,7 +33,8 @@
  * `gh secret set` and never printed.
  */
 
-import { dirname, resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import {
     type Action,
     checkRepos,
@@ -38,6 +42,9 @@ import {
     type EnvConfig,
     envAccount,
     expiresOn,
+    fromWrangler,
+    missingWorkerMessage,
+    missingZoneMessage,
     type Policy,
     plan,
     policies,
@@ -51,6 +58,8 @@ import {
     WORKER_EDITOR,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
+    type WranglerTarget,
+    wranglerWarnings,
 } from '../cloudflare/tokens.ts'
 import {
     adminTokenVar,
@@ -141,6 +150,8 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
 
     let REPOS: Record<string, RepoConfig>
     let adminVar = DEFAULT_ADMIN_TOKEN_ENV
+    /** The checkout the per-repo config sits in; the fleet has none. */
+    let localRoot: string | undefined
     if (repoConfig === undefined) {
         REPOS = await loadOrExit(values.config, checkRepos)
     } else {
@@ -149,6 +160,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
                 process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
                 repoConfig,
             )
+            localRoot = dirname(repoConfigPath)
             const cfg = await loadVoidflowConfig(repoConfigPath)
             REPOS = toTokenRepos(
                 cfg,
@@ -311,48 +323,121 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     const zonesIn = memo((acct) =>
         cfAll<{ id: string; name: string }>(`/zones?account.id=${acct}`),
     )
+    const parseWrangler = (path: string, text: string): unknown =>
+        path.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)
     /** A repo's wrangler config on its default branch, parsed. Key: repo:path. */
     const wranglerAt = memo(async (key) => {
         const [repo, path] = key.split(':')
-        const text = await gh([
-            'api',
-            `repos/${repo}/contents/${path}`,
-            '-H',
-            'Accept: application/vnd.github.raw',
-        ])
-        return parseWranglerConfig(path, text)
+        let text: string
+        try {
+            text = await gh([
+                'api',
+                `repos/${repo}/contents/${path}`,
+                '-H',
+                'Accept: application/vnd.github.raw',
+            ])
+        } catch (e) {
+            const local = localRoot && join(localRoot, path)
+            if (
+                local &&
+                existsSync(local) &&
+                /HTTP 404|Not Found/i.test((e as Error).message)
+            ) {
+                throw new Error(
+                    `${path} is not on ${repo}'s default branch, only in this checkout; the plan reads the default branch's. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+                )
+            }
+            throw e
+        }
+        return parseWrangler(path, text)
     })
+    /** The same file in this checkout, with --repo-config; undefined if absent. */
+    function localWrangler(path: string): unknown {
+        const file = localRoot && join(localRoot, path)
+        if (!file || !existsSync(file)) return undefined
+        return parseWrangler(path, readFileSync(file, 'utf8'))
+    }
 
-    /** The env's Worker and zones, and the ids its policies reference them by. */
+    /**
+     * The env's Worker and zones, the ids its policies reference them by, and
+     * where the Worker and zones came from.
+     */
     async function lookups(repo: string, acct: string, env: EnvConfig) {
         const zones = await zonesIn(acct)
+        const zoneNames = zones.map((z) => z.name)
+        const file = env.wrangler ?? 'wrangler.jsonc'
         const wrangler =
             env.worker && env.zones
                 ? undefined
-                : await wranglerAt(
-                      `${repo}:${env.wrangler ?? 'wrangler.jsonc'}`,
-                  )
-        const t = resolveTarget(
-            env,
-            wrangler,
-            zones.map((z) => z.name),
-        )
-        const script = (await scriptsIn(acct)).find((s) => s.id === t.worker)
+                : await wranglerAt(`${repo}:${file}`)
+        let t: ReturnType<typeof resolveTarget>
+        try {
+            t = resolveTarget(env, wrangler, zoneNames)
+        } catch (e) {
+            // An env block only in this checkout: say so, rather than the bare error.
+            if (
+                wrangler !== undefined &&
+                /has no env\./.test((e as Error).message)
+            ) {
+                let inLocal = false
+                try {
+                    const lp = localWrangler(file)
+                    if (lp !== undefined) {
+                        fromWrangler(lp, env.env, env.wranglerEnv)
+                        inLocal = true
+                    }
+                } catch {}
+                if (inLocal)
+                    throw new Error(
+                        `${env.env}: ${(e as Error).message} on ${file}'s default branch, but the local ${file} has it; the plan reads the default branch's. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+                    )
+            }
+            throw e
+        }
+        // null: an explicit worker with no wrangler env named, so unknown
+        let block: string | null | undefined =
+            wrangler === undefined && env.wranglerEnv === undefined
+                ? null
+                : env.wranglerEnv
+        let source = 'worker and zones from the config'
+        if (wrangler !== undefined) {
+            source = `${file} on the default branch`
+            const used = fromWrangler(wrangler, env.env, env.wranglerEnv)
+            block = used.block
+            let local: WranglerTarget | Error | undefined
+            try {
+                const parsed = localWrangler(file)
+                if (parsed !== undefined)
+                    local = fromWrangler(parsed, env.env, env.wranglerEnv)
+            } catch (e) {
+                local = e as Error
+            }
+            for (const w of wranglerWarnings({
+                env: env.env,
+                account: acct,
+                file,
+                used,
+                local,
+            }))
+                console.log(`  ! ${w}`)
+        }
+        const scripts = await scriptsIn(acct)
+        const script = scripts.find((s) => s.id === t.worker)
         if (!script) {
             // Per-Worker grants apply only to Workers that exist; creating one
             // needs product-level Workers Admin, which no deploy token gets.
             throw new Error(
-                `Worker "${t.worker}" does not exist in account ${acct} yet: deploy it once with an admin token, then re-run`,
+                missingWorkerMessage(t.worker, acct, scripts.length, block),
             )
         }
         const zoneIds: Record<string, string> = {}
         for (const name of t.zones) {
             const zone = zones.find((z) => z.name === name)
             if (!zone)
-                throw new Error(`zone ${name} not found in account ${acct}`)
+                throw new Error(missingZoneMessage(name, acct, zoneNames))
             zoneIds[name] = zone.id
         }
-        return { target: t, ids: { scriptTag: script.tag, zoneIds } }
+        return { target: t, ids: { scriptTag: script.tag, zoneIds }, source }
     }
 
     /** `gh` flags for where an env's secret and variable live. */
@@ -505,11 +590,11 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     ) {
         const acct = envAccount(cfg, env)
         const name = tokenName(repo, env.env)
-        const { target, ids } = await lookups(repo, acct, env)
+        const { target, ids, source } = await lookups(repo, acct, env)
         const want = policies(cfg, env, ids, target.zones)
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
         console.log(
-            `  ${env.env}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, secret in ${scopeLabel(repo, env)}`,
+            `  ${env.env}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, secret in ${scopeLabel(repo, env)} (${source})`,
         )
         // The list endpoint omits policies; fetch each match in full.
         const have = await Promise.all(

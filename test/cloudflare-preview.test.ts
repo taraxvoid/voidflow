@@ -112,7 +112,52 @@ describe('cloudflare-preview resolve step', () => {
 })
 
 describe('cloudflare-preview parse step', () => {
-    const parse = (OUTPUT: string) => run(step('parse').run, { OUTPUT })
+    const parse = (OUTPUT: string, INPUT_ENV = '') =>
+        run(step('parse').run, { OUTPUT, INPUT_ENV })
+    const stderr = (OUTPUT: string, INPUT_ENV = '') =>
+        Bun.spawnSync(['bash', '-c', step('parse').run], {
+            env: {
+                PATH: process.env.PATH,
+                GITHUB_OUTPUT: '/dev/null',
+                OUTPUT,
+                INPUT_ENV,
+            },
+        }).stderr.toString()
+
+    // What wrangler printed on synthomaha#132: no URLs, but the PR link in
+    // the Worker's annotations.
+    const noUrls = JSON.stringify({
+        preview: {
+            name: 'pr-132',
+            urls: [],
+            annotations: {
+                'workers/pull_request_url': 'https://github.com/o/n/pull/132',
+            },
+        },
+        deployment: { urls: [] },
+    })
+
+    test('never takes a non-workers.dev URL for the Preview', () => {
+        expect(parse(noUrls).code).toBe(1)
+    })
+
+    test('with no URL, the error names the deploy that turns workers.dev on', () => {
+        expect(stderr(noUrls, 'preview')).toContain(
+            "'wrangler deploy --env preview'",
+        )
+        expect(stderr(noUrls)).toContain("'wrangler deploy'")
+    })
+
+    test('the fallback skips the deployment URL', () => {
+        const json = JSON.stringify({
+            deployment_urls: ['https://abc-pr-1-site.acct.workers.dev'],
+            other: { url: 'https://pr-1-site.acct.workers.dev' },
+        })
+        expect(parse(json).outputs).toEqual({
+            url: 'https://pr-1-site.acct.workers.dev',
+            'deployment-url': 'https://abc-pr-1-site.acct.workers.dev',
+        })
+    })
 
     test('reads the documented .preview.urls[0]', () => {
         const json = JSON.stringify({
