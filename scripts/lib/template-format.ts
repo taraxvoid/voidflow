@@ -9,6 +9,7 @@ export const TEMPLATE_PLACEHOLDERS = [
     '{{kind}}',
     '{{cron_minute}}',
     '{{repo}}',
+    '{{owner}}',
 ] as const
 
 /**

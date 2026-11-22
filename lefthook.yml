@@ -8,8 +8,10 @@ pre-commit:
       run: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --diagnostic-level=error {staged_files}
       stage_fixed: true
     templates:
-      glob: "{package.json,mise.toml,bunfig.toml,scripts/build-templates.ts,scripts/lib/template-format.ts,scripts/unlighthouse/unlighthouse.config.example.ts}"
-      run: just templates
+      glob: "{package.json,mise.toml,bunfig.toml,scripts/build-templates.ts,.github/workflows/agentic-locks.yml,scripts/lib/template-format.ts,scripts/unlighthouse/unlighthouse.config.example.ts}"
+      # Generated files (e.g. templates/common/gh-aw-version) are outside the
+      # glob, so stage_fixed alone would leave them unstaged.
+      run: just templates && git add templates
       stage_fixed: true
     typecheck:
       glob: "{*.{ts,mts},tsconfig.json,package.json}"

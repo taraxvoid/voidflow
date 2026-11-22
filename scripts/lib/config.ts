@@ -1,14 +1,16 @@
 /**
- * Fleet config for the repo tools (cf-tokens, apply-rulesets): a module in
+ * Fleet config for the repo tools (tokens providers, apply-rulesets): a module in
  * the org's own (private) infra repo, given with --config, which holds the
  * repo, account and zone mapping so voidflow holds only code. Both tools
  * require it.
  */
 import { resolve } from 'node:path'
+import { flattenOrgs } from './orgs.ts'
 
 /**
  * The `REPOS` (or default) export of the module at `path`, resolved against
- * `base` and run through `check`, which throws listing every problem.
+ * `base`, flattened from the org-grouped shape if it uses one (see orgs.ts),
+ * and run through `check`, which throws listing every problem.
  * Without a `path`, an error asking for one.
  */
 export async function loadConfig<T>(
@@ -27,7 +29,7 @@ export async function loadConfig<T>(
     if (cfg === undefined)
         throw new Error(`${file}: no REPOS or default export`)
     try {
-        return check(cfg)
+        return check(flattenOrgs(cfg))
     } catch (e) {
         throw new Error(`${file}: ${(e as Error).message}`)
     }

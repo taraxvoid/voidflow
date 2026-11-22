@@ -5,8 +5,10 @@ description: >
   PR, updating the same comment on later pushes. With delete, removes the
   Preview instead (run it on the 'closed' pull_request event). The Preview's
   bindings come from the 'previews' block in the wrangler config, so a PR
-  never touches production resources. Build and post-deploy checks stay in
-  the caller's job, as with cloudflare-deploy.
+  never touches production resources. With env, the Previews live under that
+  wrangler environment's Worker (e.g. <name>-preview) instead of the
+  production Worker, so their token needs no rights on production. Build and
+  post-deploy checks stay in the caller's job, as with cloudflare-deploy.
 
 inputs:
   cloudflare-api-token:
@@ -19,6 +21,13 @@ inputs:
   working-directory:
     description: Directory to run wrangler from.
     default: '.'
+  env:
+    description: >
+      Wrangler environment to create Previews under, passed as --env to both
+      the deploy and the delete. Its Worker (env.<env>.name, default
+      <name>-<env>) holds the Previews, and env.<env>.previews holds their
+      bindings. Empty (the default) uses the top-level, production Worker.
+    default: ''
   name:
     description: Preview name. Defaults to pr-<number> on pull_request events, else the branch name.
     default: ''
@@ -55,6 +64,7 @@ runs:
       env:
         INPUT_NAME: ${{ inputs.name }}
         INPUT_DELETE: ${{ inputs.delete }}
+        INPUT_ENV: ${{ inputs.env }}
         SECRETS: ${{ inputs.secrets }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         REF_NAME: ${{ github.head_ref || github.ref_name }}
@@ -71,11 +81,22 @@ runs:
         fi
         echo "name=$name" >> "$GITHUB_OUTPUT"
 
+        # Wrangler targets the top-level Worker without --env, so the deploy
+        # and the delete must both carry it.
+        envflag=""
+        if [ -n "$INPUT_ENV" ]; then
+          if ! [[ "$INPUT_ENV" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "::error::env must be a wrangler environment name ([A-Za-z0-9_-])." >&2
+            exit 1
+          fi
+          envflag=" --env $INPUT_ENV"
+        fi
+
         if [ "$INPUT_DELETE" == true ]; then
-          echo "cmd=preview delete --name $name --skip-confirmation" >> "$GITHUB_OUTPUT"
+          echo "cmd=preview delete$envflag --name $name --skip-confirmation" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        cmd="preview --name $name --json"
+        cmd="preview$envflag --name $name --json"
         if [ -n "$SECRETS" ]; then
           file="$RUNNER_TEMP/voidflow-preview-secrets.env"
           (umask 077; printf '%s\n' "$SECRETS" > "$file")
@@ -105,14 +126,18 @@ runs:
       shell: bash
       env:
         OUTPUT: ${{ steps.preview.outputs.command-output }}
-      # Documented shape: .preview.urls[0]. Falls back to the first https URL
-      # anywhere in the output, in case the beta shape moves.
+        INPUT_ENV: ${{ inputs.env }}
+      # Documented shape: .preview.urls[0]. Falls back to the first workers.dev
+      # URL elsewhere in the output (not the deployment's), in case the beta
+      # shape moves. Only workers.dev: the output also holds other https
+      # strings, such as the pull request URL in the Worker's annotations.
       run: |
         json=$(printf '%s' "$OUTPUT" | sed -n '/^[[:space:]]*{/,$p')
-        url=$(jq -r '.preview.urls[0] // ([.. | strings | select(test("^https://"))] | first) // empty' <<< "$json" 2>/dev/null || true)
         deployment=$(jq -r '(.deployment.urls // .deployment_urls // [])[0] // empty' <<< "$json" 2>/dev/null || true)
+        url=$(jq -r --arg dep "$deployment" '.preview.urls[0] // ([.. | strings | select(test("^https://[^/]+\\.workers\\.dev(/|$)") and . != $dep)] | first) // empty' <<< "$json" 2>/dev/null || true)
         if [ -z "$url" ]; then
-          echo "::error::wrangler preview reported no Preview URL" >&2
+          deploy="wrangler deploy${INPUT_ENV:+ --env $INPUT_ENV}"
+          echo "::error::wrangler preview reported no Preview URL. Preview URLs are served on workers.dev, so the Worker likely has its workers.dev route off (for example when the first Preview created the Worker). Deploy it once with '$deploy' (with \"workers_dev\": true in that wrangler env), or enable workers.dev for the Worker in the dashboard, then re-run." >&2
           exit 1
         fi
         echo "url=$url" >> "$GITHUB_OUTPUT"

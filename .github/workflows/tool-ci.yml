@@ -42,7 +42,7 @@ jobs:
     if: github.event.pull_request.draft == false
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0 # sharp edge: gitleaks requires full commit history
           persist-credentials: false
@@ -69,7 +69,7 @@ jobs:
             --report-format sarif --report-path "$RUNNER_TEMP/sarif/gitleaks.sarif" .
         shell: bash
 
-      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+      - uses: dorny/paths-filter@v4.0.3
         id: changes
         with:
           filters: |
@@ -82,17 +82,17 @@ jobs:
             workflows:
               - '.github/workflows/**'
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: oven-sh/setup-bun@v2.2.0
         with:
           # Empty when the repo has no .bun-version: setup-bun then uses its default.
           bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
 
       # Tools pinned in the repo's mise.toml. If it also pins bun, mise's bun
       # comes first on PATH from here on.
-      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - uses: jdx/mise-action@v5.1.1
         if: hashFiles('mise.toml') != ''
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache@v6.1.0
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -152,7 +152,7 @@ jobs:
         id: scripts
         # Fail open: a check whose script the caller doesn't define is skipped, not failed.
         run: |
-          for name in lint check build test check:licenses; do
+          for name in lint check build test check:licenses check:voidflow; do
             if jq -e --arg n "$name" '.scripts // {} | has($n)' package.json >/dev/null; then
               echo "${name//:/_}=true" >> "$GITHUB_OUTPUT"
             else
@@ -187,11 +187,11 @@ jobs:
 
       - name: Setup uv
         if: steps.changes.outputs.workflows == 'true'
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@v10.0.1
 
       - name: Audit CI workflows
         if: steps.changes.outputs.workflows == 'true'
-        run: uvx zizmor@1.30.1 --min-severity medium .github
+        run: uvx zizmor@1.32.0 --min-severity medium .github
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -202,6 +202,22 @@ jobs:
       - name: Typecheck
         if: steps.scripts.outputs.check == 'true'
         run: bun run check
+
+      - name: Check voidflow config drift
+        if: steps.scripts.outputs.check_voidflow == 'true'
+        # Exit 1 is drift and fails the job. Exit 2 (no admin on the repo for
+        # the default token, or a config error) only warns: CI has no admin
+        # token, so it cannot always read rulesets. Tokens are never checked here.
+        run: |
+          code=0
+          bun run check:voidflow || code=$?
+          if [ "$code" = 2 ]; then
+            echo "::warning::voidflow check could not run (exit 2: auth or config error). Run 'voidflow check' locally."
+          elif [ "$code" != 0 ]; then
+            exit "$code"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build
         if: steps.scripts.outputs.build == 'true'
@@ -221,20 +237,20 @@ jobs:
       # from the next upload; with --format sarif it never fails the job.
       - name: Setup uv (SARIF)
         if: ${{ !cancelled() }}
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@v10.0.1
 
       - name: zizmor SARIF
         if: ${{ !cancelled() && hashFiles('.github/workflows/*.yml', '.github/workflows/*.yaml') != '' }}
         run: |
           mkdir -p "$RUNNER_TEMP/sarif"
-          uvx zizmor@1.30.1 --format sarif .github > "$RUNNER_TEMP/sarif/zizmor.sarif"
+          uvx zizmor@1.32.0 --format sarif .github > "$RUNNER_TEMP/sarif/zizmor.sarif"
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Keep SARIF
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: voidflow-sarif
           path: ${{ runner.temp }}/sarif/*.sarif
