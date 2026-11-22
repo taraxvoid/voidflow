@@ -138,6 +138,13 @@ describe('cloudflare-preview action shape', () => {
         expect(pin(action)).toBe(pin(deploy))
     })
 
+    test('delete installs wrangler with npm, so a skipped bun setup cannot break it', () => {
+        const w = step('preview').with
+        expect(w.packageManager).toBe(
+            "${{ inputs.delete == 'true' && 'npm' || '' }}",
+        )
+    })
+
     test('the secrets file is removed even when the deploy fails', () => {
         const rm = action.runs.steps.find(
             (s: any) => s.name === 'Remove secrets file',
