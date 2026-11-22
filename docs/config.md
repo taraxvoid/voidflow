@@ -164,6 +164,12 @@ voidflow apply settings     # turn on the settings that differ
 voidflow plan tokens        # the cloudflare section's tokens (tokens means tokens cf)
 voidflow apply tokens       # create, update and rotate them; set each env's secret
 voidflow apply tokens --prune    # also delete `retire` tokens
+```
+
+Each also reads noun first (`voidflow rulesets plan`, `voidflow settings apply`,
+`voidflow tokens apply --prune`); both spellings run the same command.
+
+```sh
 voidflow tokens cf --repo-config voidflow.config.ts --try prod -- bunx wrangler deploy
 ```
 

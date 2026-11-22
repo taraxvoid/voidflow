@@ -118,6 +118,15 @@ describe('splitVerbArgs', () => {
         )
     })
 
+    test('--apply and --check point at the verb commands', () => {
+        expect(() => splitVerbArgs(['rulesets', '--apply'])).toThrow(
+            'voidflow apply <tool>',
+        )
+        expect(() => splitVerbArgs(['rulesets', '--check'])).toThrow(
+            'voidflow check <tool>',
+        )
+    })
+
     test('--entire-fleet takes no inline value', () => {
         for (const a of ['--entire-fleet=false', '--entire-fleet=true'])
             expect(() => splitVerbArgs(['rulesets', a])).toThrow(
