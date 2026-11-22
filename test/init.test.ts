@@ -92,6 +92,7 @@ function fakeGh(
                     visibility: 'PUBLIC',
                     pullRequestCreationPolicy: v,
                     issueCreationPolicy: v,
+                    viewerPermission: 'ADMIN',
                 },
             }
         },

@@ -4,6 +4,15 @@
 import { isUpgradeMessage } from '../../rulesets/plan-gate.ts'
 import { capture } from '../lib/proc.ts'
 
+/** The name of the credential `gh` will use, never its value. */
+export function credentialSource(
+    env: Record<string, string | undefined>,
+): string {
+    if (env.GH_TOKEN) return 'GH_TOKEN'
+    if (env.GITHUB_TOKEN) return 'GITHUB_TOKEN'
+    return 'gh auth'
+}
+
 export type GhResult = { status: number; body: unknown }
 
 export interface Gh {

@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { enabledGroups } from '../config/settings.ts'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
     credentialNotes,
@@ -32,6 +33,7 @@ import {
 } from './init/files.ts'
 import { addToFleet } from './init/fleet.ts'
 import {
+    credentialSource,
     type Gh,
     ghAvailable,
     ghCli,
@@ -326,6 +328,19 @@ export async function main(
     // Relock without verify is half a feature: relock implies lock.
     const enableActionsLock =
         values['enable-actions-lock'] || enableActionsRelock
+    const enabled = enabledGroups(
+        (
+            [
+                [enablePvr, 'pvr'],
+                [enableAiScan, 'ai-scan'],
+                [enableAgentic, 'agentic'],
+                [enableActionsLock, 'actions-lock'],
+                [enableActionsRelock, 'actions-relock'],
+            ] as const
+        )
+            .filter(([on]) => on)
+            .map(([, g]) => g),
+    )
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -553,14 +568,22 @@ export async function main(
             out.push(row('unavailable', 'settings', unavailable))
             if (!dryRun) exitCode = 1
         } else if (repo) {
-            settingResults = await runSettings(gh, repo, {
+            const run = await runSettings(gh, repo, {
+                enabled,
                 skip: new Set(values.skip),
-                enablePvr,
-                enableAiScan,
-                enableAgentic,
-                enableActionsRelock,
                 dryRun,
             })
+            settingResults = run.results
+            if (run.notAdmin !== undefined) {
+                out.push(
+                    row(
+                        'unavailable',
+                        'settings',
+                        `settings need admin on ${repo} (${credentialSource(process.env)} has ${run.notAdmin})`,
+                    ),
+                )
+                if (!dryRun) exitCode = 1
+            }
             for (const r of settingResults)
                 out.push(row(r.status, r.name, r.detail))
             if (settingResults.some((r) => r.status === 'failed')) exitCode = 1
@@ -643,13 +666,7 @@ export async function main(
 
     if (repo && preset.settings) {
         out.push('manual:')
-        for (const l of manualReminders(
-            repo,
-            enableAiScan,
-            enableAgentic,
-            enableActionsLock,
-        ))
-            out.push(`  ${l}`)
+        for (const l of manualReminders(repo, enabled)) out.push(`  ${l}`)
     }
     if (notes.length > 0) {
         out.push('notes:')

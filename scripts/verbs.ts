@@ -23,6 +23,7 @@ import {
     type VoidflowConfig,
 } from '../config/index.ts'
 import { checkFleet } from '../rulesets/index.ts'
+import { credentialSource } from './init/gh.ts'
 import { loadConfig } from './lib/config.ts'
 import {
     discover,
@@ -217,14 +218,7 @@ export function repoModeError(v: VerbArgs): string | null {
     return null
 }
 
-/** The name of the credential `gh` will use, never its value. */
-export function credentialSource(
-    env: Record<string, string | undefined>,
-): string {
-    if (env.GH_TOKEN) return 'GH_TOKEN'
-    if (env.GITHUB_TOKEN) return 'GITHUB_TOKEN'
-    return 'gh auth'
-}
+export { credentialSource }
 
 const VERB_FLAG: Record<Verb, string[]> = {
     plan: [],

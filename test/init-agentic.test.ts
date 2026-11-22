@@ -69,6 +69,7 @@ function fakeGh() {
                 visibility: 'PUBLIC',
                 pullRequestCreationPolicy: 'COLLABORATORS_ONLY',
                 issueCreationPolicy: 'COLLABORATORS_ONLY',
+                viewerPermission: 'ADMIN',
             },
         }),
     }
