@@ -111,6 +111,9 @@ runs:
         apiToken: ${{ inputs.cloudflare-api-token }}
         accountId: ${{ inputs.cloudflare-account-id }}
         workingDirectory: ${{ inputs.working-directory }}
+        # Delete runs on 'closed', where callers skip install and setup, so
+        # a lockfile-inferred bun would be missing. It needs only Wrangler.
+        packageManager: ${{ inputs.delete == 'true' && 'npm' || '' }}
         command: ${{ steps.resolve.outputs.cmd }}
 
     - name: Remove secrets file

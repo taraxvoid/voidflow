@@ -100,6 +100,18 @@ describe('templates', () => {
         expect(t.get('tool/biome.json')).not.toContain('.astro')
     })
 
+    test('site biome.json also ignores .astro and svg', () => {
+        const t = buildTemplates(ROOT)
+        const site = JSON.parse(t.get('site/biome.json')!)
+        expect(site.files.includes).toEqual([
+            '**',
+            '!**/bun.lock',
+            '!.astro',
+            '!**/*.svg',
+        ])
+        expect(t.get('tool/biome.json')).not.toContain('.astro')
+    })
+
     test('bunfig template keeps the install gate and the scanner', () => {
         const b = buildTemplates(ROOT).get('common/bunfig.toml')!
         expect(b).toContain('[install.security]')
