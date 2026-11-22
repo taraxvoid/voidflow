@@ -27,7 +27,7 @@ Covered by this policy:
 | Opt-in Renovate preset (`deps-review-automerge.json`) | The update types it automerges and that it merges through GitHub auto-merge |
 | Tags | `vX.Y.Z` release tags, the floating `vN` major tag |
 
-Not covered: anything the README doesn't document, `scripts/` other than the
+Not covered: anything the README and `docs/` don't document, `scripts/` other than the
 covered bins, the experimental parts below, tests, this repo's own CI, and
 canary `-next.N` versions, which may change or break between canaries.
 
@@ -48,7 +48,7 @@ Pin Bun with a `.bun-version` file or `"packageManager": "bun@x.y.z"` in
 Without a pin, CI installs the latest Bun, so a Bun release can change your CI
 without a voidflow release. pnpm and aube versions already come from
 `packageManager`, and Node from `engines`/`volta` or `devEngines.runtime` (see
-the README).
+[Site CI](docs/workflows.md#site-ci)).
 
 ## What each release may change
 
@@ -108,7 +108,7 @@ make the gate stricter.
 
 Nothing in the public surface is removed in the release that deprecates it.
 
-1. **Deprecate in a minor.** The thing keeps working. The README and its own
+1. **Deprecate in a minor.** The thing keeps working. The docs and its own
    description say "Deprecated" with the replacement, and the changelog lists
    it under **Deprecations**.
 2. **Warn where callers will see it.** Workflows and actions emit a
