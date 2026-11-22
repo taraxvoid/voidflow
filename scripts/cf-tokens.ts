@@ -323,8 +323,6 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     const zonesIn = memo((acct) =>
         cfAll<{ id: string; name: string }>(`/zones?account.id=${acct}`),
     )
-    const parseWrangler = (path: string, text: string): unknown =>
-        path.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)
     /** A repo's wrangler config on its default branch, parsed. Key: repo:path. */
     const wranglerAt = memo(async (key) => {
         const [repo, path] = key.split(':')
@@ -349,13 +347,13 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
             }
             throw e
         }
-        return parseWrangler(path, text)
+        return parseWranglerConfig(path, text)
     })
     /** The same file in this checkout, with --repo-config; undefined if absent. */
     function localWrangler(path: string): unknown {
         const file = localRoot && join(localRoot, path)
         if (!file || !existsSync(file)) return undefined
-        return parseWrangler(path, readFileSync(file, 'utf8'))
+        return parseWranglerConfig(path, readFileSync(file, 'utf8'))
     }
 
     /**
