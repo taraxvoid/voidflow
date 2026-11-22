@@ -180,9 +180,9 @@ pre-push:
       #   check:voidflow  voidflow check: exit 1 on ruleset drift (and token
       #                   drift when the cloudflare section's admin token
       #                   variable is set, else tokens are skipped with a note).
-      #   try:deploy      optional repo script, e.g. `voidflow tokens cf
-      #                   --repo-config voidflow.config.ts --try prod -- bunx
-      #                   wrangler deploy --dry-run`; proves the token policies
+      #   try:deploy      optional repo script, e.g. `voidflow try tokens
+      #                   prod -- bunx wrangler deploy --dry-run`; proves the
+      #                   token policies
       #                   are enough. Guard it on the admin token being set.
       # Exit 2 from the check (no gh admin, config error) warns, never blocks.
       use_stdin: true

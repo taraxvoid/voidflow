@@ -49,12 +49,17 @@ describe('STABILITY.md', () => {
         },
     )
 
-    test('the fleet tools are experimental, not covered', () => {
-        for (const name of ['voidflow', './cloudflare', './rulesets']) {
+    test('the voidflow CLI is experimental, not covered', () => {
+        for (const name of [
+            'voidflow',
+            './config',
+            './cloudflare',
+            './rulesets',
+        ]) {
             expect(experimental).toContain(`\`${name}\``)
             expect(covered).not.toContain(`\`${name}\``)
         }
-        for (const command of ['tokens', 'rulesets', 'init']) {
+        for (const command of ['plan', 'check', 'apply', 'try', 'init']) {
             expect(experimental).toContain(`\`${command}\``)
         }
     })

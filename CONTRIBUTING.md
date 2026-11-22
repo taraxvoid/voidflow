@@ -69,49 +69,41 @@ for the release flow.
 
 ## Branch rulesets
 
-[`rulesets/index.ts`](rulesets/index.ts) holds the config shape and the plan
-logic; the fleet (which repos, tiers, checks and bypasses) lives in the org's
-own infra repo (see [Fleet config](#fleet-config---config)). A tiered repo's
-missing fields take `tool()`'s defaults; a repo whose protection doesn't fit
-the tiers spells out its rulesets in full. A repo can instead carry its own
-[`voidflow.config.ts`](docs/config.md) with a `kind` of `site` or `tool`, and
-run `plan`, `check` and `apply rulesets` from inside it; the fleet form below
-is deprecated. Needs `gh` with admin on the repos.
-With the infra repo at `~/.config/voidflow`, or from inside its checkout (see
-[`docs/fleet.md`](docs/fleet.md) for discovery and the verbs):
+[`rulesets/index.ts`](rulesets/index.ts) holds the ruleset shape and the plan
+logic. Each repo says what it wants in the `rulesets` section of its own
+[`voidflow.config.ts`](docs/config.md): its `kind`'s defaults with any field
+overridden, or its rulesets spelled out in full when its protection doesn't
+fit the tiers. A repo without the file is never touched. Run the verbs inside
+the repo, with `gh` as an admin of it:
 
 ```sh
 vf="bunx @taraxvoid/voidflow@<version>"
-$vf plan rulesets                         # diff every repo against the config
-$vf plan rulesets --repo soundry
-$vf check rulesets                        # exit 1 on drift
-$vf apply rulesets --repo soundry         # create/update one repo to match
-$vf apply rulesets --entire-fleet         # every repo in the config
-$vf apply rulesets --repo soundry --prune # also delete rulesets listed under `retire`
+$vf plan rulesets             # diff the repo against its config
+$vf check rulesets            # exit 1 on drift
+$vf apply rulesets            # create/update to match
+$vf apply rulesets --prune    # also delete rulesets listed under `retire`
 ```
 
-Fleet keys are `owner/name`, or grouped under `orgs` (see
-[`docs/fleet.md`](docs/fleet.md#config-shapes)), so one infra repo can cover
-repos under several owners. A repo not listed in the fleet is never touched, so repos whose rulesets
-are managed by hand can stay out of it.
-
-To require a merge queue on `main`, set `mergeQueue: true` on the repo's entry
-(`tool({ mergeQueue: true })`). GitHub only offers merge queues on public repos
-owned by an organization, and on private org repos with Enterprise Cloud, so
-leave it off elsewhere. The repo's CI must also run on `merge_group`, or the
-required checks never report and the queue stalls. `rulesets` refuses, before
-writing anything, a repo that asks for a queue but isn't org-owned; a private org
-repo without Enterprise Cloud is left to GitHub's API to reject.
+To require a merge queue on `main`, set `mergeQueue: true` in the `rulesets`
+section. GitHub only offers merge queues on public repos owned by an
+organization, and on private org repos with Enterprise Cloud, so leave it off
+elsewhere. The repo's CI must also run on `merge_group`, or the required
+checks never report and the queue stalls. `apply rulesets` refuses, before
+writing anything, a repo that asks for a queue but isn't org-owned; a private
+org repo without Enterprise Cloud is left to GitHub's API to reject.
 
 To limit which branches can deploy to a GitHub environment, list it under
 `environments` with the tiers whose branches may use it:
 
 ```ts
-'taraxvoid/transbot': tool({ environments: { prod: ['main'] } }),
-'taraxvoid/voidflow': {
-    // ...
-    environments: { npm: ['main', 'prerelease', 'maintenance'] },
-},
+// voidflow.config.ts
+export default {
+    kind: 'tool',
+    rulesets: {
+        tiers: ['main', 'prerelease', 'maintenance'],
+        environments: { npm: ['main', 'prerelease', 'maintenance'] },
+    },
+} satisfies VoidflowConfig
 ```
 
 The plan compares each one against an explicit branch list (`main` resolves
@@ -127,14 +119,14 @@ Rulesets not in the config are reported and left alone. Repos where the API
 returns 403 (private repos on a plan without rulesets) are skipped and listed.
 
 Drift shows up when someone runs `check`; nothing applies on its own.
-Applying stays a manual `apply` with an explicit target.
+Applying stays a manual `apply` from the repo's checkout.
 
 ## Cloudflare deploy tokens as code
 
 [`cloudflare/tokens.ts`](cloudflare/tokens.ts) holds the config shape and the
-plan logic; the fleet (repos, accounts, envs) lives in the org's own infra
-repo (see [Fleet config](#fleet-config---config)), one token per repo and
-env. Each token is owned by its env's account and scoped to
+plan logic; each repo lists its account and envs in the `cloudflare` section
+of its own [`voidflow.config.ts`](docs/config.md#cloudflare-tokens), one
+token per env. Each token is owned by its env's account and scoped to
 one Worker (the Workers Editor role on it), plus Workers Routes Write on the
 zones of its routes only, with a 90-day expiry. An env whose Worker lives in
 another account sets its own `account`; otherwise it uses the repo's. A
@@ -177,8 +169,8 @@ By default each env's token goes into an environment secret,
 `CLOUDFLARE_API_TOKEN` in the GitHub environment named like the env. Only
 jobs with `environment: <env>` read it, so the environment's deployment
 branch policy (`main` only for `prod`) is what keeps a pull request job from
-reading the prod token. `tokens cf` does not set that policy; list the env under
-the repo's `environments` in the rulesets config (see
+reading the prod token. `apply tokens` does not set that policy; list the env
+under `rulesets.environments` in the same file (see
 [Branch rulesets](#branch-rulesets)) so `plan rulesets` reports it. That is the recommended shape: one deploy job for
 `main` with `environment: prod`, one for pull requests with
 `environment: preview`.
@@ -245,73 +237,56 @@ wrangler config from the default branch, so an `env.preview` block on an
 unmerged branch is not seen yet (it warns when the local file resolves
 differently): merge it first, or set `worker` and `zones` on the env.
 
-The targets need `CF_TOKEN_ADMIN`: a user-owned token (account-owned tokens
-reach only their own account) that includes every account in the config, a
-short expiry and an IP filter, with these on each account:
+The token commands need an admin token, in the variable the section's
+`adminTokenEnv` names (default `CF_TOKEN_ADMIN`): a user-owned token
+(account-owned tokens reach only their own account) covering the repo's
+account, with a short expiry and an IP filter, and these on the account:
 
 - Account API Tokens Edit
 - Workers Scripts Read, shown in the dashboard as Workers Metadata Read-Only
   (account-wide, or on every Worker the config scopes a token to)
 - Zone Read
 
-Cloudflare answers a list the token lacks the permission for with an empty
-list, not an error, so a plan that sees no Workers or no zones in an account
-says the token likely lacks that permission. Adding a repo in a new account
-means adding that account to this token. It can mint
-deploy tokens, so it stays on a maintainer's machine and never goes into CI.
-[fnox](https://github.com/jdx/fnox) (installed by `mise install`) supplies
-it: the committed [`fnox.toml`](fnox.toml) declares the secret, but no value,
-and a `cf-admin` provider backed by the macOS Keychain. Store the value once
-with `fnox set -k voidflow-cf-token-admin CF_TOKEN_ADMIN` (it prompts with
-hidden input), and confirm with `just doctor`. To use another fnox provider
-(age, 1Password, `pass`...), redefine `[providers.cf-admin]` in a gitignored
-`fnox.local.toml` at the repo root (one per checkout or worktree). If
-`CF_TOKEN_ADMIN` is already in the environment, the targets use it and skip
-fnox.
+Give each Cloudflare account its own variable, so repos in different accounts
+each use a token for their own. Cloudflare answers a list the token lacks the
+permission for with an empty list, not an error, so a plan that sees no
+Workers or no zones in an account says the token likely lacks that
+permission. The token can mint deploy tokens, so it stays on a maintainer's
+machine and never goes into CI. [fnox](https://github.com/jdx/fnox) can
+supply it: voidflow's own [`fnox.toml`](fnox.toml) shows the shape, declaring
+the secret with no value and a `cf-admin` provider backed by the macOS
+Keychain. Store the value once with
+`fnox set -k voidflow-cf-token-admin CF_TOKEN_ADMIN` (it prompts with hidden
+input); to use another fnox provider (age, 1Password, `pass`...), redefine
+`[providers.cf-admin]` in a gitignored `fnox.local.toml`.
 
-A repo can also hold its own tokens in the `cloudflare` section of its
-`voidflow.config.ts` ([`docs/config.md`](docs/config.md#cloudflare-tokens)).
-There `cloudflare.adminTokenEnv` names the variable with the admin token
-(default `CF_TOKEN_ADMIN`), so a repo in another Cloudflare account uses a
-token for that account. Run the verbs inside the repo, with that variable
-set:
-
-```sh
-cd ../example_project
-bunx @taraxvoid/voidflow@<version> plan tokens   # tokens means tokens cf
-bunx @taraxvoid/voidflow@<version> apply tokens
-```
-
-For the fleet, with the infra repo found as in [`docs/fleet.md`](docs/fleet.md#discovery):
+Run the verbs inside the repo, with that variable set:
 
 ```sh
 vf="bunx @taraxvoid/voidflow@<version>"
-$vf plan tokens cf                           # read-only: diff every repo's tokens against the config
-$vf check tokens cf                          # exit 1 on drift or a token within 14 days of expiry
-$vf apply tokens cf --repo example_project   # create/update, rotate tokens due, set CLOUDFLARE_API_TOKEN per env
-$vf apply tokens cf --entire-fleet           # the same for every repo
-$vf apply tokens cf --repo example_project --rotate  # rotate its tokens now
-$vf apply tokens cf --repo example_project --prune   # also delete `retire` tokens and a leftover repo-wide secret
-$vf tokens cf --config ~/.config/voidflow/cf-tokens.ts --groups  # live names of the permission group ids the config uses
+$vf plan tokens               # read-only: diff the repo's tokens against the config
+$vf check tokens              # exit 1 on drift or a token within 14 days of expiry
+$vf apply tokens              # create/update, rotate tokens due, set CLOUDFLARE_API_TOKEN per env
+$vf apply tokens --rotate     # rotate its tokens now
+$vf apply tokens --prune      # also delete `retire` tokens and a leftover repo-wide secret
+$vf plan tokens --groups      # live names of the permission group ids the config uses
 ```
 
 The plan prints when each token was last used, so a CI deploy shows up there.
 To prove a token's policies are enough before CI depends on them, run the
-deploy with a throwaway token that has the same policies. From the site's
-checkout:
+deploy with a throwaway token that has the same policies:
 
 ```sh
-bunx @taraxvoid/voidflow@<version> tokens cf --config ~/.config/voidflow/cf-tokens.ts \
-    --repo example_project --try prod -- bunx wrangler deploy
+bunx @taraxvoid/voidflow@<version> try tokens prod -- bunx wrangler deploy
 ```
 
 The real token can't be used locally (its value only exists in GitHub), and
 a shell holding a wider token (an admin token, `wrangler login`) would hide a
 missing grant. The command gets the throwaway token as `CLOUDFLARE_API_TOKEN`,
-with `CF_TOKEN_ADMIN` (and a repo's `adminTokenEnv` variable) removed, and the token is deleted afterwards (it
-expires within the hour regardless).
+with `CF_TOKEN_ADMIN` and the section's `adminTokenEnv` variable removed, and
+the token is deleted afterwards (it expires within the hour regardless).
 
-A plan needs `gh` as well as `CF_TOKEN_ADMIN`: it reads each repo's wrangler
+A plan needs `gh` as well as the admin token: it reads the repo's wrangler
 config and secret names. New values go straight from the API into `gh secret
 set` and are never printed. A rotation creates the new token, sets the
 secret, then deletes the old token, so a deploy in between still works. If
@@ -338,32 +313,19 @@ Limits worth knowing:
       token-fallback: ${{ vars.CF_TOKEN_FALLBACK }}
   ```
 
-Cut over one repo at a time: `voidflow apply tokens cf --repo <name>`, deploy,
-then `voidflow apply tokens cf --repo <name> --prune` to delete its old token.
+To move a repo onto voidflow tokens, list its pre-voidflow token names under
+`retire`, run `voidflow apply tokens`, deploy, then
+`voidflow apply tokens --prune` to delete the old ones.
 
-## Fleet config (`--config`)
+## The `voidflow` bin
 
-voidflow holds the tools; each org keeps its fleet map (repo names, account
-ids, envs) in its own private infra repo, e.g. `taraxvoid/infra`, as modules
-that export `REPOS` (or a default). The package's `voidflow` bin runs both
-tools, so the infra repo needs a pinned release rather than a voidflow
-checkout. The `plan`, `check` and `apply` verbs find the config themselves
-(`--config`, `VOIDFLOW_CONFIG`, `~/.config/voidflow`, then the directories up
-from here); the tool commands `rulesets` and `tokens [provider]` (cf by default) require `--config`.
-[`docs/fleet.md`](docs/fleet.md) covers discovery, the org-grouped shape, the
-verbs and their exit codes.
-
-```sh
-bunx @taraxvoid/voidflow@<version> check rulesets
-npx @taraxvoid/voidflow@<version> apply tokens cf --repo example_project
-bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts --check   # the tool command
-```
-
-Each tool command takes its script's flags (`scripts/apply-rulesets.ts`,
-`scripts/cf-tokens.ts`) and lists them with `--help`. The bin runs under Bun or
-Node 24+ (`bunx` or `npx`); the package ships it built to `dist/`. In this repo,
-the `rulesets-*` and `cf-tokens-*` recipes run the same entry point
-(`scripts/cli.ts`) from the checkout.
+The package's `voidflow` bin runs `init` and the verbs from a pinned release,
+under Bun or Node 24+ (`bunx` or `npx`); the package ships it built to
+`dist/`. In this repo, `bun scripts/cli.ts` runs the same entry point from the
+checkout. The config file stays TypeScript under either runtime. Node 24 loads
+it by stripping types, which covers erasable syntax only: type annotations,
+`type` / `interface`, `as` and `satisfies`, but no `enum`, `namespace` or
+constructor parameter properties. Write it as plain data plus types.
 
 If you run a canary (`@next`) with an npm release-age cooldown set, add
 `min-release-age-exclude[]=voidflow` and `min-release-age-exclude[]=@taraxvoid/*`
@@ -372,82 +334,3 @@ exclusion in current npm releases, and npm before 11.17 does not know it, so
 run `npx --min-release-age=0 @taraxvoid/voidflow@next ...` instead (this also
 lifts the cooldown for that run's dependencies). See
 [Trying a canary release](docs/init.md#trying-a-canary-release).
-
-If you run a canary (`@next`) with an npm release-age cooldown set, add
-`min-release-age-exclude[]=voidflow` and `min-release-age-exclude[]=@taraxvoid/*`
-to your `.npmrc`, or `@next` resolves to an older release. See
-[Trying a canary release](docs/init.md#trying-a-canary-release).
-
-The config modules stay TypeScript under either runtime. Node 24 loads them by
-stripping types, which covers erasable syntax only: type annotations, `type` /
-`interface`, `as` and `satisfies`, but no `enum`, `namespace` or constructor
-parameter properties. Write configs as plain data plus types, as below.
-
-With `@taraxvoid/voidflow` as a devDependency of the infra repo (the same
-version the recipes pin), a config module can type its map against its
-shapes and use its helpers (`tool()` for rulesets, say). Type-only imports
-need nothing at run time; value imports resolve from the infra repo's
-`node_modules`:
-
-```ts
-import type { RepoConfig } from "@taraxvoid/voidflow/cloudflare";
-import { tool, type Fleet } from "@taraxvoid/voidflow/rulesets";
-```
-
-```ts
-// cf-tokens.ts in the org's infra repo
-export const REPOS = {
-  "example-org/site": {
-    account: "<account id>",
-    envs: [
-      { env: "prod" }, // env.prod in its wrangler.jsonc, else the top level
-      { env: "preview", zones: [] },
-    ],
-    retire: [],
-  },
-};
-```
-
-An infra repo needs no justfile. If you keep one, say to wrap runs in fnox
-for `CF_TOKEN_ADMIN`, its recipes call the verbs and pass `--config` as the
-recipe's own directory:
-
-```just
-# justfile in the org's infra repo
-vf := "bunx @taraxvoid/voidflow@<version>"
-# CF_TOKEN_ADMIN from fnox unless already set. fnox.toml is a copy of
-# voidflow's; -c finds it from a [no-cd] recipe too.
-fnox := "fnox -c " + quote(justfile_directory() / "fnox.toml") + " exec -- "
-cf := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { fnox + vf } else { vf }
-cfg := quote(justfile_directory())
-
-plan *args:
-    {{ cf }} plan --config {{ cfg }} {{ args }}
-
-apply tool *args:
-    {{ cf }} apply {{ tool }} --config {{ cfg }} {{ args }}
-
-# [no-cd]: the command runs in the site checkout `just -f` was called from
-[no-cd]
-cf-tokens-try repo env +cmd:
-    {{ cf }} tokens cf --config {{ quote(justfile_directory() / "cf-tokens.ts") }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
-```
-
-A rulesets config can use the tier model, where any field left out takes
-`tool()`'s value (main only, the `validate` check, CODEOWNERS, linear
-history, so `{}` is a valid repo) and an unknown field is an error. Or it can
-spell a repo's rulesets out in full as `{ rulesets: [...], retire: [...] }` when its protection doesn't fit
-the tiers. A snapshot of what GitHub has now (`gh api
-repos/<repo>/rulesets/<id>`, keeping `name`, `target`, `enforcement`,
-`conditions`, `bypass_actors` and `rules`) plans with no drift.
-
-A relative `--config` (or `VOIDFLOW_CONFIG`) resolves from
-`VOIDFLOW_CONFIG_BASE` when that is set, else the current directory. This
-repo's recipes set it to the directory `just` was run from; the bin doesn't,
-so with the infra justfile above a relative path resolves from the infra repo,
-or from the site checkout for the `[no-cd]` recipe (hence
-`justfile_directory()`). `--try` runs its command
-in the same directory. Each config is
-checked before any API call, and every problem is reported by its path.
-`CF_TOKEN_ADMIN` then needs to cover that org's accounts, and `gh` needs admin
-on its repos.

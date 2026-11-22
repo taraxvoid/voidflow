@@ -33,10 +33,10 @@ canary `-next.N` versions, which may change or break between canaries.
 
 ### Experimental
 
-The fleet tools are published but outside this policy: the `voidflow` CLI
-(`plan`, `check`, `apply`, `tokens`, `rulesets`, `init`, how config files
-are discovered, the per-repo `voidflow.config.ts`, and the starter files
-`init` writes) and the `./cloudflare`, `./config` and `./rulesets` exports
+The `voidflow` CLI is published but outside this policy: its commands
+(`plan`, `check`, `apply`, `try`, `init`), how it finds the per-repo
+`voidflow.config.ts`, the file's shape, and the starter files `init`
+writes, and the `./cloudflare`, `./config` and `./rulesets` exports
 that type their configs. The
 `init --enable-agentic` opt-in is the least settled of these. They're new and
 still settling, so their commands, flags and config shapes may change in any

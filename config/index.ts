@@ -41,14 +41,14 @@ export type VoidflowConfig = {
     kind: Kind
     /** Overrides on the kind's defaults, or a raw ruleset list. */
     rulesets?: Partial<RepoConfig> | RawConfig
-    /** The repo's scoped Cloudflare deploy tokens (`voidflow tokens cf`). */
+    /** The repo's scoped Cloudflare deploy tokens (`voidflow plan tokens`). */
     cloudflare?: CloudflareConfig
-    /** Repo settings to check: opt-in groups and skips (`voidflow settings`). */
+    /** Repo settings to check: opt-in groups and skips (`voidflow plan settings`). */
     settings?: SettingsConfig
 }
 
 /**
- * A fleet cf-tokens entry (cloudflare/tokens.ts) plus the variable holding
+ * A repo's token entry (cloudflare/tokens.ts) plus the variable holding
  * the admin token for this repo's account.
  */
 export type CloudflareConfig = {
@@ -187,7 +187,7 @@ export function checkVoidflowConfig(x: unknown): VoidflowConfig {
     return x as VoidflowConfig
 }
 
-/** The one-repo fleet map the rulesets planner runs on, defaults filled in. */
+/** The one-repo map the rulesets planner runs on, defaults filled in. */
 export function toFleet(cfg: VoidflowConfig, repo: string): Fleet {
     return checkFleet({ [repo]: entry(cfg.kind, cfg.rulesets ?? {}) })
 }
@@ -196,7 +196,7 @@ export function toFleet(cfg: VoidflowConfig, repo: string): Fleet {
 export const adminTokenVar = (cf: CloudflareConfig): string =>
     cf.adminTokenEnv ?? DEFAULT_ADMIN_TOKEN_ENV
 
-/** The one-repo cf-tokens map `voidflow tokens cf` runs on. */
+/** The one-repo token map `voidflow plan|apply tokens` runs on. */
 export function toTokenRepos(
     cfg: VoidflowConfig,
     repo: string,

@@ -95,7 +95,6 @@ a minor ([`STABILITY.md`](STABILITY.md#experimental)).
 | npm package (license check, Lighthouse, Playwright, Biome), Renovate preset, git hooks | [docs/tools.md](docs/tools.md) |
 | deps-review and the other agentic workflows | [docs/agentic.md](docs/agentic.md) |
 | The per-repo `voidflow.config.ts` | [docs/config.md](docs/config.md) |
-| Fleet config for rulesets and Cloudflare tokens across many repos | [docs/fleet.md](docs/fleet.md) |
 | Releases, verifying tarballs, what versions may change | [`RELEASING.md`](RELEASING.md), [`STABILITY.md`](STABILITY.md) |
 
 ## Pinning

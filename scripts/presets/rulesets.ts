@@ -184,7 +184,7 @@ export type RulesetOutcome = {
 
 /**
  * Plan (and with `apply`, write) one repo's rulesets against `fleet`. Shared
- * by `voidflow rulesets` and `voidflow init --preset rulesets`. A repo that is
+ * by `voidflow apply rulesets` and `voidflow init --preset rulesets`. A repo that is
  * private on a plan without rulesets comes back `gated`, never as drift.
  */
 export async function syncRepo(
@@ -281,7 +281,7 @@ export async function syncRepo(
 
 /**
  * Plan (and with `apply`, write) a tiered repo's environment branch policies;
- * returns the number that differ. Only `voidflow rulesets` does this, not
+ * returns the number that differ. Only `voidflow apply rulesets` does this, not
  * `voidflow init --preset rulesets`.
  */
 async function syncEnvs(

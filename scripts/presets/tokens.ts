@@ -277,7 +277,7 @@ export async function tokens(
         }
         return parseWranglerConfig(path, text)
     })
-    /** The same file in this checkout, with --repo-config; undefined if absent. */
+    /** The same file in this checkout; undefined if absent. */
     function localWrangler(path: string): unknown {
         const file = localRoot && join(localRoot, path)
         if (!file || !existsSync(file)) return undefined
@@ -525,7 +525,7 @@ export async function tokens(
         // The list endpoint omits policies; fetch each match in full.
         const have = await Promise.all(
             (tokens.get(acct) ?? [])
-                // A former fleet config may have spelled owner/name with
+                // An older config may have spelled owner/name with
                 // different casing. Treat it as this token, then update it
                 // to the canonical lowercase name instead of minting another.
                 // Only the repo part is case-folded: env names stay exact.
