@@ -98,7 +98,7 @@ version and `--force` to overwrite the ones that differ.
 | `--skip <name>` | leave one file or setting out (repeatable, [names below](#skip-names)) |
 | `--config <file\|dir>` | the fleet rulesets config in your infra repo (a directory means its `rulesets.ts`). With `--preset rulesets`, apply this repo's entry from it instead of the default `tool()` (required for `--kind site`). Otherwise, add the repo to it (as `'owner/name': {},`, or under `orgs.<owner>.repos` in an [org-grouped](docs/fleet.md#config-shapes) config); comments and other entries are left as written. Review and commit that file, then run `voidflow plan rulesets` and `voidflow apply rulesets --repo <name>` |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
-| `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
+| `--enable-ai-scan` | opt in: AI Scan for pull requests and for the repository (`repository_scan`, preview) |
 | `--enable-agentic` | opt in, experimental: [deps-review](#deps-review) and the repo settings and labels it relies on. The `COPILOT_GITHUB_TOKEN` secret is a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets |
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to the repo's `checks` in your fleet rulesets config |
 | `--enable-actions-lock` | opt in: [actions.lock](#actionslock) for the repo's own workflows. Writes `verify-lockfile.yml`, then runs `gh actions-lock` once |
@@ -120,8 +120,13 @@ version and `--force` to overwrite the ones that differ.
 - **Settings:** `pr-policy`, `issue-policy`, `dependabot-alerts`,
   `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan`,
   and with `--enable-agentic`: `auto-merge`, `update-branch`,
-  `delete-branch-on-merge`, `actions-permissions`; with
-  `--enable-actions-relock`: `label-relock-actions`
+  `delete-branch-on-merge`, `actions-permissions`, `fork-pr-approval`,
+  `label-low-risk`, `label-needs-you`; with `--enable-actions-relock`:
+  `label-relock-actions`
+
+The `--enable-*` groups and the settings you skip are recorded in
+`voidflow.config.ts` (`settings`), so `voidflow check` keeps covering them; see
+[docs/config.md](docs/config.md#settings).
 
 ### Files
 

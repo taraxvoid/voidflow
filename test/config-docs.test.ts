@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { renderDefaultsTable } from '../config/index.ts'
+import { renderSettingsTable } from '../config/settings.ts'
 
 const root = join(import.meta.dir, '..')
 const read = (p: string) => readFileSync(join(root, p), 'utf8')
@@ -17,6 +18,18 @@ describe('docs/config.md', () => {
         )
         expect(text).toContain(start)
         expect(body.trim()).toBe(renderDefaultsTable().trim())
+    })
+
+    test('holds the generated settings table', () => {
+        const text = read('docs/config.md')
+        const start = '<!-- settings:start -->'
+        const end = '<!-- settings:end -->'
+        const body = text.slice(
+            text.indexOf(start) + start.length,
+            text.indexOf(end),
+        )
+        expect(text).toContain(start)
+        expect(body.trim()).toBe(renderSettingsTable().trim())
     })
 })
 

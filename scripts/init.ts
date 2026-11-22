@@ -107,7 +107,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --preset <name>         ${Object.keys(PRESETS).join('|')}(default full)
   --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
-  --enable-ai-scan        opt in: AI Scan for pull requests
+  --enable-ai-scan        opt in: AI Scan for pull requests and the repository
   --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --enable-actions-lock   opt in: verify-lockfile.yml, then run gh actions-lock once to write .github/workflows/actions.lock
