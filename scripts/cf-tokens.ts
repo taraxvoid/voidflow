@@ -55,6 +55,7 @@ import {
     sameToken,
     type Token,
     tokenName,
+    UNMERGED_WRANGLER_HINT,
     WORKER_EDITOR,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
@@ -82,6 +83,7 @@ const OPTIONS = {
     repo: { type: 'string' },
     config: { type: 'string' },
     'repo-config': { type: 'string' },
+    'local-wrangler': { type: 'boolean', default: false },
 } as const
 
 const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
@@ -101,6 +103,9 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
   --groups           print the live names of the permission group ids used
   --try <env>        run the command after -- with a throwaway token scoped
                      like the env's
+  --local-wrangler   with --repo-config, read the wrangler config from this
+                     checkout instead of the default branch (to mint a first
+                     preview token before its env block merges)
 
 Needs the admin token (cloudflare.adminTokenEnv with --repo-config, default
 CF_TOKEN_ADMIN) and gh with admin on the repos.`
@@ -144,6 +149,14 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     if (repoConfig !== undefined && values.repo !== undefined) {
         console.error(
             `${prog}: --repo does not apply to a per-repo config; it manages the repo it sits in`,
+        )
+        process.exit(2)
+    }
+
+    const localWranglerFlag = values['local-wrangler']
+    if (localWranglerFlag && repoConfig === undefined) {
+        console.error(
+            `${prog}: --local-wrangler reads the checkout a voidflow.config.ts sits in; run it inside that repo (voidflow plan tokens --local-wrangler)`,
         )
         process.exit(2)
     }
@@ -326,6 +339,14 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     /** A repo's wrangler config on its default branch, parsed. Key: repo:path. */
     const wranglerAt = memo(async (key) => {
         const [repo, path] = key.split(':')
+        if (localWranglerFlag) {
+            const parsed = localWrangler(path)
+            if (parsed === undefined)
+                throw new Error(
+                    `${path} is not in this checkout (--local-wrangler reads it from ${localRoot})`,
+                )
+            return parsed
+        }
         let text: string
         try {
             text = await gh([
@@ -342,7 +363,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
                 /HTTP 404|Not Found/i.test((e as Error).message)
             ) {
                 throw new Error(
-                    `${path} is not on ${repo}'s default branch, only in this checkout; the plan reads the default branch's. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+                    `${path} is not on ${repo}'s default branch, only in this checkout; the plan reads the default branch's. ${UNMERGED_WRANGLER_HINT}`,
                 )
             }
             throw e
@@ -387,7 +408,7 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
                 } catch {}
                 if (inLocal)
                     throw new Error(
-                        `${env.env}: ${(e as Error).message} on ${file}'s default branch, but the local ${file} has it; the plan reads the default branch's. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+                        `${env.env}: ${(e as Error).message} on ${file}'s default branch, but the local ${file} has it; the plan reads the default branch's. ${UNMERGED_WRANGLER_HINT}`,
                     )
             }
             throw e
@@ -399,16 +420,21 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
                 : env.wranglerEnv
         let source = 'worker and zones from the config'
         if (wrangler !== undefined) {
-            source = `${file} on the default branch`
+            source = localWranglerFlag
+                ? `${file} in this checkout, not the default branch`
+                : `${file} on the default branch`
             const used = fromWrangler(wrangler, env.env, env.wranglerEnv)
             block = used.block
             let local: WranglerTarget | Error | undefined
-            try {
-                const parsed = localWrangler(file)
-                if (parsed !== undefined)
-                    local = fromWrangler(parsed, env.env, env.wranglerEnv)
-            } catch (e) {
-                local = e as Error
+            // With --local-wrangler the plan already reads the local copy.
+            if (!localWranglerFlag) {
+                try {
+                    const parsed = localWrangler(file)
+                    if (parsed !== undefined)
+                        local = fromWrangler(parsed, env.env, env.wranglerEnv)
+                } catch (e) {
+                    local = e as Error
+                }
             }
             for (const w of wranglerWarnings({
                 env: env.env,
