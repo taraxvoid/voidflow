@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { packageRoot } from '../lib/package-root.ts'
 import { json } from '../lib/template-format.ts'
+import { scopeLockWorkflow } from './actions-lock.ts'
 import {
     type Kind,
     type RenderCtx,
@@ -21,7 +22,11 @@ export type FileItem = {
     templates: string[]
     kinds: Kind[]
     merge?: 'package' | 'gitignore'
-    optIn?: 'pvr'
+    optIn?: 'pvr' | 'agentic' | 'actions-lock' | 'actions-relock'
+    /** Existing files that already fill this item's role; the item is left alone when one is present. */
+    altTargets?: string[]
+    /** The repo owns this file: no marker, and an existing one is kept unless forced. */
+    repoOwned?: true
 }
 
 const BOTH: Kind[] = ['tool', 'site']
@@ -71,6 +76,19 @@ export const FILE_ITEMS: FileItem[] = [
         kinds: BOTH,
     },
     {
+        name: 'codeowners',
+        target: '.github/CODEOWNERS',
+        templates: ['common/CODEOWNERS'],
+        kinds: BOTH,
+    },
+    {
+        name: 'config',
+        target: 'voidflow.config.ts',
+        templates: ['common/voidflow.config.ts'],
+        kinds: BOTH,
+        repoOwned: true,
+    },
+    {
         name: 'tsconfig',
         target: 'tsconfig.json',
         templates: ['tool/tsconfig.json'],
@@ -81,6 +99,11 @@ export const FILE_ITEMS: FileItem[] = [
         target: 'playwright.config.js',
         templates: ['site/playwright.config.js'],
         kinds: ['site'],
+        altTargets: [
+            'playwright.config.ts',
+            'playwright.config.mjs',
+            'playwright.config.cjs',
+        ],
     },
     {
         name: 'unlighthouse',
@@ -102,7 +125,64 @@ export const FILE_ITEMS: FileItem[] = [
         kinds: BOTH,
         optIn: 'pvr',
     },
+    {
+        name: 'agentic',
+        target: '.github/workflows/agentic.yml',
+        templates: ['common/agentic-{stage}.yml'],
+        kinds: BOTH,
+        optIn: 'agentic',
+    },
+    {
+        name: 'actions-lock',
+        target: '.github/workflows/verify-lockfile.yml',
+        templates: ['common/verify-lockfile.yml'],
+        kinds: BOTH,
+        optIn: 'actions-lock',
+    },
+    {
+        name: 'actions-relock',
+        target: '.github/workflows/relock-actions.yml',
+        templates: ['common/relock-actions.yml'],
+        kinds: BOTH,
+        optIn: 'actions-relock',
+    },
 ]
+
+/** Renovate preset that automerges low-risk updates once deps-review is required. */
+/**
+ * An existing `renovate.json` with the automerge preset added to `extends`,
+ * keeping everything else; null when it is not plain JSON with an array
+ * `extends` (the caller then reports the usual conflict).
+ */
+function mergeAutomerge(raw: string): string | null {
+    let parsed: { extends?: unknown }
+    try {
+        parsed = JSON.parse(raw)
+    } catch {
+        return null
+    }
+    if (typeof parsed !== 'object' || parsed === null) return null
+    if (!Array.isArray(parsed.extends)) return null
+    if (parsed.extends.includes(AUTOMERGE_PRESET)) return raw
+    const eol = raw.includes('\r\n') ? '\r\n' : '\n'
+    let text = json(
+        { ...parsed, extends: [...parsed.extends, AUTOMERGE_PRESET] },
+        detectIndent(raw),
+    )
+    if (!raw.endsWith('\n')) text = text.slice(0, -1)
+    return eol === '\r\n' ? text.replaceAll('\n', eol) : text
+}
+
+export const AUTOMERGE_PRESET =
+    'github>taraxvoid/voidflow:deps-review-automerge'
+
+/** `renovate.json` text with the automerge preset appended to `extends`. */
+function withAutomerge(text: string): string {
+    const parsed = JSON.parse(text) as { extends?: string[] }
+    const extend = parsed.extends ?? []
+    if (!extend.includes(AUTOMERGE_PRESET)) extend.push(AUTOMERGE_PRESET)
+    return json({ ...parsed, extends: extend })
+}
 
 export type FileStatus =
     | 'create'
@@ -124,6 +204,37 @@ type Selection = {
     skip: Set<string>
     force: boolean
     enablePvr: boolean
+    enableAgentic?: boolean
+    /** Implied by enableActionsRelock. */
+    enableActionsLock?: boolean
+    enableActionsRelock?: boolean
+    /** Workflows the lockfile workflows are limited to; null or unset runs on the whole directory. */
+    lockPaths?: string[] | null
+    /** What merging settings changes in an existing voidflow.config.ts; unset when nothing. */
+    configChange?: string
+}
+
+/** The file items `sel` selects, in FILE_ITEMS order. */
+export function selectedItems(sel: Selection): FileItem[] {
+    return FILE_ITEMS.filter((item) => {
+        if (!item.kinds.includes(sel.kind) || sel.skip.has(item.name))
+            return false
+        switch (item.optIn) {
+            case 'pvr':
+                return sel.enablePvr
+            case 'agentic':
+                return sel.enableAgentic === true
+            case 'actions-lock':
+                return (
+                    sel.enableActionsLock === true ||
+                    sel.enableActionsRelock === true
+                )
+            case 'actions-relock':
+                return sel.enableActionsRelock === true
+            default:
+                return true
+        }
+    })
 }
 
 /** Names of the file items that apply to `kind`. */
@@ -137,7 +248,10 @@ function templateTexts(item: FileItem, ctx: RenderCtx): string[] {
         const optional = t.startsWith('?')
         const p = join(
             root,
-            t.replace(/^\?/, '').replaceAll('{kind}', ctx.kind),
+            t
+                .replace(/^\?/, '')
+                .replaceAll('{kind}', ctx.kind)
+                .replaceAll('{stage}', ctx.stage ?? 'shadow'),
         )
         if (!existsSync(p)) {
             if (optional) return []
@@ -271,17 +385,56 @@ function planPackage(
         : { status: 'unchanged', content: raw }
 }
 
+/**
+ * A repo-owned file: created when missing, merged when `change` says what
+ * init adds to it, otherwise kept unless forced.
+ */
+function planRepoOwned(
+    path: string,
+    content: string,
+    sel: Selection,
+    change?: string,
+): Pick<FileAction, 'status' | 'content' | 'detail'> {
+    if (!existsSync(path)) return { status: 'create', content }
+    const existing = readFileSync(path, 'utf8')
+    if (existing === content) return { status: 'unchanged', content }
+    if (sel.force) return { status: 'overwrite', content }
+    if (change) return { status: 'merge', content, detail: change }
+    return {
+        status: 'unchanged',
+        content: existing,
+        detail: 'repo-owned, kept (--force overwrites)',
+    }
+}
+
 export function planFiles(
     dir: string,
     sel: Selection,
     ctx: RenderCtx,
 ): FileAction[] {
     const actions: FileAction[] = []
-    for (const item of FILE_ITEMS) {
-        if (!item.kinds.includes(sel.kind) || sel.skip.has(item.name)) continue
-        if (item.optIn === 'pvr' && !sel.enablePvr) continue
+    for (const item of selectedItems(sel)) {
         const path = join(dir, item.target)
-        const texts = templateTexts(item, ctx)
+        const alt = item.altTargets?.find((t) => existsSync(join(dir, t)))
+        if (alt && !existsSync(path)) {
+            actions.push({
+                name: item.name,
+                target: alt,
+                status: 'unchanged',
+                content: readFileSync(join(dir, alt), 'utf8'),
+                detail: `${alt} already exists`,
+            })
+            continue
+        }
+        let texts = templateTexts(item, ctx)
+        if (item.name === 'actions-lock' || item.name === 'actions-relock')
+            texts = texts.map((t) =>
+                scopeLockWorkflow(
+                    item.name as 'actions-lock' | 'actions-relock',
+                    t,
+                    sel.lockPaths ?? null,
+                ),
+            )
         const base = { name: item.name, target: item.target }
         if (item.merge === 'gitignore') {
             actions.push({ ...base, ...planGitignore(path, texts, ctx) })
@@ -291,12 +444,65 @@ export function planFiles(
             actions.push({ ...base, ...planPackage(dir, path, texts, sel) })
             continue
         }
-        const content = withMarker(item.target, texts[0] ?? '', ctx)
+        if (item.repoOwned) {
+            actions.push({
+                ...base,
+                ...planRepoOwned(
+                    path,
+                    texts[0] ?? '',
+                    sel,
+                    item.name === 'config' ? sel.configChange : undefined,
+                ),
+            })
+            continue
+        }
+        const content = withMarker(
+            item.target,
+            item.name === 'renovate' &&
+                sel.enableAgentic &&
+                ctx.stage === 'gate'
+                ? withAutomerge(texts[0] ?? '')
+                : (texts[0] ?? ''),
+            ctx,
+        )
         if (!existsSync(path)) {
             actions.push({ ...base, status: 'create', content })
             continue
         }
         const existing = readFileSync(path, 'utf8')
+        // Moving a repo from the shadow to the gate stage merges the two
+        // stage-dependent files instead of reporting a conflict.
+        if (
+            ctx.stage === 'gate' &&
+            sel.enableAgentic &&
+            (item.name === 'renovate' || item.name === 'agentic') &&
+            !sameIgnoringMarkerVersion(existing, content)
+        ) {
+            const shadowTexts = templateTexts(item, { ...ctx, stage: 'shadow' })
+            const shadow = withMarker(item.target, shadowTexts[0] ?? '', ctx)
+            if (sameIgnoringMarkerVersion(existing, shadow)) {
+                actions.push({ ...base, status: 'merge', content })
+                continue
+            }
+        }
+        // A customised renovate.json keeps its settings: only the preset is
+        // added to its `extends`.
+        if (
+            item.name === 'renovate' &&
+            ctx.stage === 'gate' &&
+            sel.enableAgentic &&
+            !sameIgnoringMarkerVersion(existing, content)
+        ) {
+            const merged = mergeAutomerge(existing)
+            if (merged !== null) {
+                actions.push({
+                    ...base,
+                    status: merged === existing ? 'unchanged' : 'merge',
+                    content: merged,
+                })
+                continue
+            }
+        }
         const status: FileStatus = sameIgnoringMarkerVersion(existing, content)
             ? 'unchanged'
             : sel.force

@@ -1,8 +1,14 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import {
     checkRepos,
+    D1_WRITE,
     expiresOn,
     fromWrangler,
+    missingWorkerMessage,
+    missingZoneMessage,
     type Policy,
     plan,
     policies,
@@ -12,12 +18,15 @@ import {
     resolveTarget,
     retireTargets,
     routeHost,
+    sameToken,
     type Token,
     tokenName,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
+    wranglerWarnings,
     zoneOf,
 } from '../cloudflare/tokens.ts'
+import { tryChildEnv } from '../scripts/cf-tokens.ts'
 
 // A fleet like taraxvoid/infra's cf-tokens.ts (the real one lives there).
 const REPOS: Record<string, RepoConfig> = {
@@ -86,6 +95,33 @@ describe('policies', () => {
         ])
     })
 
+    test('no D1 grant unless the env sets d1', () => {
+        const groups = policies(example_project, prod, ids).flatMap(
+            (p) => p.permission_groups,
+        )
+        expect(groups).not.toContainEqual({ id: D1_WRITE })
+        expect(policies(example_project, { ...prod, d1: false }, ids)).toEqual(
+            policies(example_project, prod, ids),
+        )
+    })
+
+    test("d1 adds D1 Write on the env's own account, in its own policy", () => {
+        const d1 = policies(example_project, { ...prod, d1: true }, ids).filter(
+            (p) => p.permission_groups.some((g) => g.id === D1_WRITE),
+        )
+        expect(d1).toEqual([
+            {
+                effect: 'allow',
+                permission_groups: [{ id: D1_WRITE }],
+                resources: { [acct]: '*' },
+            },
+        ])
+        const other = { ...prod, d1: true, account: 'e'.repeat(32) }
+        expect(policies(example_project, other, ids).at(-1)?.resources).toEqual(
+            { [`com.cloudflare.api.account.${'e'.repeat(32)}`]: '*' },
+        )
+    })
+
     test('a zone without an id fails rather than widening', () => {
         expect(() =>
             policies(example_project, prod, { scriptTag: 't', zoneIds: {} }, [
@@ -99,6 +135,12 @@ describe('policies', () => {
             cfg.envs.map((e) => tokenName(repo, e.env)),
         )
         expect(new Set(names).size).toBe(names.length)
+    })
+
+    test('canonicalizes repository casing in token names', () => {
+        expect(tokenName('TaraXVoid/Example_Project', 'prod')).toBe(
+            'voidflow:taraxvoid/example_project:prod',
+        )
     })
 })
 
@@ -214,6 +256,25 @@ describe('plan', () => {
         ).toEqual(['create'])
     })
 
+    test('a legacy-cased name is renamed even when policies match', () => {
+        const legacy = token({
+            name: 'voidflow:TaraXVoid/Example_Project:prod',
+        })
+        const [a] = plan(want, [legacy], now, {
+            name: tokenName('taraxvoid/example_project', 'prod'),
+        })
+        expect(a.kind).toBe('update')
+    })
+
+    test('sameToken folds the repo case but keeps the env exact', () => {
+        expect(
+            sameToken('voidflow:Owner/Repo:prod', 'voidflow:owner/repo:prod'),
+        ).toBe(true)
+        expect(
+            sameToken('voidflow:owner/repo:PROD', 'voidflow:owner/repo:prod'),
+        ).toBe(false)
+    })
+
     test('a rotation replaces the token it found', () => {
         const [a] = plan(want, [token({ id: 'old' })], now, { rotate: true })
         expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
@@ -267,6 +328,7 @@ describe('checkRepos', () => {
                         env: 'prod',
                         worker: 3,
                         zones: 'example.com',
+                        d1: 'yes',
                         account: 'x',
                         secret: 'org',
                         wranglr: 'wrangler.toml',
@@ -298,6 +360,7 @@ describe('checkRepos', () => {
             '"a/b".envs[0].wranglr: unknown field',
             '"a/b".envs[3].secret: a second \'repo\' env',
             '"a/b".envs[0].zones: not a list of zone names',
+            '"a/b".envs[0].d1: not true or false',
             '"a/b".envs[0].account: not a 32-hex account id',
             '"a/b".envs[1].env: duplicate "prod"',
             '"a/b".envs[1].fallback: needs reason and since',
@@ -382,12 +445,27 @@ describe('wrangler config', () => {
             worker: 'site-staging',
             hosts: ['old.example.com'],
             zones: [],
+            block: 'staging',
         })
     })
 
     test('wranglerEnv picks a block, and a missing one fails', () => {
         expect(fromWrangler(multi, 'live', 'prod').worker).toBe('site-prod')
+        expect(fromWrangler(multi, 'live', 'prod').block).toBe('prod')
         expect(() => fromWrangler(multi, 'prod', 'nope')).toThrow('env.nope')
+    })
+
+    test("account_id comes from the env block, else the top level's", () => {
+        const a = 'a'.repeat(32)
+        const b = 'b'.repeat(32)
+        const cfg = {
+            name: 's',
+            account_id: a,
+            env: { preview: {}, other: { account_id: b } },
+        }
+        expect(fromWrangler(cfg, 'preview').account).toBe(a)
+        expect(fromWrangler(cfg, 'other').account).toBe(b)
+        expect(fromWrangler(single, 'prod').account).toBeUndefined()
     })
 
     test('resolveTarget maps routes to deduplicated account zones', () => {
@@ -414,5 +492,232 @@ describe('wrangler config', () => {
                 [],
             ),
         ).toEqual({ worker: 'w', zones: ['a.org'] })
+    })
+
+    test('no zones at all points at Zone Read, not a missing zone', () => {
+        expect(() => resolveTarget({ env: 'prod' }, single, [])).toThrow(
+            'lacks Zone Read',
+        )
+        expect(() =>
+            resolveTarget({ env: 'prod' }, single, ['example.com']),
+        ).toThrow('Zone Read does not include it')
+    })
+})
+
+describe('error messages', () => {
+    const a = 'a'.repeat(32)
+
+    test('an empty scripts list blames the permission before the Worker', () => {
+        const m = missingWorkerMessage('site-preview', a, 0, 'preview')
+        expect(m).toContain('lists no Workers')
+        expect(m).toContain('Workers Metadata Read-Only')
+        expect(m).toContain('wrangler deploy --env preview')
+    })
+
+    test('a Worker missing from a non-empty list names the deploy command', () => {
+        const m = missingWorkerMessage('site-preview', a, 3, 'preview')
+        expect(m).toContain('may not include it')
+        expect(m).toContain('wrangler deploy --env preview')
+        expect(m).toContain(`account_id ${a}`)
+        expect(m).toContain('only Previews')
+        expect(missingWorkerMessage('site', a, 3)).toContain(
+            '(wrangler deploy, with',
+        )
+    })
+
+    test('an unknown wrangler env guesses no deploy command', () => {
+        const m = missingWorkerMessage('site-preview', a, 3, null)
+        expect(m).not.toContain('(wrangler deploy,')
+        expect(m).toContain('not the top-level one')
+    })
+
+    test('a missing zone hints at Zone Read either way', () => {
+        expect(missingZoneMessage('x.com', a, [])).toContain('lacks Zone Read')
+        expect(missingZoneMessage('x.com', a, ['y.com'])).toContain(
+            'does not include it',
+        )
+    })
+})
+
+describe('wranglerWarnings', () => {
+    const a = 'a'.repeat(32)
+    const b = 'b'.repeat(32)
+    const used = { worker: 'site', hosts: ['example.com'], zones: [] }
+    const base = { env: 'preview', account: a, file: 'wrangler.jsonc', used }
+
+    test('quiet when the account matches and there is no local copy', () => {
+        expect(wranglerWarnings(base)).toEqual([])
+        expect(
+            wranglerWarnings({ ...base, used: { ...used, account: a } }),
+        ).toEqual([])
+    })
+
+    test("an account_id other than the env's account", () => {
+        const [w] = wranglerWarnings({
+            ...base,
+            used: { ...used, account: b },
+        })
+        expect(w).toContain(`account_id ${b}, not the env's account ${a}`)
+    })
+
+    test('a local copy that resolves to another Worker', () => {
+        const [w] = wranglerWarnings({
+            ...base,
+            local: { ...used, worker: 'site-preview', block: 'preview' },
+        })
+        expect(w).toContain('Worker site-preview')
+        expect(w).toContain('which the plan uses')
+        expect(
+            wranglerWarnings({ ...base, local: { ...used, block: 'x' } }),
+        ).toEqual([])
+    })
+
+    test('a local copy that does not resolve', () => {
+        const [w] = wranglerWarnings({
+            ...base,
+            local: new Error('wrangler config has no name'),
+        })
+        expect(w).toContain('does not resolve (wrangler config has no name)')
+    })
+})
+
+describe('tryChildEnv', () => {
+    test('drops both admin variables and sets the throwaway token', () => {
+        const acct = '0123456789abcdef0123456789abcdef'
+        expect(
+            tryChildEnv(
+                {
+                    CF_TOKEN_ADMIN_Q: 's',
+                    CF_TOKEN_ADMIN: 't',
+                    GH_TOKEN: 'g',
+                    GITHUB_TOKEN: 'h',
+                    A: '1',
+                },
+                'CF_TOKEN_ADMIN_Q',
+                'tok',
+                acct,
+            ),
+        ).toEqual({
+            GH_TOKEN: 'g',
+            GITHUB_TOKEN: 'h',
+            A: '1',
+            CLOUDFLARE_API_TOKEN: 'tok',
+            CLOUDFLARE_ACCOUNT_ID: acct,
+        })
+    })
+})
+
+describe('voidflow tokens cf --repo-config', () => {
+    const CLI = resolve(import.meta.dir, '..', 'scripts', 'cli.ts')
+    const roots: string[] = []
+    afterEach(() => {
+        for (const r of roots.splice(0))
+            rmSync(r, { recursive: true, force: true })
+    })
+    const CF = `export default { kind: 'site', cloudflare: { account: '${'c'.repeat(32)}', adminTokenEnv: 'CF_TOKEN_ADMIN_Q', envs: [{ env: 'prod' }] } }`
+
+    /** Run `voidflow tokens cf` in a temp git dir holding `config` as voidflow.config.ts; `@file` in args is its path. */
+    async function run(
+        args: string[],
+        config = CF,
+        env: Record<string, string> = {},
+        configInBase = false,
+    ) {
+        const root = mkdtempSync(join(tmpdir(), 'voidflow-cf-'))
+        roots.push(root)
+        mkdirSync(join(root, '.git'))
+        const configDir = configInBase ? join(root, 'base') : root
+        if (configInBase) mkdirSync(configDir)
+        const file = join(configDir, 'voidflow.config.ts')
+        writeFileSync(file, config)
+        const proc = Bun.spawn(
+            [
+                'bun',
+                CLI,
+                'tokens',
+                'cf',
+                ...args.map((a) => (a === '@file' ? file : a)),
+            ],
+            {
+                cwd: root,
+                env: {
+                    ...process.env,
+                    GITHUB_REPOSITORY: 'o/n',
+                    CF_TOKEN_ADMIN: '',
+                    CF_TOKEN_ADMIN_Q: '',
+                    VOIDFLOW_CONFIG_BASE: configInBase ? configDir : '',
+                    ...env,
+                },
+                stdout: 'pipe',
+                stderr: 'pipe',
+            },
+        )
+        const [code, err] = await Promise.all([
+            proc.exited,
+            new Response(proc.stderr).text(),
+        ])
+        return { code, err }
+    }
+
+    test('--repo-config and --config are alternatives', async () => {
+        const r = await run(['--repo-config', '@file', '--config', 'x.ts'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('--repo-config and --config are alternatives')
+    })
+
+    test('--repo does not apply with --repo-config', async () => {
+        const r = await run(['--repo-config', '@file', '--repo', 'x'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('per-repo config')
+    })
+
+    test('a config with no cloudflare section exits 2', async () => {
+        const r = await run(
+            ['--repo-config', '@file'],
+            "export default { kind: 'site' }",
+        )
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('no cloudflare section')
+    })
+
+    test('a relative --repo-config resolves against the working directory', async () => {
+        const r = await run(['--repo-config', 'voidflow.config.ts'])
+        expect(r.err).not.toContain('Cannot find')
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+    })
+
+    test('a relative --repo-config resolves against VOIDFLOW_CONFIG_BASE', async () => {
+        const r = await run(
+            ['--repo-config', 'voidflow.config.ts'],
+            CF,
+            {},
+            true,
+        )
+        expect(r.err).not.toContain('Cannot find')
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+    })
+
+    test('names the missing admin variable', async () => {
+        const r = await run(['--repo-config', '@file'])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+    })
+
+    test('uses the named variable, not CF_TOKEN_ADMIN', async () => {
+        const r = await run(['--repo-config', '@file'], CF, {
+            CF_TOKEN_ADMIN: 'x',
+        })
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+    })
+
+    test('no repo slug exits 2 with the reason', async () => {
+        const r = await run(['--repo-config', '@file'], CF, {
+            GITHUB_REPOSITORY: '',
+        })
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('cannot tell which GitHub repo')
     })
 })

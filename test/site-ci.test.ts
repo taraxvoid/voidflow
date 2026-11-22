@@ -71,9 +71,9 @@ describe('site-ci.yml job shape', () => {
         )
     })
 
-    test('every action is pinned to a full SHA', () => {
+    test('every action is pinned to a version tag (commits live in actions.lock)', () => {
         for (const s of validate.steps.filter((s: any) => s.uses)) {
-            expect(s.uses).toMatch(/@[0-9a-f]{40}$/)
+            expect(s.uses).toMatch(/@v\d+\.\d+\.\d+$/)
         }
     })
 })
@@ -284,7 +284,7 @@ describe('site-ci.yml aube', () => {
     test('installs through mise and a frozen `aube ci`', () => {
         const setup = validateStep('Setup aube')
         expect(setup.if).toBe(`${GATE} && inputs.package-manager == 'aube'`)
-        expect(setup.uses).toMatch(/^jdx\/mise-action@[0-9a-f]{40}$/)
+        expect(setup.uses).toMatch(/^jdx\/mise-action@v\d+\.\d+\.\d+$/)
         const install = validateStep('Install NPM Dependencies (aube)')
         expect(install.if).toBe(`${GATE} && inputs.package-manager == 'aube'`)
         expect(install.run).toContain('aube ci')

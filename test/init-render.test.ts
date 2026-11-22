@@ -18,7 +18,7 @@ const ctx: RenderCtx = {
 const L1 =
     'Written by voidflow v1.2.3: https://www.npmjs.com/package/@taraxvoid/voidflow'
 const L2 =
-    'Set up a repo the same way: npx @taraxvoid/voidflow init --kind tool'
+    'Set up a repo the same way: npx @taraxvoid/voidflow init --kind tool --apply'
 
 describe('render', () => {
     test('fills version, sha, kind, repo, cron', () => {
@@ -36,6 +36,17 @@ describe('render', () => {
     })
     test('null repo becomes OWNER/REPO', () => {
         expect(render('{{repo}}', { ...ctx, repo: null })).toBe('OWNER/REPO')
+    })
+    test('the config literal goes in verbatim', () => {
+        const t =
+            "// {{repo}}\nexport default { kind: '{{kind}}' } satisfies X\n"
+        const config = {
+            kind: 'tool',
+            rulesets: { checks: ["$& $' {{repo}}"] },
+        }
+        expect(render(t, { ...ctx, config })).toBe(
+            "// o/r\nexport default {\n    kind: 'tool',\n    rulesets: { checks: ['$& $\\' {{repo}}'] },\n} satisfies X\n",
+        )
     })
 })
 
@@ -113,7 +124,7 @@ describe('withMarker', () => {
         const y = withMarker('lefthook.yml', 'a: 1\n', ctx).split('\n')
         expect(y.slice(0, 2)).toEqual([`# ${L1}`, `# ${L2}`])
         const b = withMarker('biome.json', '{}\n', ctx).split('\n')
-        expect(b.slice(0, 2)).toEqual([`// ${L1}`, `// ${L2}`])
+        expect(b.join('\n')).toBe('{}\n')
         expect(withMarker('tsconfig.json', '{}\n', ctx).startsWith('// ')).toBe(
             true,
         )
