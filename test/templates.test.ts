@@ -19,6 +19,21 @@ import { capture } from '../scripts/lib/proc.ts'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '')
 
+describe('agentic gate caller', () => {
+    test('grants the permissions the reusable workflow requests', () => {
+        const caller = readFileSync(
+            join(ROOT, 'templates/common/agentic-gate.yml'),
+            'utf8',
+        )
+        for (const p of [
+            'checks: write',
+            'contents: read',
+            'pull-requests: read',
+        ])
+            expect(caller).toContain(p)
+    })
+})
+
 function walk(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
         e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)],
@@ -90,6 +105,17 @@ describe('templates', () => {
         expect(b).toContain('[install.security]')
         expect(b).toMatch(/^scanner = /m)
         expect(b).not.toContain('[test]')
+        expect(b).toMatch(
+            /^minimumReleaseAgeExcludes = \["@taraxvoid\/voidflow", /m,
+        )
+        for (const k of ['tool', 'site']) {
+            const dev = JSON.parse(
+                buildTemplates(ROOT).get(`${k}/package.json`)!,
+            ).devDependencies
+            expect(dev['@socketsecurity/bun-security-scanner']).toMatch(
+                /^\d+\.\d+\.\d+$/,
+            )
+        }
     })
 
     test('biome-formatted files pass biome check with the base config', async () => {

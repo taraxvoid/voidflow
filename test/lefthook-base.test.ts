@@ -68,11 +68,16 @@ describe('lefthook/base.yml', () => {
 const hooks: any = Bun.YAML.parse(readFileSync(config, 'utf8'))
 const unitRun: string = hooks['pre-commit'].commands.unit.run
 const pushRun: string = hooks['pre-push'].commands['sync-and-test'].run
+const voidflowRun: string = hooks['pre-push'].commands['voidflow-sync'].run
 
 // Runs a hook snippet in a temp repo with git's hook env exported, `{pm}`
 // swapped for a stub that records its env and whether git still finds the
 // repo from cwd.
-async function runHook(snippet: string, stdin = '') {
+async function runHook(
+    snippet: string,
+    stdin = '',
+    withVoidflowConfig = false,
+) {
     // realpath so `git rev-parse --show-toplevel` compares equal on macOS (/private/var)
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'voidflow-lefthook-')))
     const repo = join(root, 'repo')
@@ -110,8 +115,16 @@ async function runHook(snippet: string, stdin = '') {
     mkdirSync(join(repo, 'node_modules'))
     writeFileSync(
         join(repo, 'package.json'),
-        '{"scripts":{"test:unit":"x","test:push":"x"}}',
+        JSON.stringify({
+            scripts: {
+                'test:unit': 'x',
+                'test:push': 'x',
+                ...(withVoidflowConfig ? { 'try:deploy': 'x' } : {}),
+            },
+        }),
     )
+    if (withVoidflowConfig)
+        writeFileSync(join(repo, 'voidflow.config.ts'), 'export {}')
     const out = join(root, 'out')
     writeFileSync(
         join(bin, 'stubpm'),
@@ -177,6 +190,18 @@ describe('git env cleanup before tests', () => {
         expect(pushRun.indexOf('unset $(git rev-parse')).toBeLessThan(
             pushRun.indexOf('{pm} run --if-present test:push'),
         )
+    })
+})
+
+describe('lefthook/base.yml voidflow sync', () => {
+    test('skips the entire hook when check:voidflow is not defined', async () => {
+        const r = await runHook(
+            voidflowRun,
+            `refs/heads/main {head} refs/heads/main ${'0'.repeat(40)}\n`,
+            true,
+        )
+        expect(r.code).toBe(0)
+        expect(r.env).toBe('')
     })
 })
 

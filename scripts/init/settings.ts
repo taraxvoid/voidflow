@@ -2,6 +2,8 @@
  * GitHub repo settings for `voidflow init`: read current state, change only
  * what differs. The table is data so a drift check can reuse it.
  */
+import { SETTING_GROUPS, type SettingsGroup } from '../../config/settings.ts'
+import { RELOCK_LABEL } from './actions-lock.ts'
 import type { Gh, GhResult } from './gh.ts'
 
 export type SettingStatus =
@@ -23,11 +25,13 @@ export type RepoInfo = {
     visibility: 'PUBLIC' | 'PRIVATE' | 'INTERNAL'
     pullRequestCreationPolicy?: string
     issueCreationPolicy?: string
+    /** The credential's role on the repo: ADMIN, MAINTAIN, WRITE, TRIAGE, READ. */
+    viewerPermission?: string
 }
 
+/** One setting; its group comes from SETTING_GROUPS in config/settings.ts. */
 type Setting = {
     name: string
-    optIn?: 'pvr' | 'ai-scan'
     read(gh: Gh, repo: string, info: RepoInfo): Promise<boolean>
     write(gh: Gh, repo: string, info: RepoInfo): Promise<void>
 }
@@ -88,7 +92,7 @@ async function get(gh: Gh, path: string): Promise<GhResult> {
 
 async function send(
     gh: Gh,
-    method: 'PUT' | 'PATCH',
+    method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
 ): Promise<void> {
@@ -176,7 +180,6 @@ export const SETTINGS: Setting[] = [
     },
     {
         name: 'pvr',
-        optIn: 'pvr',
         async read(gh, repo) {
             const r = await get(
                 gh,
@@ -188,24 +191,190 @@ export const SETTINGS: Setting[] = [
             send(gh, 'PUT', `repos/${repo}/private-vulnerability-reporting`),
     },
     {
+        // AI Scan for pull requests and for the repository: one endpoint, the
+        // same eligibility, changed together. `repository_scan` is a preview;
+        // a repo whose GET lacks it is checked on `pr_scan` alone, so the
+        // preview reaching it later shows up as drift.
         name: 'ai-scan',
-        optIn: 'ai-scan',
         async read(gh, repo) {
-            const r = await get(gh, `repos/${repo}/code-scanning/ai-scan`)
-            return object(r.body)?.pr_scan === 'enabled'
+            const b = await aiScan(gh, repo)
+            return (
+                b?.pr_scan === 'enabled' &&
+                (!('repository_scan' in (b ?? {})) ||
+                    b?.repository_scan === 'enabled')
+            )
         },
-        write: (gh, repo) =>
-            send(gh, 'PATCH', `repos/${repo}/code-scanning/ai-scan`, {
+        async write(gh, repo) {
+            const b = await aiScan(gh, repo)
+            await send(gh, 'PATCH', `repos/${repo}/code-scanning/ai-scan`, {
                 pr_scan: 'enabled',
-            }),
+                ...(b && 'repository_scan' in b
+                    ? { repository_scan: 'enabled' }
+                    : {}),
+            })
+        },
     },
 ]
+
+async function aiScan(gh: Gh, repo: string) {
+    return object((await get(gh, `repos/${repo}/code-scanning/ai-scan`)).body)
+}
+
+/**
+ * Labels the deps-review agent applies, created up front. Names follow
+ * rookery's convention: lowercase words joined by hyphens, so they never need
+ * quoting. `needs-you` is rookery's shared "blocked on a human" label, not a
+ * deps-only one. `was` is the old name: a repo that has it gets it deleted
+ * (nothing legacy is preserved).
+ */
+const AGENTIC_LABELS = [
+    {
+        name: 'low-risk',
+        was: 'deps:low-risk',
+        color: '0e8a16',
+        description: 'Dependency update judged low risk by deps-review',
+    },
+    {
+        name: 'needs-you',
+        was: 'deps:needs-you',
+        color: 'd93f0b',
+        description:
+            'Blocked on a human decision, whoever or whatever was working on it.',
+    },
+]
+
+async function labelExists(gh: Gh, repo: string, name: string) {
+    const r = await gh.rest(
+        'GET',
+        `repos/${repo}/labels/${encodeURIComponent(name)}`,
+    )
+    if (r.status === 404) return false
+    ok(r)
+    return true
+}
+
+function repoFlag(
+    name: string,
+    field:
+        | 'allow_auto_merge'
+        | 'allow_update_branch'
+        | 'delete_branch_on_merge',
+): Setting {
+    return {
+        name,
+        async read(gh, repo) {
+            return (
+                object((await get(gh, `repos/${repo}`)).body)?.[field] === true
+            )
+        },
+        write: (gh, repo) =>
+            send(gh, 'PATCH', `repos/${repo}`, { [field]: true }),
+    }
+}
+
+function agenticSettings(): Setting[] {
+    return [
+        repoFlag('auto-merge', 'allow_auto_merge'),
+        repoFlag('update-branch', 'allow_update_branch'),
+        repoFlag('delete-branch-on-merge', 'delete_branch_on_merge'),
+        {
+            name: 'actions-permissions',
+            // Read-only token, and Actions must never approve PRs: deps-review
+            // must not be able to approve what it reviews.
+            async read(gh, repo) {
+                const b = object(
+                    (
+                        await get(
+                            gh,
+                            `repos/${repo}/actions/permissions/workflow`,
+                        )
+                    ).body,
+                )
+                return (
+                    b?.default_workflow_permissions === 'read' &&
+                    b?.can_approve_pull_request_reviews === false
+                )
+            },
+            write: (gh, repo) =>
+                send(gh, 'PUT', `repos/${repo}/actions/permissions/workflow`, {
+                    default_workflow_permissions: 'read',
+                    can_approve_pull_request_reviews: false,
+                }),
+        },
+        {
+            name: 'fork-pr-approval',
+            // Runs from any outside contributor's fork PR wait for approval,
+            // so agent-driven workflows never run untrusted code unprompted.
+            async read(gh, repo) {
+                const b = object(
+                    (
+                        await get(
+                            gh,
+                            `repos/${repo}/actions/permissions/fork-pr-contributor-approval`,
+                        )
+                    ).body,
+                )
+                return b?.approval_policy === 'all_external_contributors'
+            },
+            write: (gh, repo) =>
+                send(
+                    gh,
+                    'PUT',
+                    `repos/${repo}/actions/permissions/fork-pr-contributor-approval`,
+                    { approval_policy: 'all_external_contributors' },
+                ),
+        },
+        ...AGENTIC_LABELS.map(
+            (label): Setting => ({
+                name: `label-${label.name}`,
+                read: (gh, repo) => labelExists(gh, repo, label.name),
+                async write(gh, repo) {
+                    const { name, color, description } = label
+                    if (await labelExists(gh, repo, label.was)) {
+                        await send(
+                            gh,
+                            'DELETE',
+                            `repos/${repo}/labels/${encodeURIComponent(label.was)}`,
+                        )
+                    }
+                    await send(gh, 'POST', `repos/${repo}/labels`, {
+                        name,
+                        color,
+                        description,
+                    })
+                },
+            }),
+        ),
+    ]
+}
+
+SETTINGS.push(...agenticSettings())
+
+// The label that asks relock-actions to relock a non-Renovate pull request.
+SETTINGS.push({
+    name: `label-${RELOCK_LABEL.name}`,
+    read: (gh, repo) => labelExists(gh, repo, RELOCK_LABEL.name),
+    write: (gh, repo) => send(gh, 'POST', `repos/${repo}/labels`, RELOCK_LABEL),
+})
 
 export function settingNames(): string[] {
     return SETTINGS.map((s) => s.name)
 }
 
 const PLAN_GATED = new Set(['codeql', 'secret-scanning'])
+
+/** GitHub's 403 text for a token missing a scope or fine-grained permission. */
+const TOKEN_SCOPE = /not accessible by (personal access token|integration)/i
+
+const AI_SCAN_HINT =
+    'AI Scan needs a public repo owned by an organization, or GitHub Code Security, and the organization and enterprise policies must allow it. Turning it on starts no scan; scans run on demand and use Code Security AI credits (or skip it: settings.skip in voidflow.config.ts, or --skip ai-scan)'
+
+/** Actionable replacement for the raw 403/422 body on a plan-gated setting. */
+function planGatedHint(name: string, info: RepoInfo): string {
+    const feature = name === 'codeql' ? 'code scanning' : 'secret scanning'
+    const kind = info.visibility === 'INTERNAL' ? 'internal' : 'private'
+    return `${feature} on ${kind} repositories needs a paid GitHub Code Security / Secret Protection plan; enable it for the org or make the repo public, then re-run (or skip it: settings.skip in voidflow.config.ts, or --skip ${name})`
+}
 
 function classifyError(
     name: string,
@@ -223,7 +392,20 @@ function classifyError(
         return {
             name,
             status: 'skipped-no-code',
-            detail: 're-run voidflow init --preset settings after your first push',
+            detail: 're-run voidflow apply settings (or voidflow init --preset settings) after your first push',
+        }
+    }
+    if (name === 'ai-scan' && status === 422) {
+        return { name, status: 'skipped-plan', detail: AI_SCAN_HINT }
+    }
+    // An admin's token can still lack a scope (a fine-grained token without
+    // Code scanning alerts, say). GitHub says so in the message; that is a
+    // failed read, not a plan limit, or check would hide the drift.
+    if (status === 403 && TOKEN_SCOPE.test(msg)) {
+        return {
+            name,
+            status: 'failed',
+            detail: `the credential lacks a permission this setting needs: ${msg}`,
         }
     }
     if (
@@ -231,32 +413,46 @@ function classifyError(
         info.visibility !== 'PUBLIC' &&
         (status === 403 || status === 422)
     ) {
-        return { name, status: 'skipped-plan', detail: msg }
+        return {
+            name,
+            status: 'skipped-plan',
+            detail: planGatedHint(name, info),
+        }
     }
     return { name, status: 'failed', detail: msg }
+}
+
+/** What one run did; `notAdmin` (the credential's role) means nothing was read. */
+export type SettingsRun = { results: SettingResult[]; notAdmin?: string }
+
+/** The settings a selection covers: baseline plus enabled groups, minus skips. */
+export function selectSettings(
+    enabled: ReadonlySet<SettingsGroup>,
+    skip: ReadonlySet<string>,
+): string[] {
+    return SETTINGS.map((s) => s.name).filter((name) => {
+        if (skip.has(name)) return false
+        const group = SETTING_GROUPS[name]
+        return group === 'baseline' || enabled.has(group)
+    })
 }
 
 export async function runSettings(
     gh: Gh,
     repo: string,
     sel: {
-        skip: Set<string>
-        enablePvr: boolean
-        enableAiScan: boolean
+        enabled: ReadonlySet<SettingsGroup>
+        skip: ReadonlySet<string>
         dryRun: boolean
     },
-): Promise<SettingResult[]> {
-    const chosen = SETTINGS.filter((s) => {
-        if (sel.skip.has(s.name)) return false
-        if (s.optIn === 'pvr') return sel.enablePvr
-        if (s.optIn === 'ai-scan') return sel.enableAiScan
-        return true
-    })
+): Promise<SettingsRun> {
+    const names = new Set(selectSettings(sel.enabled, sel.skip))
+    const chosen = SETTINGS.filter((s) => names.has(s.name))
     let info: RepoInfo
     try {
         const { owner, name } = split(repo)
         const data = await gh.graphql(
-            'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id visibility pullRequestCreationPolicy issueCreationPolicy } }',
+            'query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { id visibility pullRequestCreationPolicy issueCreationPolicy viewerPermission } }',
             { owner, name },
         )
         const repository = object(object(data)?.repository)
@@ -277,11 +473,25 @@ export async function runSettings(
                 typeof repository.issueCreationPolicy === 'string'
                     ? repository.issueCreationPolicy
                     : undefined,
+            viewerPermission:
+                typeof repository.viewerPermission === 'string'
+                    ? repository.viewerPermission
+                    : undefined,
         }
     } catch (e) {
         const detail = `cannot read ${repo}: ${e instanceof Error ? e.message : String(e)}`
-        return chosen.map((s) => ({ name: s.name, status: 'failed', detail }))
+        return {
+            results: chosen.map((s) => ({
+                name: s.name,
+                status: 'failed',
+                detail,
+            })),
+        }
     }
+    // Most settings need admin, and a weak credential's 403 would read as a
+    // plan-gated skip and hide drift, so check before reading any.
+    if (info.viewerPermission !== 'ADMIN')
+        return { results: [], notAdmin: info.viewerPermission ?? 'none' }
     const results: SettingResult[] = []
     for (const s of chosen) {
         try {
@@ -297,16 +507,28 @@ export async function runSettings(
             results.push(classifyError(s.name, e, info))
         }
     }
-    return results
+    return { results }
 }
 
-export function manualReminders(repo: string, enableAiScan: boolean): string[] {
+export function manualReminders(
+    repo: string,
+    enabled: ReadonlySet<SettingsGroup>,
+): string[] {
     const url = `https://github.com/${repo}/settings/security_analysis`
-    const lines = [`Turn on Dependabot malware alerts (no API): ${url}`]
-    if (enableAiScan) {
+    const lines = [`Turn on Dependabot malware alerts (no API setting): ${url}`]
+    if (enabled.has('actions-lock')) {
         lines.push(
-            `Turn on AI Scan for repositories (preview, no API): ${url}`,
-            `Turn on code scanning for AI applications (preview, no API): ${url}`,
+            `Once actions.lock is committed and verify-lockfile passes, turn on the Require lockfile policy (no API setting): Evaluate first where offered (Enterprise Cloud), then Active. See https://docs.github.com/en/actions/how-tos/administer/enforce-workflow-lockfiles`,
+        )
+    }
+    if (enabled.has('agentic')) {
+        lines.push(
+            `Add the COPILOT_GITHUB_TOKEN secret for the deps-review engine (cannot be created from nothing), as an Actions secret (https://github.com/${repo}/settings/secrets/actions) and again as a Dependabot secret (https://github.com/${repo}/settings/secrets/dependabot)`,
+        )
+    }
+    if (enabled.has('ai-scan')) {
+        lines.push(
+            `Turn on code scanning for AI applications (preview, no API setting): ${url}`,
         )
     }
     return lines

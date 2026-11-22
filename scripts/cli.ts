@@ -3,29 +3,72 @@
  * The `voidflow` bin: the fleet tools, for an org's infra repo to run from a
  * pinned release instead of a voidflow checkout.
  *
- *   bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts [--apply ...]
+ *   bunx @taraxvoid/voidflow@<version> plan|check [rulesets|tokens [provider]] [--repo <name>]
+ *   bunx @taraxvoid/voidflow@<version> apply rulesets|tokens <provider> --repo <name>|--entire-fleet
+ *   bunx @taraxvoid/voidflow@<version> tokens cf --config cf-tokens.ts [--apply ...]
  *   bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts [--check ...]
  *   bunx @taraxvoid/voidflow@<version> init --kind tool|site [...]
+ *   bunx @taraxvoid/voidflow@<version> --version
  *
- * Each command takes the same flags as its script (scripts/cf-tokens.ts,
- * scripts/apply-rulesets.ts) and lists them with --help. A relative --config
+ * plan, check and apply find the config themselves and re-run the tool
+ * commands (scripts/verbs.ts). Each tool command takes the same flags as its
+ * script (scripts/cf-tokens.ts, scripts/apply-rulesets.ts) and lists them
+ * with --help. A relative --config
  * resolves from VOIDFLOW_CONFIG_BASE when that is set, else the current
  * directory.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { packageRoot } from './lib/package-root.ts'
+
 type Main = (argv: string[], prog: string) => Promise<void>
+
+const verb = (v: 'plan' | 'check' | 'apply') => () =>
+    import('./verbs.ts').then((m) => ({ main: m.verbMain(v) }))
 
 const COMMANDS: Record<
     string,
-    { load: () => Promise<{ main: Main }>; about: string }
+    {
+        load: () => Promise<{ main: Main }>
+        about: string
+        hidden?: boolean
+    }
 > = {
+    plan: {
+        load: verb('plan'),
+        about: 'show what apply would change, finding the fleet config itself',
+    },
+    check: {
+        load: verb('check'),
+        about: 'plan, exiting 1 on drift',
+    },
+    apply: {
+        load: verb('apply'),
+        about: 'apply one tool to --repo <name> or --entire-fleet',
+    },
+    tokens: {
+        load: () => import('./tokens.ts'),
+        about: 'plan, apply or rotate scoped deploy tokens (<provider>)',
+    },
+    // Hidden alias for `tokens cf` while infra repos still call it; removed
+    // before 1.0.0 stable.
     'cf-tokens': {
-        load: () => import('./cf-tokens.ts'),
-        about: 'plan, apply or rotate scoped Cloudflare deploy tokens',
+        hidden: true,
+        load: () =>
+            import('./tokens.ts').then((m) => ({
+                main: (argv: string[], prog: string) =>
+                    m.main(['cf', ...argv], prog),
+            })),
+        about: 'alias for `tokens cf`',
     },
     rulesets: {
         load: () => import('./apply-rulesets.ts'),
         about: 'plan or apply branch rulesets',
+    },
+    settings: {
+        load: () => import('./settings.ts'),
+        about: "plan or apply a voidflow.config.ts's repo settings",
     },
     init: {
         load: () => import('./init.ts'),
@@ -37,19 +80,24 @@ const usage = () =>
     [
         'usage: voidflow <command> [flags]',
         '',
-        ...Object.entries(COMMANDS).map(
-            ([name, c]) => `  ${name.padEnd(10)} ${c.about}`,
-        ),
+        ...Object.entries(COMMANDS)
+            .filter(([, c]) => !c.hidden)
+            .map(([name, c]) => `  ${name.padEnd(10)} ${c.about}`),
         '',
-        'Run `voidflow <command> --help` for its flags.',
+        'Run `voidflow <command> --help` for its flags, or `voidflow --version`.',
     ].join('\n')
-
-export {}
 
 const [name, ...rest] = process.argv.slice(2)
 if (name === undefined || name === '-h' || name === '--help') {
     console.log(usage())
     process.exit(name === undefined ? 2 : 0)
+}
+if (name === '-v' || name === '--version') {
+    console.log(
+        JSON.parse(readFileSync(join(packageRoot(), 'package.json'), 'utf8'))
+            .version as string,
+    )
+    process.exit(0)
 }
 if (name.startsWith('-')) {
     console.error(
@@ -62,4 +110,13 @@ if (!cmd) {
     console.error(`unknown command ${JSON.stringify(name)}\n\n${usage()}`)
     process.exit(2)
 }
-await (await cmd.load()).main(rest, `voidflow ${name}`)
+try {
+    await (await cmd.load()).main(rest, `voidflow ${name}`)
+} catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e))
+    console.error(`voidflow ${name}: ${err.message}`)
+    if (err.cause) console.error(`  cause: ${String(err.cause)}`)
+    if (process.env.VOIDFLOW_DEBUG) console.error(err.stack)
+    else console.error('  (set VOIDFLOW_DEBUG=1 for the stack trace)')
+    process.exit(1)
+}

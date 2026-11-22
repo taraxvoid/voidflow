@@ -1,50 +1,278 @@
 # voidflow
 
-Shared CI/CD, security checks and repo config for TypeScript projects.
+Secure-by-default CI/CD, GitHub repo settings and git hooks for TypeScript
+repos, set up with one command:
 
-## What this is
+```sh
+npx @taraxvoid/voidflow init --kind site --apply    # an Astro site
+npx @taraxvoid/voidflow init --kind tool --apply    # a bun CLI, TUI or library
+```
 
-- **Reusable workflows** for sites (`site-ci.yml`) and bun tools (`tool-ci.yml`),
-  plus SARIF upload
-- **Deploy actions** for Cloudflare Workers, per-PR Worker
-  Previews, and branch-to-environment mapping
-- **npm package** with Lighthouse budgets, a copyleft license check,
-  Playwright and Biome configs, and fleet tools (branch rulesets and scoped
-  Cloudflare deploy tokens as code)
-- **Renovate preset** and **lefthook hooks**
-- **Agentic workflows** ([GitHub Agentic Workflows](https://github.github.com/gh-aw/)):
-  `deps-review`, which judges dependency PRs so low-risk ones can merge
-  themselves
+Built for Astro sites, bun tools and Cloudflare deploys. Works with `bun`,
+`pnpm`, `aube` and `npm`.
 
-Works with `bun` (default), `pnpm` and `aube`. CI runs whichever
-`package.json` scripts your repo defines (`lint`, `test:unit`, `test:e2e:all`,
-...) and skips the rest.
+## What you get
 
-## Usage
+- **CI** that runs your `lint`, `check`, `build` and test scripts on every PR,
+  plus gitleaks, jactionlint and [zizmor](https://github.com/zizmorcore/zizmor)
+  on workflow changes
+- **Deploys** to Cloudflare Workers from `main`, with a Worker Preview per PR
+- **Locked-down GitHub settings**: PRs and issues from collaborators only,
+  Dependabot alerts and security updates, secret scanning with push protection,
+  CodeQL
+- **Branch rulesets** that protect `main` from pwn requests and agent
+  misbehavior (opt-in)
+- **Renovate** with a release-age delay and grouped weekly updates
+- **A license check** that fails on copyleft and source-available dependencies
+- **lefthook git hooks** that run the same checks before you push
+- **Biome, Playwright and Lighthouse budgets**, preconfigured
+- **(experimental) deps-review**, a [GitHub Agentic Workflow](https://github.github.com/gh-aw/)
+  that judges dependency PRs so low-risk ones can merge themselves
 
-### Pinning
+## Quick start
 
-Pin to a release SHA with the version in a comment. Renovate keeps it current.
+`init` needs Node 24+ (or Bun), a git work tree, and the
+[`gh` CLI](https://cli.github.com/) logged in with admin on the repo for the
+settings half. `bunx @taraxvoid/voidflow init --kind tool --apply` works the same as
+`npx`.
+
+**New Astro site:**
+
+```sh
+bun create astro my-site
+cd my-site
+npx @taraxvoid/voidflow init --kind site --apply
+```
+
+Commit what it wrote and push.
+
+**New tool:** run `git init`, add a `package.json`, then:
+
+```sh
+npx @taraxvoid/voidflow init --kind tool --apply
+```
+
+**Existing repo:** preview first. `init` is additive: it merges `.gitignore` and
+`package.json`, and stops without writing anything if another file it would
+write already exists with different content.
+
+```sh
+npx @taraxvoid/voidflow init --kind site                     # plans only
+npx @taraxvoid/voidflow init --kind site --apply --skip renovate   # keep your own renovate.json
+```
+
+**After the first push**, add branch rulesets (they block direct pushes to
+`main`, so they're never part of the default run) and re-run settings so
+CodeQL has code to scan:
+
+```sh
+npx @taraxvoid/voidflow init --kind tool --preset rulesets --apply
+npx @taraxvoid/voidflow init --preset settings --apply
+```
+
+Re-running is always safe: files and settings already as wanted are reported
+`unchanged`. To pull in a newer voidflow's starter files, re-run with the new
+version and `--force` to overwrite the ones that differ.
+
+## `init` reference
+
+`init` is experimental: its flags may change in a minor
+([`STABILITY.md`](STABILITY.md#experimental)).
+
+### Presets
+
+| `--preset` | Does |
+|---|---|
+| `full` (default) | starter files and repo settings |
+| `files` | starter files only |
+| `settings` | repo settings only (no `--kind` needed) |
+| `ci` | only `.github/workflows/ci.yml` |
+| `codeowners` | only `.github/CODEOWNERS` |
+| `rulesets` | only branch rulesets: `tool()` by default, or the repo's entry from your fleet map with `--config <module>` (required for sites) |
+
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `--kind tool\|site` | which starter files to write; required except with `--preset settings` or `rulesets --config` |
+| `--skip <name>` | leave one file or setting out (repeatable, [names below](#skip-names)) |
+| `--config <file\|dir>` | the fleet rulesets config in your infra repo (a directory means its `rulesets.ts`). With `--preset rulesets`, apply this repo's entry from it instead of the default `tool()` (required for `--kind site`). Otherwise, add the repo to it (as `'owner/name': {},`, or under `orgs.<owner>.repos` in an [org-grouped](docs/fleet.md#config-shapes) config); comments and other entries are left as written. Review and commit that file, then run `voidflow plan rulesets` and `voidflow apply rulesets --repo <name>` |
+| `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
+| `--enable-ai-scan` | opt in: AI Scan for pull requests and for the repository (`repository_scan`, preview) |
+| `--enable-agentic` | opt in, experimental: [deps-review](#deps-review) and the repo settings and labels it relies on. The `COPILOT_GITHUB_TOKEN` secret is a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets |
+| `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to the repo's `checks` in your fleet rulesets config |
+| `--enable-actions-lock` | opt in: [actions.lock](#actionslock) for the repo's own workflows. Writes `verify-lockfile.yml`, then runs `gh actions-lock` once |
+| `--enable-actions-relock` | opt in, implies `--enable-actions-lock`: also writes [`relock-actions.yml`](#relock-actions), which relocks and pushes `actions.lock` on Renovate PRs and PRs labelled `relock-actions`. Needs a GitHub App |
+| `--repo owner/name` | the GitHub repo, if not the `origin` remote |
+| `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos, or with no repo to read, a full run skips CODEOWNERS with a note and `--preset codeowners` fails until you pass `--owner`) |
+| `--apply` | write the files and change the settings. Without it `init` only plans and changes nothing |
+| `-f`, `--force` | with `--apply`, overwrite files that differ |
+
+### Skip names
+
+`--skip` takes any file or setting name; `init --help` lists them all.
+
+- **Files:** `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`,
+  `ci`, `codeowners`, `config`, `tsconfig` (tool), `playwright` and
+  `unlighthouse` (site), `package`, `security` (with `--enable-pvr`), `agentic`
+  (with `--enable-agentic`), `actions-lock` and `actions-relock` (with
+  `--enable-actions-lock` / `--enable-actions-relock`)
+- **Settings:** `pr-policy`, `issue-policy`, `dependabot-alerts`,
+  `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan`,
+  and with `--enable-agentic`: `auto-merge`, `update-branch`,
+  `delete-branch-on-merge`, `actions-permissions`, `fork-pr-approval`,
+  `label-low-risk`, `label-needs-you`; with `--enable-actions-relock`:
+  `label-relock-actions`
+
+The `--enable-*` groups and the settings you skip are recorded in
+`voidflow.config.ts` (`settings`), so `voidflow check` keeps covering them; see
+[docs/config.md](docs/config.md#settings).
+
+### Files
+
+`lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`, `biome.json`,
+`.github/workflows/ci.yml` (the CI caller for the kind, pinned to the release
+SHA), `.github/CODEOWNERS`, `voidflow.config.ts` (the repo's
+[per-repo config](docs/config.md), holding only `kind`), and `tsconfig.json`
+(tool) or `playwright.config.js` and `unlighthouse.config.ts` (site).
+`.gitignore` and `package.json` are merged: missing lines, scripts and
+devDependencies are added and the rest kept. `voidflow.config.ts` belongs to
+the repo: an existing one is kept as it is unless `--force`, and carries no
+version comment.
+
+If any other file exists with different content, or `package.json` has a
+script with a different value, `init` lists them, writes no files and exits 1;
+`--force` overwrites. Each written file starts with a comment naming the
+voidflow version that wrote it (`renovate.json` carries it in `description`).
+There's no `dependabot.yml`: Renovate does version updates.
+
+`.github/CODEOWNERS` puts the paths a misbehaving bot or a malicious pull
+request would edit to change how the repo behaves (`.github/`, agent directives
+such as `CLAUDE.md`, `AGENTS.md` and `.claude/`, tooling config, `package.json`
+and lockfiles, `SECURITY.md`) under one owner. It only gates anything where the
+branch ruleset requires code owner review (the `codeowners` flag, on for
+`tool()`), and the owner should be someone other than the account the bot
+pushes as. GitHub does not apply rulesets to a private repo on a plan without
+them (free personal accounts): `init` probes for that and prints a note when
+the file would not be enforced.
+
+With `--enable-agentic`, `init` also installs deps-review with `gh aw add`
+(pinned to this version, needs the gh-aw extension) and writes
+`.github/workflows/agentic.yml`. Moving from `shadow` to `gate` merges both
+files, no `--force` needed.
+
+### actions.lock
+
+A caller's [`actions.lock`](https://gh.io/actions-lockfile) covers its own
+workflows' `uses:` steps (the call into voidflow's reusable workflows is not
+locked, an upstream limitation). With the Require lockfile policy on, a stale
+lock fails the run at startup with no jobs and no logs, so keep it current.
+
+`--enable-actions-lock` writes `.github/workflows/verify-lockfile.yml`, which
+runs `gh actions-lock --verify` on pull requests, pushes to `main` and weekly,
+then runs `gh actions-lock` once so every workflow, the new one included, is
+locked; commit `.github/workflows`. Without the
+[gh-actions-lock](https://github.com/github/gh-actions-lock) extension the run
+is a `manual` row with the command to run; any other failure exits 1. `init`
+prints the Require lockfile policy as a manual step: turn it on once the lock
+is committed and verify passes (Evaluate first where your plan offers it).
+
+#### relock-actions
+
+Verify only fails the PR. `--enable-actions-relock` also writes
+`.github/workflows/relock-actions.yml`, which fixes it: on a pull request that
+touches `.github/workflows/` and is opened by `renovate[bot]` or labelled
+`relock-actions`, it runs `gh actions-lock` and pushes the result to the PR
+branch. Same-repo pull requests only.
+
+- **GitHub App.** The push uses an App token, since a push with
+  `GITHUB_TOKEN` would not re-trigger CI. The App needs Contents and Workflows
+  read and write on the repo. Set its client ID as the `RELEASE_BOT_CLIENT_ID`
+  Actions variable and its private key as the `RELEASE_BOT_APP_PRIVATE_KEY`
+  secret (repo or organization level). `init` checks for both and prints a
+  setup note when either is missing; it does not fail.
+- **The `relock-actions` label.** The settings half creates it. Add it to any
+  non-Renovate pull request that changes a `uses:` line, such as a hand edit
+  or a rebase that moved one.
+- **Renovate.** The hosted Renovate app has no `postUpgradeTasks`, so it
+  cannot run `gh actions-lock` itself; relock-actions runs on its PRs instead.
+  The shared preset bumps the pinned gh-actions-lock version in both workflows.
+- **Safety.** Only the lockfile tooling runs: nothing from the pull request is
+  installed or executed, the checkout keeps no credentials, and it never passes
+  `--accept-moved` (check why a pin moved before accepting it, by hand).
+- **`pull_request_target`.** The workflow runs as it is on the base branch,
+  against the base branch's `actions.lock`. Under `pull_request`, a PR that
+  bumps an action relock-actions itself uses would have the Require lockfile
+  policy refuse the relock run at startup. The PR head is checked out by SHA as
+  data, and fork PRs never run it. zizmor's `dangerous-triggers` finding is
+  ignored inline with that reason.
+- **gh-aw.** If the repo has gh-aw workflows (a `*.lock.yml`, or
+  `--enable-agentic`), both workflows and the one-off run are limited to the
+  repo's other workflows, listed by name when `init` runs: `gh actions-lock`
+  rewrites SHA pins to tags, and gh-aw's compiled locks must stay as gh-aw
+  wrote them. Add a workflow you create later to both lists by hand. Without
+  gh-aw workflows nothing is listed and every run covers the whole directory.
+
+### Settings
+
+Always applied: pull requests and issues limited to collaborators (bots with
+write access count), Dependabot alerts and security updates, secret scanning
+with push protection, and CodeQL default setup. Opt-ins are never turned off.
+
+- On a private repo without GitHub Code Security, CodeQL and secret scanning
+  are reported `skipped-plan`.
+- Before the first push CodeQL has nothing to scan and is `skipped-no-code`;
+  re-run `init --preset settings --apply` after it.
+- `--enable-agentic` adds: allow auto-merge, always suggest updating PR
+  branches, delete head branches on merge, a read-only workflow token with
+  Actions unable to approve PRs, and the `low-risk` and `needs-you`
+  labels.
+- `--enable-actions-relock` adds the `relock-actions` label.
+- Settings with no API (Dependabot malware alerts, the AI previews, the
+  `COPILOT_GITHUB_TOKEN` secret) are printed as manual steps with a link.
+
+`--preset rulesets` applies the same rulesets as
+[`voidflow rulesets`](#npm-package), creating or updating but never pruning. A
+private repo on a plan without rulesets is `skipped-plan`.
+
+### Exit codes
+
+0 done, 1 a file conflict, a failed setting or a failed `gh actions-lock`
+run, 2 a usage error. None of the
+`skipped-*` statuses set 1. A file conflict doesn't stop the settings, and a
+missing `gh` or `origin` doesn't stop the files.
+
+# Reference
+
+Everything `init` writes points at the pieces below. Use them directly to wire
+voidflow into a repo by hand, or to customize what `init` wrote.
+
+## Pinning
+
+Pin workflows and actions to a release SHA with the version in a comment;
+Renovate keeps it current.
 
 ```yaml
 uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
 ```
 
-Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md).
-[`STABILITY.md`](STABILITY.md) says what minors, patches and majors may change
-and how deprecations reach you before a removal.
+Canary releases are tagged `vX.Y.Z-next.N`. See [`RELEASING.md`](RELEASING.md)
+for the release flow and [`STABILITY.md`](STABILITY.md) for what minors,
+patches and majors may change and how deprecations reach you.
+
+## CI workflows
 
 ### Trying a canary release
 
-Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init`
-(or the `bunx` form) runs the newest one. If your npm config has a release-age
+Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init --kind tool --apply`
+(or the `bunx` form, or `--kind site`) runs the newest one. If your npm config has a release-age
 cooldown (`min-release-age` or `before`), a fresh canary is filtered
 out and `@next` silently resolves to an older version. For the unscoped mirror
 this fails with `could not determine executable to run`, because the old
-release has no `voidflow` bin. Exempt voidflow in `~/.npmrc`:
+release has no `voidflow` bin. Exempt voidflow in `~/.npmrc`, next to the
+cooldown you already have:
 
 ```ini
-min-release-age=7
 min-release-age-exclude[]=voidflow
 min-release-age-exclude[]=@taraxvoid/*
 ```
@@ -53,58 +281,18 @@ Only the matching packages are exempt; their dependencies still follow the
 cooldown. To check what resolves, run `npm view @taraxvoid/voidflow@next version`.
 Bun has the same idea in `bunfig.toml` (`minimumReleaseAgeExcludes`).
 
-### Starting a repo
-
-`voidflow init` writes the starter files for a tool or an Astro site and
-applies the GitHub repo settings voidflow expects. Run it in a git work tree
-(for a site, after `bun create astro`):
+`npx` does not honor the exclusion in current npm releases
+([npm/cli#9765](https://github.com/npm/cli/issues/9765)), and npm before 11.17
+does not know the setting at all, so `npx` can still pick an older release.
+Until that is fixed, turn the cutoff off for that one command:
 
 ```sh
-npx @taraxvoid/voidflow@<version> init --kind tool    # Node 24+
-bunx @taraxvoid/voidflow@<version> init --kind site
+npx --min-release-age=0 @taraxvoid/voidflow@next init --kind tool --apply
 ```
 
-It's safe to re-run: files that match what `init` would write, and settings
-already as wanted, are reported `unchanged`.
-
-| Flag | Effect |
-|---|---|
-| `--kind tool\|site` | which starter files to write (not needed with `--preset settings`) |
-| `--preset full\|files\|settings` | both halves (default), only files, or only settings |
-| `--skip-file <name>` | leave a file out (repeatable): `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`, `ci`, `tsconfig`, `playwright`, `unlighthouse`, `package`, `security` |
-| `--skip-setting <name>` | leave a setting alone (repeatable): `pr-policy`, `issue-policy`, `dependabot-alerts`, `dependabot-security-updates`, `secret-scanning`, `codeql`, `pvr`, `ai-scan` |
-| `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
-| `--enable-ai-scan` | opt in: AI Scan for pull requests (preview) |
-| `--repo owner/name` | the GitHub repo, if not the `origin` remote |
-| `-f`, `--force` | overwrite files that differ |
-| `--dry-run` | plan both halves, change nothing |
-
-**Files.** `lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`,
-`biome.json`, `.github/workflows/ci.yml` (the CI caller for the kind, pinned to
-the release SHA), and `tsconfig.json` (tool) or `playwright.config.js` and
-`unlighthouse.config.ts` (site). `.gitignore` and `package.json` are merged:
-missing lines, scripts and devDependencies are added and the rest kept. If any
-other file exists with different content, or `package.json` has a script with
-a different value, `init` lists them, writes no files and exits 1; `--force`
-overwrites. Each written file starts with a comment naming the voidflow
-version that wrote it (`renovate.json` carries it in `description`). No
-`dependabot.yml`: Renovate does version updates.
-
-**Settings** need `gh`, authenticated with admin on the repo. Always applied:
-pull requests and issues limited to collaborators (bots with write access
-count), Dependabot alerts and security updates, secret scanning with push
-protection, and CodeQL default setup. On a private repo without GitHub Code
-Security, CodeQL and secret scanning are reported `skipped-plan`; before the
-first push CodeQL has nothing to scan and is `skipped-no-code` (re-run
-`init --preset settings` after it). Neither sets exit 1. Opt-ins are never
-turned off. Settings with no API (Dependabot malware alerts, and the AI
-previews with `--enable-ai-scan`) are printed with a link to the repo's
-settings page.
-
-A file conflict doesn't stop the settings, and a missing `gh` or `origin`
-doesn't stop the files. Exit codes: 0 done, 1 a file conflict or a failed
-setting, 2 a usage error. `init` is experimental
-([`STABILITY.md`](STABILITY.md#experimental)).
+This also lifts the cooldown for the dependencies `npx` installs for that run.
+If your cooldown is `before`, pass a `--before` date later than the canary's
+publish date instead. `npm install` honors the exclusion.
 
 ### Site CI
 
@@ -234,6 +422,54 @@ jobs:
     uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<sha> # vX.Y.Z
 ```
 
+### Tool release
+
+For tools published to npm: release-please on branch channels (`main` →
+`latest`, `next` → `next`, `release/N.x` → `release-N.x`), then the packed
+tarball is attested and staged with `npm stage publish`, so nothing goes live
+until you approve it with 2FA, and the bytes on npm are the attested bytes.
+Each channel reads `.release-please/<main|next|maintenance>.json` and its
+`-manifest.json`; a branch without one fails. Needs a release bot GitHub App
+(so the release PR's CI runs) and npm trusted publishing configured with
+**your** workflow file (e.g. `release.yml`) and the `npm` environment.
+Create that environment yourself and limit its deployment branches to your
+release branches (`main`, `next`, `release/*`): npm only checks the workflow
+file and environment name, so an unrestricted environment would let any
+branch's run of the caller publish.
+
+```yaml
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag: { type: string, required: true }
+      dry-run: { type: boolean, default: false }
+
+permissions: {}
+
+jobs:
+  release:
+    uses: taraxvoid/voidflow/.github/workflows/tool-release.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+      attestations: write
+    with:
+      release-bot-client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+      tag: ${{ inputs.tag }}
+      dry-run: ${{ inputs.dry-run == true }}
+    secrets:
+      release-bot-private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+```
+
+Inputs: `npm-environment` (default `npm`), `floating-tag` (move `v<major>` on
+a stable release, default on), `runner`. voidflow's own release
+(`release-please.yml`) still runs separately: it also publishes to JSR and an
+unscoped mirror and back-merges `main` into `next`.
+
 ### Code scanning
 
 Both CI workflows save gitleaks and zizmor results as a `voidflow-sarif`
@@ -253,9 +489,9 @@ artifact. To upload them to GitHub code scanning, add a job (it needs
 
 Private repos need GitHub Code Security.
 
-### Deploys
+## Deploys
 
-`actions/branch-env-map` maps `main` → `prod` and PRs → `preview`; any other
+`actions/branch-env-map` maps `main` to `prod` and PRs to `preview`; any other
 ref fails. Run it as the first step of the deploy job:
 
 ```yaml
@@ -285,13 +521,25 @@ another way.
 | Action | Inputs |
 |---|---|
 | `actions/cloudflare-deploy` | `env`, `cloudflare-api-token`, `cloudflare-account-id`, `migrate-d1`, `package-manager` (runs the migration: `bun`, `pnpm` or `aube`), `working-directory`, `command`, `token-fallback` ([details](CONTRIBUTING.md)) |
-| `actions/cloudflare-preview` | `cloudflare-api-token`, `cloudflare-account-id`, `working-directory`, `name` (default `pr-<number>`), `secrets` (dotenv lines), `github-token`, `delete` |
+| `actions/cloudflare-preview` | `cloudflare-api-token`, `cloudflare-account-id`, `working-directory`, `env` (wrangler environment for `--env`), `name` (default `pr-<number>`), `secrets` (dotenv lines), `github-token`, `delete` |
 
 **Worker Previews:** `cloudflare-preview` runs `wrangler preview` per pull
 request and outputs `preview-url` and `deployment-url`. With `github-token`
 (and `pull-requests: write`) it keeps one PR comment with the URL, updated on
 later pushes. Add `closed` to `on.pull_request.types` so the cleanup runs, and
-skip forks, which get no secrets:
+skip forks, which get no secrets. Give the job `environment: preview` so it
+reads the `preview` environment's token, not a repository secret every job can
+read. A job with an environment still falls back to a repository secret of the
+same name, so once the environment has its own token, delete the repo-wide
+`CLOUDFLARE_API_TOKEN` (`apply tokens cf --prune` does).
+
+The `preview` environment has to accept PR branches, so anyone who can push a
+branch can write a job that reads its token. Previews of the prod Worker need
+a token that can deploy to prod, so put them under a separate Worker instead:
+add an `env.preview` block to the wrangler config (Worker `<name>-preview`, no
+routes, its own `previews` block) and pass `env: preview`. Its token is then
+scoped to that Worker only; both Workers can live in one account (see
+[Where the secret goes](CONTRIBUTING.md#where-the-secret-goes)).
 
 ```yaml
   preview:
@@ -300,6 +548,7 @@ skip forks, which get no secrets:
       github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    environment: preview
     permissions:
       contents: read
       pull-requests: write
@@ -310,11 +559,12 @@ skip forks, which get no secrets:
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          env: preview # Previews under <name>-preview, not the prod Worker
           github-token: ${{ github.token }}
           delete: ${{ github.event.action == 'closed' }}
 ```
 
-### npm package
+## npm package
 
 ```sh
 bun add -d @taraxvoid/voidflow   # or: pnpm add -D @taraxvoid/voidflow
@@ -324,6 +574,9 @@ Also published as `voidflow`. `check-licenses` and `unlighthouse-runner` need
 `bun` on `PATH`; the `voidflow` CLI (below) runs under Bun or Node 24+. Each
 npm tarball has a GitHub build attestation;
 [`RELEASING.md`](RELEASING.md#verify-an-npm-tarball) shows how to check one.
+Releases are immutable on GitHub, and `gh release verify v<version> --repo taraxvoid/voidflow`
+checks it against GitHub's own attestation;
+[`RELEASING.md`](RELEASING.md#verify-a-release) has the details and the limits.
 
 **Lighthouse budgets** - runs [Unlighthouse](https://unlighthouse.dev/) against
 the build and fails on a missed budget. Options: `--dir` (default `dist`, use
@@ -335,26 +588,34 @@ the build and fails on a missed budget. Options: `--dir` (default `dist`, use
 "test:e2e:lighthouse": "bun run build && unlighthouse-runner --dir dist"
 ```
 
-**License check** - fails on GPL, AGPL, SSPL and similar. LGPL is allowed.
+**License check** - fails on copyleft (GPL, AGPL, EUPL and similar) and
+source-available licenses (SSPL, BUSL, Elastic, Commons Clause, PolyForm).
+LGPL is allowed. Compound SPDX expressions count: an `AND` or `WITH` fails if
+any part is blocked, an `OR` only if every choice is. A package whose license
+is only `SEE LICENSE IN <file>` isn't read.
 
 ```json
 "check:licenses": "check-licenses"
 ```
 
 **Fleet tools** - the `voidflow` CLI, for branch rulesets and scoped
-Cloudflare deploy tokens as code (and `init`, see
-[Starting a repo](#starting-a-repo)). Run it with `bunx` or `npx` (Node 24+) from
+Cloudflare deploy tokens as code (and [`init`](#init-reference)). Run it with `bunx` or `npx` (Node 24+) from
 an org's infra repo that holds the fleet map (`--config`) and pins the version;
-no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `cf-tokens`
-also needs `CF_TOKEN_ADMIN`. Config shapes and flags are in
+no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `tokens cf`
+also needs `CF_TOKEN_ADMIN`. [`docs/fleet.md`](docs/fleet.md) covers the
+infra repo, how the verbs find its config (including `~/.config/voidflow`) and
+their targets; config shapes and flags are in
 [`CONTRIBUTING.md`](CONTRIBUTING.md#fleet-config---config). Experimental while
 they settle: the CLI's commands and flags and the `./cloudflare` and
 `./rulesets` exports may change in a minor
 ([`STABILITY.md`](STABILITY.md#experimental)). Pin an exact version.
 
 ```sh
+bunx @taraxvoid/voidflow@<version> plan                             # both tools, config found from ~/.config/voidflow
+bunx @taraxvoid/voidflow@<version> check rulesets                   # exit 1 on drift
+bunx @taraxvoid/voidflow@<version> apply rulesets --repo transbot   # or --entire-fleet; no default target
 bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
-bunx @taraxvoid/voidflow@<version> cf-tokens --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
+bunx @taraxvoid/voidflow@<version> tokens cf --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
 npx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts     # the same, under Node 24+
 ```
 
@@ -383,7 +644,7 @@ Lists merge with the base; scalar values in your config win.
 }
 ```
 
-### Renovate
+## Renovate
 
 Requires the Renovate GitHub App. Extends `config:best-practices` with a 3-day
 release age, grouped `chore(deps):` updates on Monday mornings, and bumps for
@@ -396,7 +657,7 @@ lefthook `ref` and annotated `justfile` versions.
 }
 ```
 
-### Agentic workflows
+## Agentic workflows
 
 A [gh-aw](https://github.github.com/gh-aw/) package in [`agentic/`](agentic/).
 Each workflow is Markdown you install into your repo and compile there, so it
@@ -418,14 +679,14 @@ gh-aw and fails when a committed `.lock.yml` is stale or missing:
     uses: taraxvoid/voidflow/.github/workflows/agentic-locks.yml@<sha> # vX.Y.Z
 ```
 
-#### deps-review
+### deps-review
 
 Reviews Renovate and Dependabot PRs beyond "CI passed". Two parts, so a
 compromised package can't talk its way to a merge:
 
 - **The agent** reads the release notes between the two versions, checks them
   against what your code actually uses, and leaves a comment with the evidence
-  and a `deps:low-risk` or `deps:needs-you` label. It treats every upstream
+  and a `low-risk` or `needs-you` label. It treats every upstream
   string as untrusted and proposes a verdict; it never approves, merges,
   pushes or posts the check.
 - **The gate job** (deterministic, runs after the agent) recomputes the hard
@@ -447,15 +708,26 @@ Dependabot triggers only see Dependabot secrets.
 Roll it out in stages:
 
 1. **Shadow.** Install it and read its verdicts for a few weeks. Nothing merges.
-2. **Gate.** Make `deps-review` a required check, give human PRs a passing one
-   with the gate workflow, and let Renovate automerge low-risk updates:
+2. **Gate.** Make `deps-review` a required check, post it on everyone else's
+   PRs with the gate workflow, and let Renovate automerge low-risk updates:
 
    ```yaml
      deps-review-gate:
        uses: taraxvoid/voidflow/.github/workflows/deps-review-gate.yml@<sha> # vX.Y.Z
        permissions:
          checks: write
+         contents: read
+         pull-requests: read
    ```
+
+   The gate passes a PR that changes no lockfile and no dependency field of
+   any `package.json`. One that does (an agent's or a contributor's) fails as
+   "Needs you" with the files listed, since nothing reviewed those
+   dependencies: review them, then merge with an admin bypass. It fails
+   closed: a `package.json` it cannot read or parse is listed too, a PR near
+   GitHub's 3000-file listing limit fails, and if the file list itself cannot
+   be fetched the step errors and posts no check, so the required check stays
+   unmet.
 
    ```json
    { "extends": ["github>taraxvoid/voidflow", "github>taraxvoid/voidflow:deps-review-automerge"] }
@@ -470,7 +742,7 @@ Roll it out in stages:
 3. **Wider.** Add update classes (0.x minors, grouped monorepos) only with
    evidence from stage 2. Majors stay human.
 
-### Git hooks
+## Git hooks
 
 Shared lefthook hooks for bun, pnpm or aube repos (aube is detected from
 `packageManager`). Each step runs your `package.json` script if it exists.
@@ -507,7 +779,6 @@ the shared steps' ordering.
 
 Upgrading from `lefthook/site.yml` (≤ v0.13): switch `configs` to
 `lefthook/base.yml`.
-
 ## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),

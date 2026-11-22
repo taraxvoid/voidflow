@@ -39,6 +39,7 @@ const resolve = (env: Record<string, string>) =>
     run(step('resolve').run, {
         INPUT_NAME: '',
         INPUT_DELETE: 'false',
+        INPUT_ENV: '',
         SECRETS: '',
         PR_NUMBER: '',
         REF_NAME: '',
@@ -75,6 +76,25 @@ describe('cloudflare-preview resolve step', () => {
         expect(
             resolve({ PR_NUMBER: '7', INPUT_DELETE: 'true' }).outputs.cmd,
         ).toBe('preview delete --name pr-7 --skip-confirmation')
+    })
+
+    test('env targets that wrangler environment on deploy and delete', () => {
+        expect(
+            resolve({ PR_NUMBER: '7', INPUT_ENV: 'preview' }).outputs.cmd,
+        ).toBe('preview --env preview --name pr-7 --json')
+        expect(
+            resolve({
+                PR_NUMBER: '7',
+                INPUT_ENV: 'preview',
+                INPUT_DELETE: 'true',
+            }).outputs.cmd,
+        ).toBe('preview delete --env preview --name pr-7 --skip-confirmation')
+    })
+
+    test('rejects an env that is not a plain name', () => {
+        expect(
+            resolve({ PR_NUMBER: '7', INPUT_ENV: 'preview --config x' }).code,
+        ).toBe(1)
     })
 
     test('secrets go to a private file passed with --secrets-file', () => {

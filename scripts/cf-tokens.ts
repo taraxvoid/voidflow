@@ -1,23 +1,27 @@
 /**
- * Plan, apply or rotate scoped Cloudflare deploy tokens for the fleet in the
- * --config module (the org's infra repo), shaped as in cloudflare/tokens.ts.
- * Every invocation takes --config <module>, e.g. ../infra/cf-tokens.ts:
+ * Plan, apply or rotate scoped Cloudflare deploy tokens, for one repo from
+ * the `cloudflare` section of its voidflow.config.ts (--repo-config <file>,
+ * what `voidflow plan|check|apply tokens` passes inside a repo), or for the
+ * fleet in a --config module (the org's infra repo), shaped as in
+ * cloudflare/tokens.ts. Fleet invocations take --config, e.g.
+ * ../infra/cf-tokens.ts:
  *
- *   voidflow cf-tokens                          # plan (read-only), every repo
- *   voidflow cf-tokens --repo example_project          # plan one repo
- *   voidflow cf-tokens --check                  # plan, exit 1 on drift or a token due to rotate
- *   voidflow cf-tokens --apply                  # create/update/rotate, set the GitHub env secrets
- *   voidflow cf-tokens --apply --rotate         # ...and rotate every token now
- *   voidflow cf-tokens --apply --prune          # ...and delete the repo's `retire` tokens
- *   voidflow cf-tokens --groups                 # live names of the permission group ids used
- *   voidflow cf-tokens --repo example_project --try prod -- bunx wrangler deploy
+ *   voidflow tokens cf                          # plan (read-only), every repo
+ *   voidflow tokens cf --repo example_project          # plan one repo
+ *   voidflow tokens cf --check                  # plan, exit 1 on drift or a token due to rotate
+ *   voidflow tokens cf --apply                  # create/update/rotate, set the GitHub env secrets
+ *   voidflow tokens cf --apply --rotate         # ...and rotate every token now
+ *   voidflow tokens cf --apply --prune          # ...and delete the repo's `retire` tokens
+ *   voidflow tokens cf --groups                 # live names of the permission group ids used
+ *   voidflow tokens cf --repo example_project --try prod -- bunx wrangler deploy
  *                                               # run a command with a throwaway token scoped like prod's
  *
  * The module exports `REPOS` (or a default); see scripts/lib/config.ts.
  *
- * Needs CF_TOKEN_ADMIN: a user-owned token covering every account in the
- * config (envs can sit in different accounts),
- * with Account API Tokens Edit, Workers Scripts Read (Worker tags) and Zone
+ * Needs an admin token: in the variable the repo's `cloudflare.adminTokenEnv`
+ * names (default CF_TOKEN_ADMIN) with --repo-config, else CF_TOKEN_ADMIN
+ * covering every account in the fleet config (envs can sit in different
+ * accounts). It needs Account API Tokens Edit, Workers Scripts Read (Worker tags) and Zone
  * Read (zone ids) on each. Keep it local; never put it in CI.
  *
  * GitHub goes through the `gh` CLI, with admin on the repos: even a plan reads
@@ -26,9 +30,11 @@
  * `gh secret set` and never printed.
  */
 
+import { dirname, resolve } from 'node:path'
 import {
     type Action,
     checkRepos,
+    D1_WRITE,
     type EnvConfig,
     envAccount,
     expiresOn,
@@ -39,15 +45,22 @@ import {
     repoAccounts,
     resolveTarget,
     retireTargets,
+    sameToken,
     type Token,
     tokenName,
     WORKER_EDITOR,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
 } from '../cloudflare/tokens.ts'
+import {
+    adminTokenVar,
+    DEFAULT_ADMIN_TOKEN_ENV,
+    toTokenRepos,
+} from '../config/index.ts'
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
 import { capture, inherit } from './lib/proc.ts'
+import { loadVoidflowConfig, repoSlug } from './lib/repo-config.ts'
 import { parseWranglerConfig } from './lib/wrangler-config.ts'
 
 const OPTIONS = {
@@ -59,12 +72,17 @@ const OPTIONS = {
     try: { type: 'string' },
     repo: { type: 'string' },
     config: { type: 'string' },
+    'repo-config': { type: 'string' },
 } as const
 
 const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
+       ${prog} --repo-config <file> [flags]
        ${prog} --config <module> --repo <name> --try <env> -- <command...>
+       ${prog} --repo-config <file> --try <env> -- <command...>
 
   --config <module>  the fleet map: a module exporting REPOS (or a default)
+  --repo-config <file>  a voidflow.config.ts: manage the repo it sits in,
+                     from its cloudflare section (takes no --repo)
   --repo <name>      only this repo (owner/name, or just name)
   --check            exit 1 on drift or a token due to rotate
   --apply            create, update and rotate tokens; set each env's secret
@@ -75,22 +93,78 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
   --try <env>        run the command after -- with a throwaway token scoped
                      like the env's
 
-Needs CF_TOKEN_ADMIN and gh with admin on the repos.`
+Needs the admin token (cloudflare.adminTokenEnv with --repo-config, default
+CF_TOKEN_ADMIN) and gh with admin on the repos.`
+
+/**
+ * The environment for a --try command: `env` without CF_TOKEN_ADMIN or its
+ * validated admin variable, with the throwaway token and its account.
+ */
+export function tryChildEnv(
+    env: Record<string, string | undefined>,
+    adminVar: string,
+    value: string,
+    account: string,
+): Record<string, string | undefined> {
+    const out = { ...env }
+    delete out.CF_TOKEN_ADMIN
+    delete out[adminVar]
+    return {
+        ...out,
+        // The value is the throwaway --try token, created at run time and
+        // deleted after the command; nothing is hard-coded here.
+        // nosemgrep
+        CLOUDFLARE_API_TOKEN: value,
+        CLOUDFLARE_ACCOUNT_ID: account,
+    }
+}
 
 /** `prog` names the command in the --help usage. */
-export async function main(argv: string[], prog = 'voidflow cf-tokens') {
+export async function main(argv: string[], prog = 'voidflow tokens cf') {
     const { values, positionals } = parseOrExit(
         argv,
         { options: OPTIONS, allowPositionals: true },
         usage(prog),
     )
 
-    const REPOS = await loadOrExit(values.config, checkRepos)
+    const repoConfig = values['repo-config']
+    if (repoConfig !== undefined && values.config !== undefined) {
+        console.error(`${prog}: --repo-config and --config are alternatives`)
+        process.exit(2)
+    }
+    if (repoConfig !== undefined && values.repo !== undefined) {
+        console.error(
+            `${prog}: --repo does not apply to a per-repo config; it manages the repo it sits in`,
+        )
+        process.exit(2)
+    }
 
-    const ADMIN = process.env.CF_TOKEN_ADMIN
+    let REPOS: Record<string, RepoConfig>
+    let adminVar = DEFAULT_ADMIN_TOKEN_ENV
+    if (repoConfig === undefined) {
+        REPOS = await loadOrExit(values.config, checkRepos)
+    } else {
+        try {
+            const repoConfigPath = resolve(
+                process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
+                repoConfig,
+            )
+            const cfg = await loadVoidflowConfig(repoConfigPath)
+            REPOS = toTokenRepos(
+                cfg,
+                await repoSlug(process.env, dirname(repoConfigPath)),
+            )
+            if (cfg.cloudflare) adminVar = adminTokenVar(cfg.cloudflare)
+        } catch (e) {
+            console.error(`${prog}: ${(e as Error).message}`)
+            process.exit(2)
+        }
+    }
+
+    const ADMIN = process.env[adminVar]
     if (!ADMIN) {
         console.error(
-            'CF_TOKEN_ADMIN is not set (see CONTRIBUTING.md, Cloudflare deploy tokens as code)',
+            `${adminVar} is not set (see CONTRIBUTING.md, Cloudflare deploy tokens as code)`,
         )
         process.exit(2)
     }
@@ -113,16 +187,27 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             },
             body: body === undefined ? undefined : JSON.stringify(body),
         })
-        const json = (await res.json()) as {
-            success: boolean
-            errors?: Array<{ code: number; message: string }>
-            result: T
-            result_info?: { total_pages?: number; total_count?: number }
-        }
-        if (!json.success) {
-            const why = (json.errors ?? []).map((e) => `${e.code} ${e.message}`)
+        const json = (await res.json().catch(() => undefined)) as
+            | {
+                  success: boolean
+                  errors?: Array<{ code: number; message: string }>
+                  result: T
+                  result_info?: { total_pages?: number; total_count?: number }
+              }
+            | undefined
+        if (!json?.success) {
+            const why = (json?.errors ?? []).map(
+                (e) => `${e.code} ${e.message}`,
+            )
+            if (!json) why.push('response was not JSON')
+            const hint =
+                res.status === 401
+                    ? ` (${adminVar} is invalid or expired)`
+                    : res.status === 403
+                      ? ` (${adminVar} lacks permission for this call; it needs account API token edit rights, see CONTRIBUTING.md)`
+                      : ''
             throw new Error(
-                `${method} ${path}: ${res.status} ${why.join('; ')}`,
+                `${method} ${path}: ${res.status} ${why.join('; ')}${hint}`,
             )
         }
         return json
@@ -178,6 +263,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             used.set(id, [...(used.get(id) ?? []), where])
         for (const id of WORKER_EDITOR) note(id, 'WORKER_EDITOR')
         note(WORKERS_ROUTES_WRITE, 'WORKERS_ROUTES_WRITE')
+        note(D1_WRITE, 'D1_WRITE')
         note(WORKERS_SCRIPTS_WRITE, 'WORKERS_SCRIPTS_WRITE')
         for (const acct of accounts) {
             const live = await cf<
@@ -423,12 +509,16 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const want = policies(cfg, env, ids, target.zones)
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
         console.log(
-            `  ${env.env}: Worker ${target.worker}, ${zones}, secret in ${scopeLabel(repo, env)}`,
+            `  ${env.env}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, secret in ${scopeLabel(repo, env)}`,
         )
         // The list endpoint omits policies; fetch each match in full.
         const have = await Promise.all(
             (tokens.get(acct) ?? [])
-                .filter((t) => t.name === name)
+                // A former fleet config may have spelled owner/name with
+                // different casing. Treat it as this token, then update it
+                // to the canonical lowercase name instead of minting another.
+                // Only the repo part is case-folded: env names stay exact.
+                .filter((t) => sameToken(t.name, name))
                 .map((t) =>
                     cf<Token>('GET', `/accounts/${acct}/tokens/${t.id}`),
                 ),
@@ -447,6 +537,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         for (const a of plan(want, have, now, {
             rotate: values.rotate,
             secretMissing,
+            name,
         })) {
             await act(repo, acct, env, name, want, a)
         }
@@ -460,14 +551,14 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
      * env's policies, to prove they are enough before CI depends on them. The
      * real token's value only exists in GitHub, so a local deploy can't use it,
      * and a shell holding a wider token would hide a missing grant. The child gets
-     * the throwaway token as CLOUDFLARE_API_TOKEN, with CF_TOKEN_ADMIN removed,
+     * the throwaway token as CLOUDFLARE_API_TOKEN, with the admin token removed,
      * runs in the directory `just` was run from, and the token is deleted after
      * (it expires within the hour regardless).
      */
     async function tryEnv(envName: string, cmd: string[]) {
         if (repos.length !== 1 || cmd.length === 0) {
             console.error(
-                '--try needs one --repo, an env, and a command after --',
+                '--try needs one configured repo, an env, and a command after --',
             )
             process.exit(2)
         }
@@ -492,19 +583,13 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         )
         const zones = target.zones.length ? target.zones.join(', ') : 'no zones'
         console.log(
-            `try ${t.id}: Worker ${target.worker}, ${zones}, until ${expires.toISOString()}`,
+            `try ${t.id}: Worker ${target.worker}, ${zones}${env.d1 ? ', D1 write (account)' : ''}, until ${expires.toISOString()}`,
         )
         let code = 1
         try {
-            const childEnv: Record<string, string | undefined> = {
-                ...process.env,
-                CLOUDFLARE_API_TOKEN: t.value,
-                CLOUDFLARE_ACCOUNT_ID: acct,
-            }
-            delete childEnv.CF_TOKEN_ADMIN
             code = await inherit(cmd, {
                 cwd: process.env.VOIDFLOW_CONFIG_BASE || process.cwd(),
-                env: childEnv,
+                env: tryChildEnv(process.env, adminVar, t.value, acct),
             })
         } finally {
             await cf('DELETE', `/accounts/${acct}/tokens/${t.id}`)
@@ -519,8 +604,14 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         const cfg = REPOS[repo]
         console.log(`\n== ${repo}`)
         const tokens = new Map<string, Token[]>()
-        for (const acct of repoAccounts(cfg)) {
-            tokens.set(acct, await cfAll<Token>(`/accounts/${acct}/tokens`))
+        try {
+            for (const acct of repoAccounts(cfg)) {
+                tokens.set(acct, await cfAll<Token>(`/accounts/${acct}/tokens`))
+            }
+        } catch (e) {
+            failed++
+            console.error(`  x listing tokens: ${(e as Error).message}`)
+            continue
         }
         let envsOk = true
         for (const env of cfg.envs) {
@@ -586,10 +677,11 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
         }
     }
 
+    const applyHint = process.env.VOIDFLOW_APPLY_HINT ?? 'voidflow apply'
     const summary =
         pending === 0
             ? 'in sync'
-            : `${pending} change(s) ${values.apply ? 'applied' : 'pending (re-run with --apply)'}`
+            : `${pending} change(s) ${values.apply ? 'applied' : `pending (${process.env.VOIDFLOW_VIA_VERB ? `run \`${applyHint}\`` : 're-run with --apply'})`}`
     console.log(`\n${summary}${failed ? `, ${failed} env(s) failed` : ''}`)
     if (failed > 0 || (values.check && pending > 0)) process.exit(1)
 }

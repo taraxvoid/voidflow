@@ -3,6 +3,7 @@
         "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
         "lint": "biome check .",
         "check:licenses": "check-licenses",
+        "check:voidflow": "voidflow check",
         "test:e2e:all": "playwright test",
         "test:e2e:a11y": "playwright test --grep @a11y",
         "test:e2e:lighthouse": "bun run build && unlighthouse-runner --dir dist"
@@ -10,6 +11,7 @@
     "devDependencies": {
         "@taraxvoid/voidflow": "{{version}}",
         "@biomejs/biome": "2.6.7",
-        "@playwright/test": "1.64.1"
+        "@playwright/test": "1.64.1",
+        "@socketsecurity/bun-security-scanner": "1.1.3"
     }
 }

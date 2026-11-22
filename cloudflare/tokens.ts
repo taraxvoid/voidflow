@@ -14,7 +14,9 @@
  *
  * Each token is owned by its env's account (envs can live in different
  * accounts) and scoped to one Worker (Workers Editor on that
- * Worker), plus Workers Routes Write on the zones of its routes.
+ * Worker), plus Workers Routes Write on the zones of its routes. An env that
+ * sets `d1` also gets D1 Write on its account (the permission has no
+ * per-database scope), for a deploy that runs `wrangler d1 migrations apply`.
  * Custom Domains do not support per-Worker roles yet; when a deploy proves the
  * zone grant is not enough, record a `fallback` and the token also gets
  * account-wide Workers Scripts Write. Every plan and every deploy says so.
@@ -48,6 +50,13 @@ export type EnvConfig = {
      * token, which deploys no routes).
      */
     zones?: string[]
+    /**
+     * Grant D1 Write on every database in the env's account, for a deploy
+     * that applies migrations. Cloudflare scopes that permission to the
+     * account only. Default: off, so a preview token never gets D1 just
+     * because it shares a wrangler config with prod.
+     */
+    d1?: boolean
     /** Wrangler config path in the repo (default branch). Default: wrangler.jsonc. */
     wrangler?: string
     /**
@@ -115,12 +124,30 @@ export const WORKER_EDITOR = [
     'e086da7e2179491d91ee5f35b3ca210a',
     'c1fde68c7bcc44588cbb6ddbc16d6480',
 ]
+/** Account > D1 > Write. Account-scoped only: no per-database resource. */
+export const D1_WRITE = '09b2857d1c31407795e75e3fed8617a1'
 /** Zone > Workers Routes > Write: add or keep routes and custom domains. */
 export const WORKERS_ROUTES_WRITE = '28f4b596e7d643029c524985477ae49a'
 /** Legacy account-wide Workers Scripts Write, used only for a fallback. */
 export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
 
-export const tokenName = (repo: string, env: string) => `${TAG}:${repo}:${env}`
+export const tokenName = (repo: string, env: string) =>
+    `${TAG}:${repo.toLowerCase()}:${env}`
+
+/**
+ * Whether two token names are the same token: the tag and repo compare
+ * case-insensitively (a former config may have cased the repo differently),
+ * the env after the last colon compares exactly.
+ */
+export function sameToken(a: string, b: string): boolean {
+    const split = (n: string) => {
+        const i = n.lastIndexOf(':')
+        return [n.slice(0, i).toLowerCase(), n.slice(i + 1)]
+    }
+    const [ar, ae] = split(a)
+    const [br, be] = split(b)
+    return ar === br && ae === be
+}
 
 /** The account an env's Worker and token live in. */
 export const envAccount = (cfg: RepoConfig, env: EnvConfig) =>
@@ -219,6 +246,7 @@ const ENV_FIELDS = [
     'secret',
     'worker',
     'zones',
+    'd1',
     'wrangler',
     'wranglerEnv',
     'account',
@@ -285,6 +313,8 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
                 (!Array.isArray(env.zones) || !env.zones.every(isStr))
             )
                 bad(`${e}.zones`, 'not a list of zone names')
+            if (env.d1 !== undefined && typeof env.d1 !== 'boolean')
+                bad(`${e}.d1`, 'not true or false')
             if (env.account !== undefined && !isAcct(env.account))
                 bad(`${e}.account`, 'not a 32-hex account id')
             if (
@@ -346,6 +376,13 @@ export function policies(
             effect: 'allow',
             permission_groups: [{ id: WORKERS_ROUTES_WRITE }],
             resources,
+        })
+    }
+    if (env.d1) {
+        out.push({
+            effect: 'allow',
+            permission_groups: [{ id: D1_WRITE }],
+            resources: { [acct]: '*' },
         })
     }
     if (env.fallback) {
@@ -411,7 +448,7 @@ export function plan(
     want: Policy[],
     have: Token[],
     now: Date,
-    opts: { rotate?: boolean; secretMissing?: boolean } = {},
+    opts: { rotate?: boolean; secretMissing?: boolean; name?: string } = {},
 ): Action[] {
     if (have.length === 0) return [{ kind: 'create', reason: 'missing' }]
     if (have.length > 1) {
@@ -444,6 +481,11 @@ export function plan(
     }
     if (normalise(token.policies) !== normalise(want)) {
         return [{ kind: 'update', token, reason: 'policies differ' }]
+    }
+    // A token found under a differently cased repo name is renamed to the
+    // canonical one (the update PUT sets the name).
+    if (opts.name !== undefined && token.name !== opts.name) {
+        return [{ kind: 'update', token, reason: 'name differs' }]
     }
     return [{ kind: 'ok', token }]
 }
