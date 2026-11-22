@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { checkVoidflowConfig } from '../config/index.ts'
 import { configSource } from '../config/source.ts'
 import { mergeSettings, withSettings } from '../scripts/init/config-settings.ts'
@@ -53,8 +56,11 @@ describe('configSource', () => {
             },
             settings: { enable: ['agentic'], skip: ['codeql'] },
         }
-        // biome-ignore lint/security/noGlobalEval: evaluates the printed literal
-        const back = (0, eval)(`(${configSource(cfg)})`)
+        const dir = mkdtempSync(join(tmpdir(), 'voidflow-source-'))
+        const file = join(dir, 'voidflow.config.ts')
+        writeFileSync(file, `export default ${configSource(cfg)}\n`)
+        const back = (await import(file)).default
+        rmSync(dir, { recursive: true, force: true })
         expect(back).toEqual(cfg)
         expect(checkVoidflowConfig(back)).toEqual(cfg as never)
     })

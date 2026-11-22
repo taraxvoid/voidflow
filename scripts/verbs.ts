@@ -140,6 +140,8 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
             )
     } else if (first !== undefined) {
         throw new Error(
+            // CLI text, not HTML: <provider> is a placeholder.
+            // nosemgrep
             `unknown tool ${JSON.stringify(first)} (rulesets, settings or tokens <provider>)`,
         )
     }
@@ -184,7 +186,9 @@ const usage = (verb: Verb) =>
     `${
         verb === 'apply'
             ? 'usage: voidflow apply rulesets|settings|tokens [provider] (--repo <name> | --entire-fleet) [flags]'
-            : `usage: voidflow ${verb} [rulesets|settings|tokens [provider]] [--repo <name>] [flags]`
+            : // CLI usage text, not HTML: <name> is a placeholder.
+              // nosemgrep
+              `usage: voidflow ${verb} [rulesets|settings|tokens [provider]] [--repo <name>] [flags]`
     }
 
   --config <file|dir>  the fleet config: a tool's module, or the infra repo

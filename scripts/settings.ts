@@ -30,6 +30,8 @@ const OPTIONS = {
     'no-color': { type: 'boolean', default: false },
 } as const
 
+// CLI usage text, not HTML: the <file> is a placeholder.
+// nosemgrep
 const usage = (prog: string) => `usage: ${prog} --repo-config <file> [flags]
 
   --repo-config <file>  a voidflow.config.ts: manage the repo it sits in
