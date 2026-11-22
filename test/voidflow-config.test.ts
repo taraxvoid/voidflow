@@ -9,7 +9,7 @@ import {
     toFleet,
     toTokenRepos,
 } from '../config/index.ts'
-import { site, tool } from '../rulesets/index.ts'
+import { type Ruleset, site, tool } from '../rulesets/index.ts'
 
 const ACCT = '0123456789abcdef0123456789abcdef'
 
@@ -20,7 +20,7 @@ const validRuleset = {
     conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
     bypass_actors: [],
     rules: [{ type: 'deletion' }],
-}
+} satisfies Ruleset
 
 /** The message `checkVoidflowConfig` throws for `x`. */
 function problems(x: unknown): string {
@@ -120,19 +120,45 @@ describe('checkVoidflowConfig', () => {
         )
     })
 
-    test('the raw form is accepted', () => {
-        expect(() =>
-            checkVoidflowConfig({
-                kind: 'tool',
-                rulesets: { rulesets: [validRuleset], retire: [] },
-            }),
-        ).not.toThrow()
+    test('the raw form is accepted, retire optional', () => {
+        for (const rulesets of [
+            { raw: [validRuleset], retire: ['old'] },
+            { raw: [validRuleset] },
+        ])
+            expect(() =>
+                checkVoidflowConfig({ kind: 'tool', rulesets }),
+            ).not.toThrow()
+    })
+
+    test('raw problems are reported under rulesets.raw', () => {
+        const p = problems({ kind: 'tool', rulesets: { raw: 'x' } })
+        expect(p).toContain('rulesets.raw: not a list')
+        const q = problems({
+            kind: 'tool',
+            rulesets: { raw: [{}], retire: 'x' },
+        }).split('\n')
+        expect(q).toContain('rulesets.raw[0].name: missing')
+        expect(q).toContain('rulesets.retire: not a list')
+    })
+
+    test('raw takes no tier fields', () => {
         expect(
             problems({
                 kind: 'tool',
-                rulesets: { rulesets: 'x', retire: [] },
+                rulesets: { raw: [validRuleset], checks: ['a'] },
             }),
-        ).toContain('rulesets.rulesets: not a list')
+        ).toContain('rulesets.checks: unknown field')
+    })
+
+    test('the old rulesets.rulesets spelling says it was renamed', () => {
+        expect(
+            problems({
+                kind: 'tool',
+                rulesets: { rulesets: [validRuleset], retire: [] },
+            }),
+        ).toBe(
+            'rulesets.rulesets: renamed; spell rulesets out in full as rulesets.raw',
+        )
     })
 
     test('cloudflare takes the fleet entry shape', () => {
@@ -226,9 +252,11 @@ describe('toFleet', () => {
     })
 
     test('the raw form passes through', () => {
-        const raw = { rulesets: [validRuleset], retire: [] }
-        const fleet = toFleet({ kind: 'tool', rulesets: raw }, 'o/n')
-        expect(fleet['o/n']).toMatchObject({ rulesets: [validRuleset] })
+        const fleet = toFleet(
+            { kind: 'tool', rulesets: { raw: [validRuleset] } },
+            'o/n',
+        )
+        expect(fleet['o/n']).toEqual({ rulesets: [validRuleset], retire: [] })
     })
 })
 
