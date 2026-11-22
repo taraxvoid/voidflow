@@ -1,9 +1,11 @@
 /**
  * The fleet verbs over the per-tool commands:
  *
- *   voidflow plan  [rulesets|tokens [provider]] [--repo <name>]   # read-only
- *   voidflow check [rulesets|tokens [provider]] [--repo <name>]   # exit 1 on drift
- *   voidflow apply  rulesets|tokens [provider]  --repo <name> | --entire-fleet
+ *   voidflow plan  [rulesets|settings|tokens [provider]] [--repo <name>]   # read-only
+ *   voidflow check [rulesets|settings|tokens [provider]] [--repo <name>]   # exit 1 on drift
+ *   voidflow apply  rulesets|settings|tokens [provider]  --repo <name> | --entire-fleet
+ *
+ * settings run only on a repo's voidflow.config.ts (scripts/settings.ts).
  *
  * Each finds the tool's config (scripts/lib/discover.ts), prints a header
  * line to stderr, then runs `voidflow <tool> --config <file> [--check|--apply]`
@@ -48,8 +50,11 @@ import {
 
 type Verb = 'plan' | 'check' | 'apply'
 
-/** Tools in run order, rulesets first. */
+/** Fleet tools in run order, rulesets first. */
 const TOOLS: Tool[] = ['rulesets', ...TOKEN_TOOLS]
+
+/** A tool the verbs run; `settings` exists only for a voidflow.config.ts. */
+export type RepoTool = Tool | 'settings'
 
 /** Flags the verb sets itself, or that belong to the per-tool command only. */
 const REFUSED: Record<string, string> = {
@@ -62,7 +67,7 @@ const REFUSED: Record<string, string> = {
 }
 
 export type VerbArgs = {
-    tool?: Tool
+    tool?: RepoTool
     provider?: Provider
     config?: string
     entireFleet: boolean
@@ -113,12 +118,12 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
         }
     }
     const [first, second, third] = pos
-    if (first === 'rulesets') {
+    if (first === 'rulesets' || first === 'settings') {
         if (second !== undefined)
             throw new Error(
-                `rulesets takes no provider, got ${JSON.stringify(second)}`,
+                `${first} takes no provider, got ${JSON.stringify(second)}`,
             )
-        out.tool = 'rulesets'
+        out.tool = first
     } else if (first === 'tokens') {
         const provider = second ?? DEFAULT_PROVIDER
         if (Object.hasOwn(PROVIDERS, provider)) {
@@ -135,7 +140,7 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
             )
     } else if (first !== undefined) {
         throw new Error(
-            `unknown tool ${JSON.stringify(first)} (rulesets or tokens <provider>)`,
+            `unknown tool ${JSON.stringify(first)} (rulesets, settings or tokens <provider>)`,
         )
     }
     return out
@@ -178,8 +183,8 @@ export function worstExit(codes: number[]): 0 | 1 | 2 {
 const usage = (verb: Verb) =>
     `${
         verb === 'apply'
-            ? 'usage: voidflow apply rulesets|tokens [provider] (--repo <name> | --entire-fleet) [flags]'
-            : `usage: voidflow ${verb} [rulesets|tokens [provider]] [--repo <name>] [flags]`
+            ? 'usage: voidflow apply rulesets|settings|tokens [provider] (--repo <name> | --entire-fleet) [flags]'
+            : `usage: voidflow ${verb} [rulesets|settings|tokens [provider]] [--repo <name>] [flags]`
     }
 
   --config <file|dir>  the fleet config: a tool's module, or the infra repo
@@ -203,11 +208,11 @@ ${
 Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone means \`tokens ${DEFAULT_PROVIDER}\`.
 
 Inside a repo with a voidflow.config.ts (and no --config or VOIDFLOW_CONFIG),
-rulesets run from that file for that repo only, and so do tokens when it has a
-cloudflare section. For token verbs, --repo and --entire-fleet select the
-fleet instead. Without a tool,
-tokens run only when the section's admin token variable is set. See
-docs/config.md.`
+rulesets and settings run from that file for that repo only, and so do tokens
+when it has a cloudflare section. settings exist only there. For token
+verbs, --repo and --entire-fleet select the fleet instead. Without a tool,
+settings are skipped when gh lacks admin on the repo, and tokens run only
+when the section's admin token variable is set. See docs/config.md.`
 
 /** Why per-repo mode refuses these arguments, or null when it takes them. */
 export function repoModeError(v: VerbArgs): string | null {
@@ -226,8 +231,9 @@ const VERB_FLAG: Record<Verb, string[]> = {
     apply: ['--apply'],
 }
 
-/** The user-facing name of a tool: `rulesets` or `tokens cf`. */
-const toolName = (tool: Tool) => {
+/** The user-facing name of a tool: `rulesets`, `settings` or `tokens cf`. */
+const toolName = (tool: RepoTool) => {
+    if (tool === 'settings') return tool
     const provider = providerOf(tool)
     return provider ? `tokens ${provider}` : tool
 }
@@ -243,7 +249,7 @@ function shellArg(arg: string): string {
  * changes. Fleet plans without a repo apply to the entire fleet.
  */
 export function applyHint(
-    tool: Tool,
+    tool: RepoTool,
     file: string | undefined,
     rest: string[],
     entireFleet: boolean,
@@ -289,48 +295,55 @@ export function toolArgs(
     ]
 }
 
-/** The per-tool command line for one verb run on a voidflow.config.ts. */
+/**
+ * The per-tool command line for one verb run on a voidflow.config.ts.
+ * `bare` (no tool named) lets settings skip when it cannot check.
+ */
 export function repoToolArgs(
     verb: Verb,
     file: string,
     rest: string[],
-    tool: Tool = 'rulesets',
+    tool: RepoTool = 'rulesets',
+    bare = false,
 ): string[] {
-    const provider = providerOf(tool)
+    const provider = tool === 'settings' ? undefined : providerOf(tool)
     return [
         ...(provider ? ['tokens', provider] : [tool]),
         '--repo-config',
         file,
         ...VERB_FLAG[verb],
+        ...(tool === 'settings' && bare ? ['--if-admin'] : []),
         ...rest,
     ]
 }
 
 /**
  * The tools one verb runs on a voidflow.config.ts: a named tool alone;
- * otherwise rulesets, then tokens when the file has a cloudflare section and
- * its admin token variable is set (so a repo's CI, which has none, still
- * checks rulesets), with `skipped` saying why tokens did not run.
+ * otherwise rulesets, settings (which skips itself without admin), then
+ * tokens when the file has a cloudflare section and its admin token variable
+ * is set (so a repo's CI, which has neither, still checks rulesets), with
+ * `skipped` saying why tokens did not run.
  */
 export function repoModeTools(
     v: VerbArgs,
     cf: CloudflareConfig | undefined,
     env: Record<string, string | undefined>,
-): { run: Tool[]; skipped?: string } {
+): { run: RepoTool[]; skipped?: string } {
     if (v.tool) return { run: [v.tool] }
+    const always: RepoTool[] = ['rulesets', 'settings']
     if (!cf)
         return {
-            run: ['rulesets'],
+            run: always,
             skipped:
                 'tokens skipped (no cloudflare section in voidflow.config.ts)',
         }
     const admin = adminTokenVar(cf)
     if (!env[admin])
         return {
-            run: ['rulesets'],
+            run: always,
             skipped: `tokens skipped (${admin} not set)`,
         }
-    return { run: ['rulesets', 'cf-tokens'] }
+    return { run: [...always, 'cf-tokens'] }
 }
 
 /** Where discovery looked, for a "not found" message. */
@@ -413,7 +426,7 @@ async function runRepoMode(
     const codes: number[] = []
     for (const tool of run) {
         const credential =
-            tool === 'rulesets' || !cf
+            tool !== 'cf-tokens' || !cf
                 ? credentialSource(process.env)
                 : adminTokenVar(cf)
         console.error(
@@ -421,7 +434,10 @@ async function runRepoMode(
         )
         const r = spawnSync(
             process.execPath,
-            [cliPath(), ...repoToolArgs(verb, file, v.rest, tool)],
+            [
+                cliPath(),
+                ...repoToolArgs(verb, file, v.rest, tool, v.tool === undefined),
+            ],
             {
                 stdio: 'inherit',
                 env: verbChildEnv(applyHint(tool, undefined, v.rest, false)),
@@ -451,7 +467,7 @@ export function verbMain(verb: Verb) {
         }
         if (verb === 'apply' && !v.tool)
             fail(
-                `${prog}: apply needs a tool: voidflow apply rulesets|tokens [provider]\n\n${usage(verb)}`,
+                `${prog}: apply needs a tool: voidflow apply rulesets|settings|tokens [provider]\n\n${usage(verb)}`,
             )
 
         // Inside a repo with a voidflow.config.ts, the verbs run from that
@@ -477,6 +493,10 @@ export function verbMain(verb: Verb) {
             if (fromRepo) return runRepoMode(verb, v, prog, repoFile, cfg)
         }
 
+        if (v.tool === 'settings')
+            fail(
+                `${prog}: settings are per-repo; run inside a repo with voidflow.config.ts`,
+            )
         const wanted: Tool[] = v.tool ? [v.tool] : TOOLS
 
         const env = process.env
