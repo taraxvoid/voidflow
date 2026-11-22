@@ -150,7 +150,7 @@ cf-tokens-groups *args:
 cf-tokens-try config repo env +cmd:
     {{ cf_tokens }} --config {{ quote(config) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
 
-# Cut a canary X.Y.Z-next.N from main's tip and publish it under @next (approve both staged packages on npm after); pass dry-run=true to only resolve the version
+# Cut a canary X.Y.Z-next.N from main's tip and publish it under @next (approve both staged packages on npm after); run `just canary true` to only resolve the version
 canary dry-run="false":
     gh workflow run release-please.yml --ref main -f canary=true -f dry-run={{ dry-run }}
 

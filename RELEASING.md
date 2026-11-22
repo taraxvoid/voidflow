@@ -57,7 +57,7 @@ feature branch or lands behind a flag.
 ## Canary
 
 `just canary` runs the Release Please workflow on `main` with `canary` ticked
-(add `dry-run=true` to only resolve the version). Canaries are on demand, never
+(run `just canary true` to only resolve the version). Canaries are on demand, never
 per merge.
 
 - The version is `<proposed>-next.<n>`: `<proposed>` is the version in
