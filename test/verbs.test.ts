@@ -259,11 +259,14 @@ describe('voidflow plan|check|apply|try', () => {
         expect(r.ghCalled).toBe(true)
     })
 
-    test('VOIDFLOW_CONFIG no longer redirects a run away from the repo file', async () => {
+    test('VOIDFLOW_CONFIG no longer redirects a run away from the repo file, and says so', async () => {
         const r = await inRepo(['plan', 'rulesets'], TOOL, {
             VOIDFLOW_CONFIG: '/nonexistent/infra',
         })
+        expect(r.err).toContain('VOIDFLOW_CONFIG is set but ignored')
         expect(r.err).toContain(`config ${r.file} |`)
+        const unset = await inRepo(['plan', 'rulesets'], TOOL)
+        expect(unset.err).not.toContain('VOIDFLOW_CONFIG')
     })
 
     test('a bare plan runs rulesets and settings and says tokens were skipped', async () => {

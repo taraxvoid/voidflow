@@ -226,6 +226,12 @@ function version(): string {
 async function loadRepo(
     prog: string,
 ): Promise<{ file: string; cfg: VoidflowConfig; repo: string }> {
+    // It used to point the verbs at a fleet config; say so rather than
+    // leave someone wondering why it no longer does anything.
+    if (process.env.VOIDFLOW_CONFIG)
+        console.error(
+            `${prog}: VOIDFLOW_CONFIG is set but ignored: fleet configs were removed, and voidflow reads the ${CONFIG_FILE} of the repo it runs in`,
+        )
     const file = findRepoConfig(process.cwd())
     if (!file)
         fail(
@@ -245,17 +251,20 @@ function fail(msg: string): never {
     process.exit(2)
 }
 
-/** Each preset, loaded when it runs, so --help and usage errors stay cheap. */
-const RUN: Record<
-    Preset,
-    (ctx: PresetCtx, mode?: TokensMode) => Promise<number>
-> = {
-    rulesets: async (ctx) =>
-        (await import('./presets/rulesets.ts')).rulesets(ctx),
-    settings: async (ctx) =>
-        (await import('./presets/settings.ts')).settings(ctx),
-    tokens: async (ctx, mode) =>
-        (await import('./presets/tokens.ts')).tokens(ctx, mode),
+/** Run one preset, loaded when it runs, so --help and usage errors stay cheap. */
+async function run(
+    preset: Preset,
+    ctx: PresetCtx,
+    mode?: TokensMode,
+): Promise<number> {
+    switch (preset) {
+        case 'rulesets':
+            return (await import('./presets/rulesets.ts')).rulesets(ctx)
+        case 'settings':
+            return (await import('./presets/settings.ts')).settings(ctx)
+        case 'tokens':
+            return (await import('./presets/tokens.ts')).tokens(ctx, mode)
+    }
 }
 
 /** One preset: the header line on stderr, then the run; a throw is exit 1. */
@@ -269,7 +278,7 @@ async function runPreset(
         `voidflow ${version()} ${ctx.verb} ${preset} | config ${ctx.file} | repo ${ctx.repo} | credential ${credential(preset, ctx.cfg, ctx.env)}`,
     )
     try {
-        return await RUN[preset](ctx, mode)
+        return await run(preset, ctx, mode)
     } catch (e) {
         console.error(`${prog} ${preset}: ${(e as Error).message}`)
         return 1
