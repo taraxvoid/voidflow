@@ -305,7 +305,8 @@ skip forks, which get no secrets:
       pull-requests: write
     steps:
       - uses: actions/checkout@<sha> # <version>
-      # install and build, unless the event is 'closed'
+      # install and build, unless the event is 'closed' (delete installs
+      # Wrangler with npm, so it needs no setup-bun)
       - uses: taraxvoid/voidflow/actions/cloudflare-preview@<sha> # vX.Y.Z
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
