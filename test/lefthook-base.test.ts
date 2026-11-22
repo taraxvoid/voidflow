@@ -205,6 +205,118 @@ describe('lefthook/base.yml voidflow sync', () => {
     })
 })
 
+describe('lefthook/base.yml voidflow sync on config changes', () => {
+    const ZERO = '0'.repeat(40)
+    const env = () => ({ PATH: process.env.PATH, HOME: tmpdir() })
+    const git = (cwd: string, ...args: string[]) => {
+        const proc = Bun.spawnSync(
+            ['git', '-c', 'user.name=t', '-c', 'user.email=t@t', ...args],
+            { cwd, env: env() },
+        )
+        if (proc.exitCode !== 0)
+            throw new Error(`git ${args.join(' ')}: ${proc.stderr}`)
+        return proc.stdout.toString().trim()
+    }
+
+    /**
+     * A clone with voidflow.config.ts already on origin/main, a check:voidflow
+     * script, and a voidflow bin that logs its args and exits `validateCode`
+     * for validate.
+     */
+    const setup = (validateCode = 0) => {
+        const root = mkdtempSync(join(tmpdir(), 'voidflow-sync-'))
+        const remote = join(root, 'remote.git')
+        const repo = join(root, 'repo')
+        git(root, 'init', '-q', '--bare', '-b', 'main', remote)
+        git(root, 'init', '-q', '-b', 'main', repo)
+        writeFileSync(
+            join(repo, 'voidflow.config.ts'),
+            "export default { kind: 'tool' }\n",
+        )
+        writeFileSync(
+            join(repo, 'package.json'),
+            JSON.stringify({ scripts: { 'check:voidflow': 'voidflow check' } }),
+        )
+        git(repo, 'add', '.')
+        git(repo, 'commit', '-q', '--no-verify', '-m', 'config')
+        git(repo, 'remote', 'add', 'origin', remote)
+        git(repo, 'push', '-q', '--no-verify', 'origin', 'main')
+        const bin = join(repo, 'node_modules', '.bin')
+        mkdirSync(bin, { recursive: true })
+        const log = join(root, 'vf.log')
+        writeFileSync(
+            join(bin, 'voidflow'),
+            `#!/bin/sh\necho "$@" >> ${JSON.stringify(log)}\n[ "$1" = validate ] && exit ${validateCode}\nexit 0\n`,
+        )
+        chmodSync(join(bin, 'voidflow'), 0o755)
+        return { repo, log, pushed: git(repo, 'rev-parse', 'HEAD') }
+    }
+
+    const run = async (repo: string, stdin: string) => {
+        const script = voidflowRun
+            .replaceAll('{1}', 'origin')
+            .replaceAll('{pm}', 'echo PM')
+        const proc = Bun.spawn(['sh', '-c', script], {
+            cwd: repo,
+            env: env(),
+            stdin: new Blob([stdin]),
+            stdout: 'pipe',
+            stderr: 'pipe',
+        })
+        const code = await proc.exited
+        return { code, out: await new Response(proc.stdout).text() }
+    }
+    const logged = (log: string) =>
+        existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []
+
+    test('a push that changes the config validates, then plans, on any branch', async () => {
+        const { repo, log, pushed } = setup()
+        writeFileSync(
+            join(repo, 'voidflow.config.ts'),
+            "export default { kind: 'site' }\n",
+        )
+        git(repo, 'commit', '-q', '-am', 'change', '--no-verify')
+        const head = git(repo, 'rev-parse', 'HEAD')
+        const r = await run(
+            repo,
+            `refs/heads/feature ${head} refs/heads/feature ${ZERO}\n`,
+        )
+        expect(r.code).toBe(0)
+        expect(logged(log)).toEqual(['validate', 'plan'])
+        expect(r.out).toContain('PM run --if-present try:deploy')
+        void pushed
+    })
+
+    test('an invalid config blocks the push and skips the plan', async () => {
+        const { repo, log, pushed } = setup(2)
+        writeFileSync(
+            join(repo, 'voidflow.config.ts'),
+            "export default { kind: 'x' }\n",
+        )
+        git(repo, 'commit', '-q', '-am', 'bad', '--no-verify')
+        const head = git(repo, 'rev-parse', 'HEAD')
+        const r = await run(
+            repo,
+            `refs/heads/main ${head} refs/heads/main ${pushed}\n`,
+        )
+        expect(r.code).toBe(1)
+        expect(logged(log)).toEqual(['validate'])
+    })
+
+    test('a push that leaves the config alone runs nothing', async () => {
+        const { repo, log, pushed } = setup()
+        git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'other')
+        const head = git(repo, 'rev-parse', 'HEAD')
+        const r = await run(
+            repo,
+            `refs/heads/main ${head} refs/heads/main ${pushed}\n`,
+        )
+        expect(r.code).toBe(0)
+        expect(logged(log)).toEqual([])
+        expect(r.out).not.toContain('try:deploy')
+    })
+})
+
 describe('lefthook/base.yml pre-push new-commit detection', () => {
     const ZERO = '0'.repeat(40)
     // Clean env: if bun test itself runs inside a git hook, an inherited

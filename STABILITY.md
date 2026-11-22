@@ -34,7 +34,7 @@ canary `-next.N` versions, which may change or break between canaries.
 ### Experimental
 
 The `voidflow` CLI is published but outside this policy: its commands
-(`plan`, `check`, `apply`, `try`, `init`), how it finds the per-repo
+(`plan`, `check`, `apply`, `try`, `validate`, `init`), how it finds the per-repo
 `voidflow.config.ts`, the file's shape, and the starter files `init`
 writes, and the `./cloudflare`, `./config` and `./rulesets` exports
 that type their configs. The

@@ -38,7 +38,7 @@ Every preset, flag, skip name, file and setting `init` handles, and how to try a
 `--skip` takes any file or setting name; `init --help` lists them all.
 
 - **Files:** `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`,
-  `ci`, `codeowners`, `config`, `tsconfig` (tool), `playwright` and
+  `ci`, `codeowners`, `config`, `drift`, `tsconfig` (tool), `playwright` and
   `unlighthouse` (site), `package`, `security` (with `--enable-pvr`), `agentic`
   (with `--enable-agentic`), `actions-lock` and `actions-relock` (with
   `--enable-actions-lock` / `--enable-actions-relock`)
@@ -58,7 +58,9 @@ The `--enable-*` groups and the settings you skip are recorded in
 `lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`, `biome.json`,
 `.github/workflows/ci.yml` (the CI caller for the kind, pinned to the release
 SHA), `.github/CODEOWNERS`, `voidflow.config.ts` (the repo's
-[per-repo config](config.md), holding only `kind`), and `tsconfig.json`
+[per-repo config](config.md), holding only `kind`),
+`.github/workflows/voidflow-drift.yml` (the [drift check](config.md#reviewing-and-applying-a-change)
+on `main`), and `tsconfig.json`
 (tool) or `playwright.config.js` and `unlighthouse.config.ts` (site).
 `.gitignore` and `package.json` are merged: missing lines, scripts and
 devDependencies are added and the rest kept. `voidflow.config.ts` belongs to
