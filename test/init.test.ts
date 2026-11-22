@@ -8,7 +8,6 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { addToFleet } from '../scripts/init/fleet.ts'
 import type { Gh } from '../scripts/init/gh.ts'
 import { main, PRESETS } from '../scripts/init.ts'
 
@@ -278,9 +277,9 @@ describe('voidflow init', () => {
         expect(r.err).toContain('settings.enable: unknown group "nope"')
     })
 
-    test('without the config item, next steps keep the fleet text', async () => {
+    test('without the config item, next steps say to write one', async () => {
         const r = await run(['--kind', 'tool', '--skip', 'config', repo()])
-        expect(r.out).toContain("'o/r': {},")
+        expect(r.out).toContain('write a voidflow.config.ts')
         expect(r.out).not.toContain('    voidflow plan\n')
     })
 
@@ -648,134 +647,5 @@ describe('voidflow init', () => {
         expect(
             readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8'),
         ).toBe(ci)
-    })
-})
-
-describe('voidflow init --config', () => {
-    const SRC = `// fleet\nexport const REPOS = {\n    'a/b': {\n        retire: ['x'], // }\n    },\n    // trailing\n}\n`
-    const S = ['--preset', 'settings']
-
-    function cfg(text: string): string {
-        const dir = mkdtempSync(join(tmpdir(), 'voidflow-fleet-'))
-        roots.push(dir)
-        const p = join(dir, 'rulesets.ts')
-        writeFileSync(p, text)
-        return p
-    }
-
-    test('adds the repo to REPOS, once', async () => {
-        const p = cfg(SRC)
-        const r = await run([...S, '--config', p, repo()])
-        expect(r.code).toBe(0)
-        expect(r.out).toMatch(/added\s+rulesets\s+o\/r/)
-        const text = readFileSync(p, 'utf8')
-        expect(text).toContain("    // trailing\n    'o/r': {},\n}")
-        expect(r.out).not.toContain('by hand')
-        // Discovery from the new repo would not find the infra config, so
-        // the next steps name it.
-        expect(r.out).toContain(
-            `voidflow plan rulesets --config ${p} --repo o/r`,
-        )
-        expect(r.out).toContain(
-            `voidflow apply rulesets --config ${p} --repo o/r`,
-        )
-        const again = await run([...S, '--config', p, repo()])
-        expect(again.out).toMatch(/unchanged\s+rulesets/)
-        expect(readFileSync(p, 'utf8')).toBe(text)
-    })
-
-    test('adds a missing comma and fills an empty object', async () => {
-        const a = cfg("export const REPOS = {\n    'a/b': {}\n}\n")
-        await run([...S, '--config', a, repo()])
-        expect(readFileSync(a, 'utf8')).toBe(
-            "export const REPOS = {\n    'a/b': {},\n    'o/r': {},\n}\n",
-        )
-        const b = cfg('export default {}\n')
-        await run([...S, '--config', b, repo()])
-        expect(readFileSync(b, 'utf8')).toBe(
-            "export default {\n    'o/r': {},\n}\n",
-        )
-    })
-
-    test('--dry-run writes nothing; an unparseable config fails', async () => {
-        const p = cfg(SRC)
-        const d = await run([...S, '--dry-run', '--config', p, repo()])
-        expect(d.out).toMatch(/added\s+rulesets/)
-        expect(readFileSync(p, 'utf8')).toBe(SRC)
-        const r = await run([...S, '--config', cfg('const x = 1\n'), repo()])
-        expect(r.code).toBe(1)
-        expect(r.out).toMatch(/failed\s+rulesets/)
-    })
-
-    test('a directory means its rulesets.ts', async () => {
-        const p = cfg(SRC)
-        const r = await run([...S, '--config', dirname(p), repo()])
-        expect(r.code).toBe(0)
-        expect(r.out).toMatch(/added\s+rulesets\s+o\/r/)
-        expect(r.out).toContain(p)
-        expect(readFileSync(p, 'utf8')).toContain("    'o/r': {},\n}")
-    })
-
-    test('an org-grouped config gets the repo under its owner', async () => {
-        const p = cfg(
-            'export default {\n    orgs: {\n        o: { repos: {} },\n    },\n}\n',
-        )
-        const r = await run([...S, '--config', p, repo()])
-        expect(r.code).toBe(0)
-        expect(readFileSync(p, 'utf8')).toContain('repos: {\n')
-        expect(readFileSync(p, 'utf8')).toContain("'r': {},")
-    })
-
-    test('a config path that cannot be read is a failed row, and the rest still prints', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'voidflow-fleet-'))
-        roots.push(dir)
-        const r = await run([...S, '--config', dir, repo()])
-        expect(r.code).toBe(1)
-        expect(r.out).toMatch(/failed\s+rulesets/)
-        expect(r.out).toContain('fleet:')
-        // Not "done": the next steps still tell the user to add the entry.
-        expect(r.out).toContain('by hand')
-    })
-})
-
-describe('addToFleet', () => {
-    const added = (text: string) => {
-        const r = addToFleet(text, 'o/r')
-        if (r.status !== 'added') throw new Error(`expected added: ${r.status}`)
-        return r.text
-    }
-
-    test('ignores an export written in a comment or a string', () => {
-        const text =
-            '/* old:\nexport default {}\n*/\n// export const REPOS = {\nconst s = "export default {"\nexport const REPOS = {\n    "a/b": {},\n}\n'
-        expect(added(text)).toBe(
-            text.replace('"a/b": {},\n}', `"a/b": {},\n    'o/r': {},\n}`),
-        )
-        expect(addToFleet('/* export default {} */\n', 'o/r').status).toBe(
-            'failed',
-        )
-    })
-
-    test('finds an existing key wherever it sits, not in comments or nested values', () => {
-        const key = (text: string) => addToFleet(text, 'o/r').status
-        // On the opening line, and after another entry on a line.
-        expect(key("export default { 'o/r': {} }\n")).toBe('unchanged')
-        expect(key("export default {\n 'a/b': {}, 'o/r': {},\n}\n")).toBe(
-            'unchanged',
-        )
-        // A key inside a block comment, or in a nested value, is not an entry.
-        expect(key("export default {\n/*\n 'o/r': {},\n*/\n}\n")).toBe('added')
-        expect(
-            key("export default {\n 'a/b': { aka: { 'o/r': 'x' } },\n}\n"),
-        ).toBe('added')
-    })
-
-    test('puts a missing comma before an inline comment', () => {
-        expect(added("export default {\n    'a/b': {} // keep\n}\n")).toBe(
-            "export default {\n    'a/b': {}, // keep\n    'o/r': {},\n}\n",
-        )
-        expect(added("export default {\n    'a/b': {} /* keep */\n}\n")).toBe(
-            "export default {\n    'a/b': {}, /* keep */\n    'o/r': {},\n}\n",
-        )
     })
 })

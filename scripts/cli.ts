@@ -1,75 +1,41 @@
 #!/usr/bin/env node
 /**
- * The `voidflow` bin: the fleet tools, for an org's infra repo to run from a
- * pinned release instead of a voidflow checkout.
+ * The `voidflow` bin, run inside a repo with a voidflow.config.ts:
  *
- *   bunx @taraxvoid/voidflow@<version> plan|check [rulesets|tokens [provider]] [--repo <name>]
- *   bunx @taraxvoid/voidflow@<version> apply rulesets|tokens <provider> --repo <name>|--entire-fleet
- *   bunx @taraxvoid/voidflow@<version> tokens cf --config cf-tokens.ts [--apply ...]
- *   bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts [--check ...]
- *   bunx @taraxvoid/voidflow@<version> init --kind tool|site [...]
- *   bunx @taraxvoid/voidflow@<version> --version
+ *   voidflow plan|check [rulesets|settings|tokens]
+ *   voidflow apply rulesets|settings|tokens [--prune] [--rotate]
+ *   voidflow try tokens <env> -- <command...>
+ *   voidflow init --kind tool|site [...]
+ *   voidflow --version
  *
- * plan, check and apply find the config themselves and re-run the tool
- * commands (scripts/verbs.ts). Each tool command takes the same flags as its
- * script (scripts/cf-tokens.ts, scripts/apply-rulesets.ts) and lists them
- * with --help. A relative --config
- * resolves from VOIDFLOW_CONFIG_BASE when that is set, else the current
- * directory.
+ * The verbs are scripts/verbs.ts; each lists its flags with --help.
  */
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { nounVerb } from './lib/noun-verb.ts'
 import { packageRoot } from './lib/package-root.ts'
 
 type Main = (argv: string[], prog: string) => Promise<void>
 
-const verb = (v: 'plan' | 'check' | 'apply') => () =>
+const verb = (v: 'plan' | 'check' | 'apply' | 'try') => () =>
     import('./verbs.ts').then((m) => ({ main: m.verbMain(v) }))
 
 const COMMANDS: Record<
     string,
-    {
-        load: () => Promise<{ main: Main }>
-        about: string
-        hidden?: boolean
-    }
+    { load: () => Promise<{ main: Main }>; about: string }
 > = {
     plan: {
         load: verb('plan'),
-        about: 'show what apply would change, finding the fleet config itself',
+        about: 'show what apply would change (rulesets, settings, tokens)',
     },
-    check: {
-        load: verb('check'),
-        about: 'plan, exiting 1 on drift',
-    },
+    check: { load: verb('check'), about: 'plan, exiting 1 on drift' },
     apply: {
         load: verb('apply'),
-        about: 'apply one tool to --repo <name> or --entire-fleet',
+        about: 'make GitHub (or Cloudflare) match voidflow.config.ts',
     },
-    tokens: {
-        load: () => import('./tokens.ts'),
-        about: 'plan, apply or rotate scoped deploy tokens (<provider>)',
-    },
-    // Hidden alias for `tokens cf` while infra repos still call it; removed
-    // before 1.0.0 stable.
-    'cf-tokens': {
-        hidden: true,
-        load: () =>
-            import('./tokens.ts').then((m) => ({
-                main: (argv: string[], prog: string) =>
-                    m.main(['cf', ...argv], prog),
-            })),
-        about: 'alias for `tokens cf`',
-    },
-    rulesets: {
-        load: () => import('./apply-rulesets.ts'),
-        about: 'plan or apply branch rulesets',
-    },
-    settings: {
-        load: () => import('./settings.ts'),
-        about: "plan or apply a voidflow.config.ts's repo settings",
+    try: {
+        load: verb('try'),
+        about: 'run a command with a throwaway token scoped like an env',
     },
     init: {
         load: () => import('./init.ts'),
@@ -77,15 +43,23 @@ const COMMANDS: Record<
     },
 }
 
+/** Commands from before the verbs took presets, and what replaced them. */
+const REMOVED: Record<string, string> = {
+    rulesets: 'voidflow plan|check|apply rulesets',
+    settings: 'voidflow plan|check|apply settings',
+    tokens: 'voidflow plan|check|apply tokens, or voidflow try tokens <env> -- <command>',
+    'cf-tokens':
+        'voidflow plan|check|apply tokens, or voidflow try tokens <env> -- <command>',
+}
+
 const usage = () =>
     [
         'usage: voidflow <command> [flags]',
         '',
-        ...Object.entries(COMMANDS)
-            .filter(([, c]) => !c.hidden)
-            .map(([name, c]) => `  ${name.padEnd(10)} ${c.about}`),
+        ...Object.entries(COMMANDS).map(
+            ([name, c]) => `  ${name.padEnd(10)} ${c.about}`,
+        ),
         '',
-        'Fleet tools also read noun first: `voidflow rulesets plan`, `voidflow tokens cf apply`.',
         'Run `voidflow <command> --help` for its flags, or `voidflow --version`.',
     ].join('\n')
 
@@ -108,17 +82,19 @@ if (name.startsWith('-')) {
     process.exit(2)
 }
 
-const swapped = nounVerb(name, rest)
-const cmd = COMMANDS[swapped ? swapped.verb : name]
+if (Object.hasOwn(REMOVED, name)) {
+    console.error(
+        `voidflow ${name} was replaced by \`${REMOVED[name]}\`, run inside the repo whose voidflow.config.ts it reads (fleet configs were removed; see docs/config.md)`,
+    )
+    process.exit(2)
+}
+const cmd = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined
 if (!cmd) {
     console.error(`unknown command ${JSON.stringify(name)}\n\n${usage()}`)
     process.exit(2)
 }
 try {
-    await (await cmd.load()).main(
-        swapped ? swapped.argv : rest,
-        `voidflow ${swapped ? swapped.verb : name}`,
-    )
+    await (await cmd.load()).main(rest, `voidflow ${name}`)
 } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e))
     console.error(`voidflow ${name}: ${err.message}`)

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { build, tool } from '../rulesets/index.ts'
@@ -177,18 +177,35 @@ describe('init --preset rulesets', () => {
         expect(r.out).toMatch(/skipped-plan\s+rulesets/)
     })
 
-    test('a site without --config exits 2', async () => {
+    test('a site gets the site defaults', async () => {
+        const f = fakeRulesets()
         const r = await run(
-            ['--preset', 'rulesets', '--kind', 'site', repo()],
-            fakeRulesets().gh,
+            ['--preset', 'rulesets', '--kind', 'site', '--dry-run', repo()],
+            f.gh,
         )
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('--config')
+        expect(r.code).toBe(0)
+        expect(r.out).toMatch(/would-apply\s+ruleset main/)
+        expect(f.writes).toEqual([])
     })
 
-    test('no --kind and no --config exits 2', async () => {
+    test("the repo's voidflow.config.ts wins over the kind's defaults", async () => {
+        const dir = repo()
+        writeFileSync(
+            join(dir, 'voidflow.config.ts'),
+            "export default { kind: 'tool', rulesets: { tiers: ['main', 'next'] } }\n",
+        )
+        const r = await run(
+            ['--preset', 'rulesets', '--dry-run', dir],
+            fakeRulesets().gh,
+        )
+        expect(r.code).toBe(0)
+        expect(r.out.match(/would-apply\s+ruleset /g)?.length).toBe(2)
+    })
+
+    test('no --kind and no voidflow.config.ts exits 2', async () => {
         const r = await run(['--preset', 'rulesets', repo()], fakeRulesets().gh)
         expect(r.code).toBe(2)
+        expect(r.err).toContain('voidflow.config.ts')
     })
 
     test('full does not touch rulesets', async () => {
@@ -229,13 +246,11 @@ describe('init --preset rulesets', () => {
         expect(rows.map((x) => x.status)).toEqual(['applied', 'failed'])
     })
 
-    test('--config without --preset rulesets adds the repo to the fleet instead', async () => {
-        // Covered in init.test.ts; here only that it is no longer a usage error.
+    test('--config is gone with the fleet configs', async () => {
         const r = await run(
-            ['--kind', 'tool', '--config', './no-such-file.ts', repo()],
+            ['--kind', 'tool', '--config', './rulesets.ts', repo()],
             fakeRulesets().gh,
         )
-        expect(r.code).toBe(1)
-        expect(r.out).toMatch(/failed\s+rulesets/)
+        expect(r.code).toBe(2)
     })
 })
