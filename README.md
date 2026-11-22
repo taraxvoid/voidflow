@@ -554,7 +554,8 @@ scoped to that Worker only; both Workers can live in one account (see
       pull-requests: write
     steps:
       - uses: actions/checkout@<sha> # <version>
-      # install and build, unless the event is 'closed'
+      # install and build, unless the event is 'closed' (delete installs
+      # Wrangler with npm, so it needs no setup-bun)
       - uses: taraxvoid/voidflow/actions/cloudflare-preview@<sha> # vX.Y.Z
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -779,6 +780,7 @@ the shared steps' ordering.
 
 Upgrading from `lefthook/site.yml` (≤ v0.13): switch `configs` to
 `lefthook/base.yml`.
+
 ## Used by
 
 [taraxvoid.net](https://taraxvoid.net), [Queer Omaha](https://queeromaha.net),

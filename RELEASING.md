@@ -65,9 +65,10 @@ Check the stable release PR's version before merging it. release-please walks
 `main` newest-first by commit date and stops at the last release commit, so a
 `feat` on `next` dated before the latest stable release (e.g. a hotfix released
 while the feature waited on `next`) is never counted and the PR proposes a
-patch bump. Fix it by pinning the version (below), then add the missed entries
-to both the release PR's body and its `CHANGELOG.md` by hand: release-please
-builds the GitHub release notes from the PR body, not from the file.
+patch bump. Fix it with a squash-merged PR to `main` whose body ends with a
+`Release-As: X.Y.Z` footer (the squash commit message is the PR body), then
+add the missed entries to both the release PR's body and its `CHANGELOG.md` 
+by hand: release-please builds the GitHub release notes from the PR body, not from the file.
 
 To pin the version, end the body of a squash-merged PR to `main` with a
 `Release-As: X.Y.Z` footer. The footer has to be the last paragraph of the
