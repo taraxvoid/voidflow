@@ -3,6 +3,7 @@
  * node: APIs only, so the CLI runs under Node as well as Bun.
  */
 import { basename, extname } from 'node:path'
+import { configSource } from '../../config/source.ts'
 import { capture } from '../lib/proc.ts'
 import { json } from '../lib/template-format.ts'
 
@@ -18,7 +19,15 @@ export type RenderCtx = {
     stage?: 'shadow' | 'gate'
     /** `@user`, `@org` or `@org/team` for CODEOWNERS; null renders a placeholder. */
     owner?: string | null
+    /** voidflow.config.ts's default export; unset renders `{ kind }`. */
+    config?: Record<string, unknown>
 }
+
+/**
+ * The default export's literal in the voidflow.config.ts template, swapped
+ * whole for the config init writes (so the template stays valid TypeScript).
+ */
+export const CONFIG_LITERAL = "{ kind: '{{kind}}' }"
 
 /** Fill the init-time placeholders. A null sha pins the tag instead. */
 export function render(template: string, ctx: RenderCtx): string {
@@ -29,6 +38,10 @@ export function render(template: string, ctx: RenderCtx): string {
     return pinned
         .replaceAll('{{version}}', ctx.version)
         .replaceAll('{{sha}}', ctx.sha ?? '')
+        .replaceAll(
+            `export default ${CONFIG_LITERAL}`,
+            `export default ${configSource(ctx.config ?? { kind: ctx.kind })}`,
+        )
         .replaceAll('{{kind}}', ctx.kind)
         .replaceAll('{{cron_minute}}', String(ctx.cronMinute))
         .replaceAll('{{repo}}', ctx.repo ?? 'OWNER/REPO')

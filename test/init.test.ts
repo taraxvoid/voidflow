@@ -193,7 +193,7 @@ describe('voidflow init', () => {
         expect(r.out).toContain(
             'https://github.com/o/r/settings/security_analysis',
         )
-        expect(r.out).toContain('voidflow plan rulesets')
+        expect(r.out).toContain('    voidflow plan\n')
         expect(r.out).toContain('voidflow apply rulesets')
         expect(r.out).not.toContain("'o/r': {},")
     })
@@ -209,10 +209,79 @@ describe('voidflow init', () => {
         expect(r.out).toContain('repo-owned')
     })
 
+    test('a fresh config records the opt-in flags as settings', async () => {
+        const dir = repo()
+        await run(['--kind', 'tool', '--enable-pvr', '--skip', 'codeql', dir])
+        const text = readFileSync(join(dir, 'voidflow.config.ts'), 'utf8')
+        expect(text).toContain(
+            "export default {\n    kind: 'tool',\n    settings: { enable: ['pvr'], skip: ['codeql'] },\n} satisfies VoidflowConfig\n",
+        )
+    })
+
+    test('flags add their settings to an existing config, keeping its data', async () => {
+        const dir = repo()
+        const file = join(dir, 'voidflow.config.ts')
+        writeFileSync(
+            file,
+            "// mine\nexport default { kind: 'tool', rulesets: { checks: ['ci'] } }\n",
+        )
+        const plan = await run([
+            '--preset',
+            'settings',
+            '--kind',
+            'tool',
+            '--enable-pvr',
+            '--dry-run',
+            dir,
+        ])
+        // The settings preset writes no files, so the line to add is a note.
+        expect(plan.out).toContain(
+            "add 'pvr' to settings.enable in voidflow.config.ts so voidflow check covers it",
+        )
+        const r = await run(['--kind', 'tool', '--enable-pvr', dir])
+        expect(r.code).toBe(0)
+        expect(r.out).toContain(
+            'settings.enable + pvr; comments in the file are not kept',
+        )
+        expect(r.out).not.toContain("add 'pvr'")
+        const { default: cfg } = await import(`${file}?v=1`)
+        expect(cfg).toEqual({
+            kind: 'tool',
+            rulesets: { checks: ['ci'] },
+            settings: { enable: ['pvr'] },
+        })
+        // Same settings again: the file is left alone.
+        const again = await run(['--kind', 'tool', '--enable-pvr', dir])
+        expect(again.out).toMatch(/unchanged\s+config/)
+    })
+
+    test('the file settings run in the settings half without flags', async () => {
+        const dir = repo()
+        writeFileSync(
+            join(dir, 'voidflow.config.ts'),
+            "export default { kind: 'tool', settings: { enable: ['pvr'], skip: ['codeql'] } }\n",
+        )
+        const r = await run(['--preset', 'settings', '--dry-run', dir])
+        expect(r.out).toMatch(/would-apply\s+pvr/)
+        expect(r.out).not.toMatch(/\bcodeql\b/)
+    })
+
+    test('an invalid existing config exits 2 naming the file', async () => {
+        const dir = repo()
+        writeFileSync(
+            join(dir, 'voidflow.config.ts'),
+            "export default { kind: 'tool', settings: { enable: ['nope'] } }\n",
+        )
+        const r = await run(['--kind', 'tool', dir])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('voidflow.config.ts')
+        expect(r.err).toContain('settings.enable: unknown group "nope"')
+    })
+
     test('without the config item, next steps keep the fleet text', async () => {
         const r = await run(['--kind', 'tool', '--skip', 'config', repo()])
         expect(r.out).toContain("'o/r': {},")
-        expect(r.out).not.toContain('voidflow plan rulesets')
+        expect(r.out).not.toContain('    voidflow plan\n')
     })
 
     test('a conflict exits 1, writes no files, and still applies settings', async () => {
@@ -549,7 +618,7 @@ describe('voidflow init', () => {
         expect(r.code).toBe(0)
         expect(existsSync(join(dir, 'playwright.config.js'))).toBe(false)
         expect(r.out).toContain('playwright.config.ts already exists')
-        expect(r.out).toContain('voidflow plan rulesets')
+        expect(r.out).toContain('    voidflow plan\n')
         expect(r.out).not.toContain('tool()')
     })
 

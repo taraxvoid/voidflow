@@ -210,6 +210,8 @@ type Selection = {
     enableActionsRelock?: boolean
     /** Workflows the lockfile workflows are limited to; null or unset runs on the whole directory. */
     lockPaths?: string[] | null
+    /** What merging settings changes in an existing voidflow.config.ts; unset when nothing. */
+    configChange?: string
 }
 
 /** The file items `sel` selects, in FILE_ITEMS order. */
@@ -382,16 +384,21 @@ function planPackage(
         : { status: 'unchanged', content: raw }
 }
 
-/** A repo-owned file: created when missing, otherwise kept unless forced. */
+/**
+ * A repo-owned file: created when missing, merged when `change` says what
+ * init adds to it, otherwise kept unless forced.
+ */
 function planRepoOwned(
     path: string,
     content: string,
     sel: Selection,
+    change?: string,
 ): Pick<FileAction, 'status' | 'content' | 'detail'> {
     if (!existsSync(path)) return { status: 'create', content }
     const existing = readFileSync(path, 'utf8')
     if (existing === content) return { status: 'unchanged', content }
     if (sel.force) return { status: 'overwrite', content }
+    if (change) return { status: 'merge', content, detail: change }
     return {
         status: 'unchanged',
         content: existing,
@@ -439,7 +446,12 @@ export function planFiles(
         if (item.repoOwned) {
             actions.push({
                 ...base,
-                ...planRepoOwned(path, texts[0] ?? '', sel),
+                ...planRepoOwned(
+                    path,
+                    texts[0] ?? '',
+                    sel,
+                    item.name === 'config' ? sel.configChange : undefined,
+                ),
             })
             continue
         }

@@ -401,7 +401,9 @@ export function buildTemplates(root: string): Map<string, string> {
     t.set('common/gitignore', 'node_modules/\ndist/\n.env*\n')
     t.set('common/SECURITY.md', securityMd)
     t.set('common/CODEOWNERS', codeowners)
-    // Repo-owned: init writes it once, with no marker.
+    // Repo-owned: init writes it once, with no marker, and again only to
+    // merge settings into it. render() swaps the whole `{ kind }` literal for
+    // the config it writes (CONFIG_LITERAL in scripts/init/render.ts).
     t.set(
         'common/voidflow.config.ts',
         `// voidflow settings for this repo; \`kind\` picks the defaults: https://github.com/taraxvoid/voidflow/blob/main/docs/config.md

@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { VoidflowConfig } from '../config/index.ts'
 import { enabledGroups } from '../config/settings.ts'
 import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
@@ -23,6 +24,7 @@ import {
     runActionsLock,
 } from './init/actions-lock.ts'
 import { colorEnabled, type Paint, painter, statusStyle } from './init/color.ts'
+import { mergeSettings, withSettings } from './init/config-settings.ts'
 import {
     applyFiles,
     FILE_ITEMS,
@@ -58,6 +60,7 @@ import { loadOrExit } from './lib/config.ts'
 import { configPath } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import { capture } from './lib/proc.ts'
+import { CONFIG_FILE, loadVoidflowConfig } from './lib/repo-config.ts'
 
 /**
  * Presets are data: each names the file items it selects and whether the
@@ -328,19 +331,40 @@ export async function main(
     // Relock without verify is half a feature: relock implies lock.
     const enableActionsLock =
         values['enable-actions-lock'] || enableActionsRelock
-    const enabled = enabledGroups(
-        (
-            [
-                [enablePvr, 'pvr'],
-                [enableAiScan, 'ai-scan'],
-                [enableAgentic, 'agentic'],
-                [enableActionsLock, 'actions-lock'],
-                [enableActionsRelock, 'actions-relock'],
-            ] as const
-        )
-            .filter(([on]) => on)
-            .map(([, g]) => g),
+    const flagGroups = (
+        [
+            [enablePvr, 'pvr'],
+            [enableAiScan, 'ai-scan'],
+            [enableAgentic, 'agentic'],
+            [enableActionsLock, 'actions-lock'],
+            [enableActionsRelock, 'actions-relock'],
+        ] as const
     )
+        .filter(([on]) => on)
+        .map(([, g]) => g)
+    // A repo's voidflow.config.ts adds its settings to the flags', and gets
+    // the flags' written back. A broken one stops here: the rewrite would
+    // throw it away.
+    const configFile = join(dir, CONFIG_FILE)
+    let existingConfig: VoidflowConfig | undefined
+    if (existsSync(configFile)) {
+        try {
+            existingConfig = await loadVoidflowConfig(configFile)
+        } catch (e) {
+            console.error((e as Error).message)
+            process.exit(2)
+        }
+    }
+    const merged = mergeSettings(
+        existingConfig?.settings,
+        flagGroups,
+        values.skip,
+    )
+    const enabled = enabledGroups(merged.settings?.enable)
+    const settingSkip = new Set([
+        ...values.skip,
+        ...(merged.settings?.skip ?? []),
+    ])
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -415,6 +439,7 @@ export async function main(
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
             stage,
             owner: ownerHandle,
+            config: withSettings(existingConfig ?? { kind }, merged.settings),
         }
         const skip = new Set([
             ...values.skip,
@@ -429,6 +454,10 @@ export async function main(
             enableAgentic: values['enable-agentic'],
             enableActionsLock,
             enableActionsRelock,
+            configChange:
+                existingConfig && merged.added.length > 0
+                    ? `${merged.added.join(', ')}; comments in the file are not kept`
+                    : undefined,
         }
         const scope = enableActionsLock
             ? lockScope(
@@ -570,7 +599,7 @@ export async function main(
         } else if (repo) {
             const run = await runSettings(gh, repo, {
                 enabled,
-                skip: new Set(values.skip),
+                skip: settingSkip,
                 dryRun,
             })
             settingResults = run.results
@@ -625,6 +654,20 @@ export async function main(
             if (results.some((r) => r.status === 'failed')) exitCode = 1
         }
     }
+
+    // Settings the flags add, when the file is not being rewritten with them.
+    const configWritten = fileActions.some(
+        (a) =>
+            a.name === 'config' &&
+            (a.status === 'merge' || a.status === 'overwrite'),
+    )
+    if (existingConfig && !configWritten)
+        for (const a of merged.added) {
+            const [path, value] = a.split(' + ')
+            notes.push(
+                `add '${value}' to ${path} in ${CONFIG_FILE} so voidflow check covers it`,
+            )
+        }
 
     // Opt-ins act only on the halves that ran; say what was left out.
     if (enablePvr) {
@@ -734,8 +777,9 @@ export async function main(
     ) {
         out.push(
             '  review and commit voidflow.config.ts, then run:',
-            '    voidflow plan rulesets',
+            '    voidflow plan',
             '    voidflow apply rulesets',
+            '    voidflow apply settings',
             '  (see https://github.com/taraxvoid/voidflow/blob/main/docs/config.md)',
         )
     } else {
