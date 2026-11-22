@@ -26,6 +26,8 @@
  * `gh secret set` and never printed.
  */
 
+import { parse as parseJsonc } from 'jsonc-parser'
+import { parse as parseToml } from 'smol-toml'
 import {
     type Action,
     checkRepos,
@@ -233,9 +235,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             '-H',
             'Accept: application/vnd.github.raw',
         ])
-        return path.endsWith('.toml')
-            ? Bun.TOML.parse(text)
-            : Bun.JSONC.parse(text)
+        return path.endsWith('.toml') ? parseToml(text) : parseJsonc(text)
     })
 
     /** The env's Worker and zones, and the ids its policies reference them by. */

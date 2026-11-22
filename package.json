@@ -91,6 +91,8 @@
         "typescript": "7.0.2"
     },
     "dependencies": {
-        "license-checker-rseidelsohn": "5.0.1"
+        "jsonc-parser": "3.3.1",
+        "license-checker-rseidelsohn": "5.0.1",
+        "smol-toml": "1.9.1"
     }
 }
