@@ -691,7 +691,7 @@ export async function tokens(
     const summary =
         pending === 0
             ? 'in sync'
-            : `${pending} change(s) ${apply ? 'applied' : `pending (run \`${ctx.applyHint}\`)`}`
+            : `${pending} change(s) ${apply ? 'applied' : `pending (${ctx.applyHint})`}`
     console.log(`\n${summary}${failed ? `, ${failed} env(s) failed` : ''}`)
     return failed > 0 || (ctx.verb === 'check' && pending > 0) ? 1 : 0
 }
