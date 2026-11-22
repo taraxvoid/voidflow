@@ -102,3 +102,17 @@ jobs:
         run: bun run check
 
       - run: bun run test
+
+      - name: voidflow check (rulesets)
+        # Same handling as tool-ci: drift (exit 1) fails, exit 2 (the default
+        # token cannot read rulesets, or a config error) only warns.
+        run: |
+          code=0
+          bun run check:voidflow || code=$?
+          if [ "$code" = 2 ]; then
+            echo "::warning::voidflow check could not run (exit 2: auth or config error). Run 'bun run check:voidflow' locally."
+          elif [ "$code" != 0 ]; then
+            exit "$code"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
