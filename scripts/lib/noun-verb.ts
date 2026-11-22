@@ -9,13 +9,21 @@ export function nounVerb(
     args: string[],
 ): { verb: string; argv: string[] } | null {
     if (!NOUNS.has(noun)) return null
-    const at = args.findIndex((a) => !a.startsWith('-'))
+    // The positionals before `--`, skipping flags and their values, so
+    // `tokens cf --repo x apply` finds `apply` and `--repo apply` does not.
+    const pos: number[] = []
+    for (let i = 0; i < args.length; i++) {
+        const a = args[i]
+        if (a === '--') break
+        if (!a.startsWith('-')) pos.push(i)
+        else if (VALUE_FLAGS.has(a)) i++
+    }
     // tokens takes a provider before the verb: `tokens cf apply`.
     const idx =
-        noun === 'tokens' && at !== -1 && !VERBS.has(args[at])
-            ? args.findIndex((a, i) => i > at && !a.startsWith('-'))
-            : at
-    if (idx === -1 || !VERBS.has(args[idx])) return null
+        noun === 'tokens' && pos[0] !== undefined && !VERBS.has(args[pos[0]])
+            ? pos[1]
+            : pos[0]
+    if (idx === undefined || !VERBS.has(args[idx])) return null
     return {
         verb: args[idx],
         argv: [noun, ...args.slice(0, idx), ...args.slice(idx + 1)],
@@ -23,3 +31,5 @@ export function nounVerb(
 }
 const NOUNS = new Set(['rulesets', 'settings', 'tokens'])
 const VERBS = new Set(['plan', 'check', 'apply'])
+/** The flags the tools take a separate value for (`--repo x`, not `--repo=x`). */
+const VALUE_FLAGS = new Set(['--repo', '--config', '--repo-config', '--try'])
