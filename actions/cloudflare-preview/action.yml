@@ -123,14 +123,18 @@ runs:
       shell: bash
       env:
         OUTPUT: ${{ steps.preview.outputs.command-output }}
-      # Documented shape: .preview.urls[0]. Falls back to the first https URL
-      # anywhere in the output, in case the beta shape moves.
+        INPUT_ENV: ${{ inputs.env }}
+      # Documented shape: .preview.urls[0]. Falls back to the first workers.dev
+      # URL elsewhere in the output (not the deployment's), in case the beta
+      # shape moves. Only workers.dev: the output also holds other https
+      # strings, such as the pull request URL in the Worker's annotations.
       run: |
         json=$(printf '%s' "$OUTPUT" | sed -n '/^[[:space:]]*{/,$p')
-        url=$(jq -r '.preview.urls[0] // ([.. | strings | select(test("^https://"))] | first) // empty' <<< "$json" 2>/dev/null || true)
         deployment=$(jq -r '(.deployment.urls // .deployment_urls // [])[0] // empty' <<< "$json" 2>/dev/null || true)
+        url=$(jq -r --arg dep "$deployment" '.preview.urls[0] // ([.. | strings | select(test("^https://[^/]+\\.workers\\.dev(/|$)") and . != $dep)] | first) // empty' <<< "$json" 2>/dev/null || true)
         if [ -z "$url" ]; then
-          echo "::error::wrangler preview reported no Preview URL" >&2
+          deploy="wrangler deploy${INPUT_ENV:+ --env $INPUT_ENV}"
+          echo "::error::wrangler preview reported no Preview URL. Preview URLs are served on workers.dev, so the Worker likely has its workers.dev route off (for example when the first Preview created the Worker). Deploy it once with '$deploy' (with \"workers_dev\": true in that wrangler env), or enable workers.dev for the Worker in the dashboard, then re-run." >&2
           exit 1
         fi
         echo "url=$url" >> "$GITHUB_OUTPUT"
