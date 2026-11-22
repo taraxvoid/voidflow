@@ -1,94 +1,98 @@
 # Releasing
 
-voidflow uses release channels mapped to branches, driven by
+voidflow releases from one trunk, `main`, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
 Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`. That environment is the only server-side
 limit on who can publish, so it deploys from `main`, `next` and `release/*`
 only: the infra repo's rulesets config lists it under voidflow's
 `environments`, and `rulesets-plan` reports drift.
 
-The versions below are examples of the shape each channel takes, not the
-current ones; those are in `.release-please/*-manifest.json`.
-
-| Branch        | Channel                  | Version                                  | npm dist-tag  | GitHub release |
-| ------------- | ------------------------ | ---------------------------------------- | ------------- | -------------- |
-| `main`        | stable                   | `0.10.0`                                 | `latest`      | normal         |
-| `next`        | prerelease               | `0.10.0-next`, then `-next.1`, `-next.2` | `next`        | prerelease     |
-| `release/N.x` | maintenance (patch-only) | `0.9.4`                                  | `release-N.x` | normal         |
+| Source | Channel | Version | npm dist-tag | GitHub release |
+|---|---|---|---|---|
+| `main`, release PR merged | stable | `1.1.0` | `latest` | normal |
+| `main`, `just canary` | canary | `1.1.0-next.2` | `next` | prerelease |
+| `release/N.x` | maintenance (patch-only) | `0.9.4` | `release-N.x` | normal |
 
 ```mermaid
 gitGraph
-  commit id: "release" tag: "v0.9.0"
-  branch next
+  commit id: "release 1.0.0" tag: "v1.0.0"
   commit id: "feat: a"
-  commit id: "prerelease" tag: "v0.10.0-next"
+  commit id: "fix: b"
+  branch canary
+  commit id: "1.1.0-next.2" tag: "v1.1.0-next.2"
   checkout main
-  merge next id: "promote"
-  commit id: "stable" tag: "v0.10.0"
-  checkout next
-  merge main id: "back-merge"
+  commit id: "feat: c"
+  commit id: "release 1.1.0" tag: "v1.1.0"
 ```
 
 Which bump a change gets is set by [`STABILITY.md`](STABILITY.md): breaking
 changes (`feat!:` or a `BREAKING CHANGE:` footer) go out only in a major, after
 a deprecating minor.
 
+| Situation | What you do |
+|---|---|
+| Ship a feature | PR to `main`, squash-merge. It joins the open release PR. |
+| Try unreleased code | `just canary`. Publishes `X.Y.Z-next.N` under `next` after npm approval. |
+| Release stable | Merge release-please's PR on `main`. After approving it on npm, `just sync-next X.Y.Z` moves `@next` to it. |
+| Hotfix | PR to `main`, squash-merge, merge the release PR. |
+| Backport | `release/N.x`, see below. |
+
+**`main` stays releasable.** Work that is not ready to ship either stays on its
+feature branch or lands behind a flag.
+
 ## Ship a feature
 
-1. Branch from `next`, open the PR against `next`, squash-merge it.
-2. release-please keeps a prerelease PR open on `next`. Merging it tags
-   `vX.Y.Z-next` (then `-next.1`, `-next.2`), creates a GitHub prerelease and publishes to npm under
-   `next` (and to JSR).
-3. To try it in a site, pin the prerelease tag's commit SHA, or install the
-   package with `bun add @taraxvoid/voidflow@next`.
+1. Branch from `main`, open the PR against `main`, squash-merge it.
+2. release-please keeps a stable release PR open on `main`. Merging it tags
+   `vX.Y.Z`, creates the GitHub release, publishes to npm under `latest` (and to
+   JSR) and moves the floating `v1` tag.
+3. Check the release PR's version before merging it. To pin it, set
+   `"release-as": "X.Y.Z"` on the `.` package in `.release-please/main.json`
+   with a squash-merged PR to `main`, and remove it in the first PR after that
+   release, or every later release PR proposes the same version again. A
+   `Release-As:` footer in a PR body isn't reliable: CodeRabbit appends its
+   summary to the body, so the footer is no longer the last paragraph of the
+   squash commit and isn't parsed.
 
-## Promote next to main
+## Canary
 
-1. `just promote` opens the `next` to `main` PR and sets it to auto-merge with a
-   **merge commit** (not squash) so each Conventional Commit reaches
-   release-please. The `main` ruleset allows squash and merge only. Don't promote
-   from a hand-made branch: CI's promotion guard fails any PR into `main` that
-   carries `next`'s commits unless its head is `next`. A squashed promotion
-   gives `main` next's changes without next's commits, so every back-merge
-   after it conflicts on the same lines.
-2. release-please opens or updates the stable release PR on `main`. Merging it
-   publishes under `latest`, moves the floating `v0` tag, and opens a
-   `main` to `next` back-merge PR.
-3. The back-merge PR auto-merges with a merge commit once checks pass. If you
-   ever merge one by hand (e.g. after resolving conflicts), use a merge commit,
-   never squash: a squash leaves main's commits out of next's history, so the
-   following back-merge conflicts on the same lines again. If the back-merge
-   job fails, it opens a "Back-merge of vX.Y.Z into next failed" issue; don't
-   re-run the release run instead, it skips the job and goes green.
+`just canary` runs the Release Please workflow on `main` with `canary` ticked
+(add `dry-run=true` to only resolve the version). Canaries are on demand, never
+per merge.
 
-Check the stable release PR's version before merging it. release-please walks
-`main` newest-first by commit date and stops at the last release commit, so a
-`feat` on `next` dated before the latest stable release (e.g. a hotfix released
-while the feature waited on `next`) is never counted and the PR proposes a
-patch bump. Fix it with a squash-merged PR to `main` whose body ends with a
-`Release-As: X.Y.Z` footer (the squash commit message is the PR body), then
-add the missed entries to both the release PR's body and its `CHANGELOG.md` 
-by hand: release-please builds the GitHub release notes from the PR body, not from the file.
+- The version is `<proposed>-next.<n>`: `<proposed>` is the version in
+  release-please's open release PR on `main` (its title is
+  `chore(main): release X.Y.Z`), `<n>` is the number of commits on `main` since
+  the last stable tag. With no open release PR there is nothing releasable and
+  `just canary` refuses.
+- The workflow writes the canary version into `package.json`, `jsr.json` and the
+  `VOIDFLOW` pin in `agentic/workflows/deps-review.md`, commits that on top of
+  `main`'s tip (the commit never lands on `main`), pushes only the tag
+  `vX.Y.Z-next.N`, creates a GitHub prerelease and publishes under `next`.
+- Canarying the same commit twice gives the same version, and the rerun changes
+  nothing: published versions are skipped, a staged one is a 409 notice, an
+  existing tag and release are kept.
+- A dry run resolves and prints the version but pushes no tag and publishes
+  nothing.
+- To try it in a site, pin the canary tag's commit SHA, or install with
+  `bun add @taraxvoid/voidflow@next`. Each canary needs two npm approvals (see
+  below).
 
-To pin the version, end the body of a squash-merged PR to `main` with a
-`Release-As: X.Y.Z` footer. The footer has to be the last paragraph of the
-squash commit. CodeRabbit keeps its summary in its walkthrough comment instead
-of appending it to the PR body ([`.coderabbit.yaml`](.coderabbit.yaml)), so
-nothing lands after it. Check the squash commit message in the merge dialog
-before confirming.
+## `@next` after a stable release
 
-The alternative is `"release-as": "X.Y.Z"` on the `.` package in
-`.release-please/main.json`, set with a squash-merged PR to `main`. It
-overrides any commit footer, so if the file already pins a different version
-(check it first), update or remove that pin before relying on a footer for
-another version. Remove it in the first PR after that release, or every later
-release PR proposes the same version again. A footer needs no cleanup.
+After `1.1.0` ships, `@next` would still point at the last canary, older than
+`latest`. The release job cannot move it (a staged version only gets its tag at
+staging, `npm stage approve` takes no extra tags, and CI's token does not get
+dist-tag rights, which would also let it move `latest`). After approving both
+packages on npm, run:
 
-A `Release-As` footer on `next` reaches `main` with the promotion, and
-release-please on `main` honours it too: a `Release-As: 1.0.0-next` used to
-start a prerelease line makes the stable release PR propose `1.0.0-next`. The
-newest footer wins, so the same fix applies: a squash-merged PR to `main`
-ending `Release-As: 1.0.0`.
+```sh
+just sync-next 1.1.0
+```
+
+It checks that `1.1.0` is the current `latest` of both packages, then runs
+`npm dist-tag add <pkg>@1.1.0 next` for each package where it sorts above the
+current `next`. A canary for the following version moves `@next` forward again.
 
 ## Approve the npm release
 
@@ -100,7 +104,7 @@ unscoped `voidflow` mirror), so approve both, `@taraxvoid/voidflow` first
 package at the same version, which would not install until that is live),
 via the Staged Packages tab on
 npmjs.com or `npm stage approve <id>`. The GitHub release, `vX.Y.Z` tag and
-floating `v0` tag are created before approval; actions consumers pin git tags,
+floating `v1` tag are created before approval; actions consumers pin git tags,
 so this is fine, but `npm install` of the new version works only after
 approval. JSR publishes directly. CI cannot approve: approval and
 `npm stage list` need a 2FA-capable npm session, not the workflow's OIDC token.
@@ -114,8 +118,9 @@ different dist-tag), first reject it with `npm stage reject <id>`.
 
 ## Hotfix
 
-Fix on a branch off `main`, PR to `main`, squash-merge, release as above. The
-automatic back-merge brings it into `next`.
+PR to `main`, squash-merge, merge the release PR. It ships whatever is on `main`:
+if `main` holds something unready, finish it, revert it, or cut a patch from the
+last tag on a `release/N.x` branch.
 
 ## Backport to an older line
 
@@ -127,32 +132,16 @@ automatic back-merge brings it into `next`.
 2. Cherry-pick the fix onto a branch from `release/0.9.x`, PR to
    `release/0.9.x`, squash-merge.
 3. Merge the release PR that release-please opens there. It publishes
-   `0.9.4` under the `release-0.9.x` dist-tag and never touches `latest` or `v0`.
+   `0.9.4` under the `release-0.9.x` dist-tag and never touches `latest` or `v1`.
 
 ## Republish a tag
 
 Run the Release Please workflow manually (`workflow_dispatch`) from the branch
-that owns the tag's channel (`main`, `next` or `release/N.x`), give it the tag,
-and tick `dry-run` first to check without publishing. A tag is rejected unless
-its version fits the channel (`-next` versions only on `next`; only `0.9.x`
-versions on `release/0.9.x`) and its commit is on that branch.
-
-## If the back-merge fails
-
-[`scripts/back-merge.ts`](scripts/back-merge.ts) resolves version bookkeeping on
-its own: `package.json` and `jsr.json` get a real three-way merge with the version
-lines normalised (so next-only changes survive), and `CHANGELOG.md` and the main
-manifest take main's side. Any other conflict fails the job on purpose. Merge by hand:
-
-```sh
-git switch -c backmerge/fix origin/next
-git merge origin/main     # resolve the conflicts yourself
-```
-
-Then set `.release-please/next-manifest.json` to the version main just released, but
-only if that is newer than what is already there. After a hotfix on an older line
-(main at `0.9.1`, next at `0.10.0-next.1`) leave it alone, or `next` would be pushed
-backwards. Commit, push, open the PR against `next` and merge it with a merge commit.
+that owns the tag's channel (`main` or `release/N.x`), give it the tag, and tick
+`dry-run` first to check without publishing. A tag is rejected unless its
+version fits the channel (`main` takes `X.Y.Z` and canary `X.Y.Z-next.N` tags;
+only `0.9.x` versions on `release/0.9.x`) and its commit is on that branch (for
+a canary tag, its parent commit and only the version files changed).
 
 ## Consuming
 
@@ -177,7 +166,6 @@ gh attestation verify taraxvoid-voidflow-<version>.tgz \
 `npm pack <spec>` downloads the registry's tarball as is. Releases before the
 first one with this change have no attestation. A republish (`workflow_dispatch`)
 attests only what it actually publishes, and a dry run attests nothing.
-
 ### Verify a release
 
 Releases are published with GitHub's

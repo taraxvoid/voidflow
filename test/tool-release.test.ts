@@ -62,11 +62,10 @@ describe('tool-release.yml channel step matches release-channel.ts', () => {
         'channel',
         'Resolve release channel from branch',
     ).run
-    const repo = callerRepo(['main', 'next', 'maintenance'])
+    const repo = callerRepo(['main', 'maintenance'])
 
     for (const branch of [
         'main',
-        'next',
         'release/0.9.x',
         'release/1.x',
         'release/12.3.x',
@@ -91,7 +90,9 @@ describe('tool-release.yml channel step matches release-channel.ts', () => {
     test("a channel without the caller's config fails", () => {
         const onlyMain = callerRepo(['main'])
         expect(runStep(run, { BRANCH: 'main' }, onlyMain).code).toBe(0)
-        expect(runStep(run, { BRANCH: 'next' }, onlyMain).code).not.toBe(0)
+        expect(runStep(run, { BRANCH: 'release/1.x' }, onlyMain).code).not.toBe(
+            0,
+        )
     })
 })
 
@@ -106,9 +107,6 @@ describe('tool-release.yml tag check matches assertVersionMatchesChannel', () =>
     const cases: Array<[string, string]> = [
         ['main', '1.2.3'],
         ['main', '1.2.3-next.1'],
-        ['next', '1.2.3-next'],
-        ['next', '1.2.3-next.4'],
-        ['next', '1.2.3'],
         ['release/0.9.x', '0.9.4'],
         ['release/0.9.x', '0.10.0'],
         ['release/1.x', '1.4.0'],

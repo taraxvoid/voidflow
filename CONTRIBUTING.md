@@ -63,7 +63,7 @@ because `npm pack` drops files named `.gitignore`. `{{version}}`, `{{sha}}`,
 
 ## Branches and commits
 
-Feature PRs target `next`. Use [Conventional Commits](https://www.conventionalcommits.org);
+Feature PRs target `main`. Use [Conventional Commits](https://www.conventionalcommits.org);
 they drive version bumps and the changelog. See [`RELEASING.md`](RELEASING.md)
 for the release flow.
 

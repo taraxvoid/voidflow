@@ -264,8 +264,8 @@ patches and majors may change and how deprecations reach you.
 
 ### Trying a canary release
 
-Canaries publish to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init --kind tool --apply`
-(or the `bunx` form, or `--kind site`) runs the newest one. If your npm config has a release-age
+Canaries are published on demand, not on every merge, to the `next` dist-tag, so `npx @taraxvoid/voidflow@next init`
+(or the `bunx` form) runs the newest one. If your npm config has a release-age
 cooldown (`min-release-age` or `before`), a fresh canary is filtered
 out and `@next` silently resolves to an older version. For the unscoped mirror
 this fails with `could not determine executable to run`, because the old
