@@ -29,9 +29,8 @@ npx @taraxvoid/voidflow init --kind tool --apply    # a bun CLI, TUI or library
 
 ## Quick start
 
-You need Node 24+ or Bun, a git work tree, and the
-[`gh` CLI](https://cli.github.com/) logged in with admin on the repo (for the
-settings half). `bunx` works anywhere `npx` does.
+- Node 24+ or Bun
+- [`gh` CLI](https://cli.github.com/) with a repo-admin token
 
 ```sh
 # New Astro site
