@@ -516,13 +516,19 @@ describe('error messages', () => {
 
     test('a Worker missing from a non-empty list names the deploy command', () => {
         const m = missingWorkerMessage('site-preview', a, 3, 'preview')
-        expect(m).not.toContain('Read-Only')
+        expect(m).toContain('may not include it')
         expect(m).toContain('wrangler deploy --env preview')
         expect(m).toContain(`account_id ${a}`)
         expect(m).toContain('only Previews')
         expect(missingWorkerMessage('site', a, 3)).toContain(
             '(wrangler deploy, with',
         )
+    })
+
+    test('an unknown wrangler env guesses no deploy command', () => {
+        const m = missingWorkerMessage('site-preview', a, 3, null)
+        expect(m).not.toContain('(wrangler deploy,')
+        expect(m).toContain('not the top-level one')
     })
 
     test('a missing zone hints at Zone Read either way', () => {

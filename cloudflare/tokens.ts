@@ -286,9 +286,16 @@ export function missingZoneMessage(
         : `zone ${zone} not found in account ${account}; if it is there, the admin token's Zone Read does not include it`
 }
 
-/** The command that deploys an env's Worker, `block` being its wrangler env. */
-export const deployCommand = (block?: string) =>
-    block === undefined ? 'wrangler deploy' : `wrangler deploy --env ${block}`
+/**
+ * The command that deploys an env's Worker, `block` being its wrangler env;
+ * `null` when it is unknown (explicit worker override), so none is guessed.
+ */
+export const deployCommand = (block?: string | null) =>
+    block === null
+        ? 'wrangler deploy with the --env of the wrangler block that holds this Worker (not the top-level one, which may be production)'
+        : block === undefined
+          ? 'wrangler deploy'
+          : `wrangler deploy --env ${block}`
 
 /**
  * A Worker missing from the account's scripts list. `scripts` is how many the
@@ -298,13 +305,13 @@ export function missingWorkerMessage(
     worker: string,
     account: string,
     scripts: number,
-    block?: string,
+    block?: string | null,
 ): string {
     const deploy = `deploy it once with your own login (${deployCommand(block)}, with account_id ${account} in the wrangler config so it lands in this account), then re-run. A Worker the dashboard shows with only Previews and no deployed script does not count`
     if (scripts === 0) {
         return `Worker "${worker}": account ${account} lists no Workers to the admin token. It likely lacks Workers Scripts Read (Workers Metadata Read-Only in the dashboard) on this account; if the account has no Workers yet, ${deploy}`
     }
-    return `Worker "${worker}" is not among the ${scripts} Worker(s) in account ${account}: ${deploy}`
+    return `Worker "${worker}" is not among the ${scripts} Worker(s) in account ${account}; if it is deployed there, the admin token's Workers Scripts Read (Workers Metadata Read-Only in the dashboard) may not include it. Otherwise ${deploy}`
 }
 
 /**

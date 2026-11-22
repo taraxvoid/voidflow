@@ -369,8 +369,35 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
             env.worker && env.zones
                 ? undefined
                 : await wranglerAt(`${repo}:${file}`)
-        const t = resolveTarget(env, wrangler, zoneNames)
-        let block = env.wranglerEnv
+        let t: ReturnType<typeof resolveTarget>
+        try {
+            t = resolveTarget(env, wrangler, zoneNames)
+        } catch (e) {
+            // An env block only in this checkout: say so, rather than the bare error.
+            if (
+                wrangler !== undefined &&
+                /has no env\./.test((e as Error).message)
+            ) {
+                let inLocal = false
+                try {
+                    const lp = localWrangler(file)
+                    if (lp !== undefined) {
+                        fromWrangler(lp, env.env, env.wranglerEnv)
+                        inLocal = true
+                    }
+                } catch {}
+                if (inLocal)
+                    throw new Error(
+                        `${env.env}: ${(e as Error).message} on ${file}'s default branch, but the local ${file} has it; the plan reads the default branch's. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+                    )
+            }
+            throw e
+        }
+        // null: an explicit worker with no wrangler env named, so unknown
+        let block: string | null | undefined =
+            wrangler === undefined && env.wranglerEnv === undefined
+                ? null
+                : env.wranglerEnv
         let source = 'worker and zones from the config'
         if (wrangler !== undefined) {
             source = `${file} on the default branch`
