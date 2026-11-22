@@ -20,6 +20,7 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { nounVerb } from './lib/noun-verb.ts'
 import { packageRoot } from './lib/package-root.ts'
 
 type Main = (argv: string[], prog: string) => Promise<void>
@@ -84,6 +85,7 @@ const usage = () =>
             .filter(([, c]) => !c.hidden)
             .map(([name, c]) => `  ${name.padEnd(10)} ${c.about}`),
         '',
+        'Fleet tools also read noun first: `voidflow rulesets plan`, `voidflow tokens cf apply`.',
         'Run `voidflow <command> --help` for its flags, or `voidflow --version`.',
     ].join('\n')
 
@@ -105,13 +107,18 @@ if (name.startsWith('-')) {
     )
     process.exit(2)
 }
-const cmd = COMMANDS[name]
+
+const swapped = nounVerb(name, rest)
+const cmd = COMMANDS[swapped ? swapped.verb : name]
 if (!cmd) {
     console.error(`unknown command ${JSON.stringify(name)}\n\n${usage()}`)
     process.exit(2)
 }
 try {
-    await (await cmd.load()).main(rest, `voidflow ${name}`)
+    await (await cmd.load()).main(
+        swapped ? swapped.argv : rest,
+        `voidflow ${swapped ? swapped.verb : name}`,
+    )
 } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e))
     console.error(`voidflow ${name}: ${err.message}`)

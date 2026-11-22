@@ -126,6 +126,11 @@ voidflow check [rulesets|tokens [provider]] [--repo <name>]   # read-only: exit 
 voidflow apply  rulesets|tokens [provider]  (--repo <name> | --entire-fleet)
 ```
 
+Each reads noun first too: `voidflow rulesets plan`, `voidflow rulesets apply
+--repo <name>`, `voidflow tokens cf check` (or `tokens check cf`). Same command,
+same flags. `--apply` and `--check` are not flags of the verbs: the verb is
+the command, so `voidflow plan rulesets --apply` is refused.
+
 - `plan` and `check` cover every repo by default; `--repo` narrows to one
   (an `owner/name`, or a bare name, which matches it under every owner).
   With no tool named they run each configured tool, rulesets first, and a

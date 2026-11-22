@@ -58,8 +58,10 @@ export type RepoTool = Tool | 'settings'
 
 /** Flags the verb sets itself, or that belong to the per-tool command only. */
 const REFUSED: Record<string, string> = {
-    '--apply': 'the verb decides; use `voidflow apply`',
-    '--check': 'the verb decides; use `voidflow check`',
+    '--apply':
+        'plan and check never write; run `voidflow apply <tool>` (or `voidflow <tool> apply`)',
+    '--check':
+        'the verb is the command; run `voidflow check <tool>` (or `voidflow <tool> check`)',
     '--try': 'use `voidflow tokens cf --try`',
     '--groups': 'use `voidflow tokens cf --groups`',
     '--repo-config':
