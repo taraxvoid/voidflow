@@ -14,7 +14,9 @@
  *
  * Each token is owned by its env's account (envs can live in different
  * accounts) and scoped to one Worker (Workers Editor on that
- * Worker), plus Workers Routes Write on the zones of its routes.
+ * Worker), plus Workers Routes Write on the zones of its routes. An env that
+ * sets `d1` also gets D1 Write on its account (the permission has no
+ * per-database scope), for a deploy that runs `wrangler d1 migrations apply`.
  * Custom Domains do not support per-Worker roles yet; when a deploy proves the
  * zone grant is not enough, record a `fallback` and the token also gets
  * account-wide Workers Scripts Write. Every plan and every deploy says so.
@@ -48,7 +50,18 @@ export type EnvConfig = {
      * token, which deploys no routes).
      */
     zones?: string[]
-    /** Wrangler config path in the repo (default branch). Default: wrangler.jsonc. */
+    /**
+     * Grant D1 Write on every database in the env's account, for a deploy
+     * that applies migrations. Cloudflare scopes that permission to the
+     * account only. Default: off, so a preview token never gets D1 just
+     * because it shares a wrangler config with prod.
+     */
+    d1?: boolean
+    /**
+     * Wrangler config path in the repo, read from its default branch (a plan
+     * inside a checkout warns when the local file resolves differently).
+     * Default: wrangler.jsonc.
+     */
     wrangler?: string
     /**
      * Wrangler `env.<name>` block to read. Default: the block named like
@@ -115,12 +128,30 @@ export const WORKER_EDITOR = [
     'e086da7e2179491d91ee5f35b3ca210a',
     'c1fde68c7bcc44588cbb6ddbc16d6480',
 ]
+/** Account > D1 > Write. Account-scoped only: no per-database resource. */
+export const D1_WRITE = '09b2857d1c31407795e75e3fed8617a1'
 /** Zone > Workers Routes > Write: add or keep routes and custom domains. */
 export const WORKERS_ROUTES_WRITE = '28f4b596e7d643029c524985477ae49a'
 /** Legacy account-wide Workers Scripts Write, used only for a fallback. */
 export const WORKERS_SCRIPTS_WRITE = 'e086da7e2179491d91ee5f35b3ca210a'
 
-export const tokenName = (repo: string, env: string) => `${TAG}:${repo}:${env}`
+export const tokenName = (repo: string, env: string) =>
+    `${TAG}:${repo.toLowerCase()}:${env}`
+
+/**
+ * Whether two token names are the same token: the tag and repo compare
+ * case-insensitively (a former config may have cased the repo differently),
+ * the env after the last colon compares exactly.
+ */
+export function sameToken(a: string, b: string): boolean {
+    const split = (n: string) => {
+        const i = n.lastIndexOf(':')
+        return [n.slice(0, i).toLowerCase(), n.slice(i + 1)]
+    }
+    const [ar, ae] = split(a)
+    const [br, be] = split(b)
+    return ar === br && ae === be
+}
 
 /** The account an env's Worker and token live in. */
 export const envAccount = (cfg: RepoConfig, env: EnvConfig) =>
@@ -144,6 +175,17 @@ export const repoAccounts = (cfg: RepoConfig) => [
 
 type Route = string | { pattern: string; zone_name?: string }
 
+/** What an env deploys, as read from its wrangler config. */
+export type WranglerTarget = {
+    worker: string
+    hosts: string[]
+    zones: string[]
+    /** The `env.<name>` block used, if any: what `wrangler --env` takes. */
+    block?: string
+    /** `account_id`, when the config pins one (env block, else top level). */
+    account?: string
+}
+
 /**
  * The Worker name and route hostnames an env deploys, read from a parsed
  * wrangler config the way wrangler reads it: an `env.<name>` block's `name`,
@@ -154,8 +196,13 @@ export function fromWrangler(
     config: unknown,
     env: string,
     wranglerEnv?: string,
-): { worker: string; hosts: string[]; zones: string[] } {
-    type Block = { name?: string; route?: Route; routes?: Route[] }
+): WranglerTarget {
+    type Block = {
+        name?: string
+        route?: Route
+        routes?: Route[]
+        account_id?: string
+    }
     const top = config as Block & { env?: Record<string, Block> }
     const block = wranglerEnv ?? (top.env?.[env] ? env : undefined)
     const sub = block === undefined ? undefined : top.env?.[block]
@@ -172,7 +219,11 @@ export function fromWrangler(
         if (typeof r !== 'string' && r.zone_name) zones.push(r.zone_name)
         else hosts.push(routeHost(typeof r === 'string' ? r : r.pattern))
     }
-    return { worker, hosts, zones }
+    const out: WranglerTarget = { worker, hosts, zones }
+    if (block !== undefined) out.block = block
+    const account = sub?.account_id ?? top.account_id
+    if (account) out.account = account
+    return out
 }
 
 /** `*.example.com/api/*` and `https://example.com:443/` to their hostname. */
@@ -206,10 +257,96 @@ export function resolveTarget(
     const { hosts, zones } = from()
     for (const h of hosts) {
         const z = zoneOf(h, zoneNames)
-        if (!z) throw new Error(`route host ${h} is in no zone of the account`)
+        if (!z) throw new Error(noZoneMessage(h, zoneNames))
         zones.push(z)
     }
     return { worker, zones: [...new Set(zones)].sort() }
+}
+
+// ---- error messages ---------------------------------------------------------
+//
+// Cloudflare answers a list call the admin token lacks the permission for with
+// success and an empty list, not a 403, so "not found" may mean "not visible".
+
+/** A route host in none of the zones the admin token sees in the account. */
+export function noZoneMessage(host: string, zoneNames: string[]): string {
+    return zoneNames.length === 0
+        ? `route host ${host}: the account lists no zones to the admin token; it likely lacks Zone Read on this account`
+        : `route host ${host} is in none of the account's zones (${zoneNames.join(', ')}); if its zone is in this account, the admin token's Zone Read does not include it`
+}
+
+/** A zone name the admin token does not see in the account. */
+export function missingZoneMessage(
+    zone: string,
+    account: string,
+    zoneNames: string[],
+): string {
+    return zoneNames.length === 0
+        ? `zone ${zone}: account ${account} lists no zones to the admin token; it likely lacks Zone Read on this account`
+        : `zone ${zone} not found in account ${account}; if it is there, the admin token's Zone Read does not include it`
+}
+
+/**
+ * The command that deploys an env's Worker, `block` being its wrangler env;
+ * `null` when it is unknown (explicit worker override), so none is guessed.
+ */
+export const deployCommand = (block?: string | null) =>
+    block === null
+        ? 'wrangler deploy with the --env of the wrangler block that holds this Worker (not the top-level one, which may be production)'
+        : block === undefined
+          ? 'wrangler deploy'
+          : `wrangler deploy --env ${block}`
+
+/**
+ * A Worker missing from the account's scripts list. `scripts` is how many the
+ * list had: none at all usually means the admin token can't list them.
+ */
+export function missingWorkerMessage(
+    worker: string,
+    account: string,
+    scripts: number,
+    block?: string | null,
+): string {
+    const deploy = `deploy it once with your own login (${deployCommand(block)}, with account_id ${account} in the wrangler config so it lands in this account), then re-run. A Worker the dashboard shows with only Previews and no deployed script does not count`
+    if (scripts === 0) {
+        return `Worker "${worker}": account ${account} lists no Workers to the admin token. It likely lacks Workers Scripts Read (Workers Metadata Read-Only in the dashboard) on this account; if the account has no Workers yet, ${deploy}`
+    }
+    return `Worker "${worker}" is not among the ${scripts} Worker(s) in account ${account}; if it is deployed there, the admin token's Workers Scripts Read (Workers Metadata Read-Only in the dashboard) may not include it. Otherwise ${deploy}`
+}
+
+/**
+ * Warnings about an env's wrangler config: an `account_id` other than the
+ * env's account (wrangler would deploy there), and a local copy that resolves
+ * to another Worker or zones than the one the plan read.
+ */
+export function wranglerWarnings(opts: {
+    env: string
+    account: string
+    file: string
+    used: WranglerTarget
+    local?: WranglerTarget | Error
+}): string[] {
+    const { env, account, file, used, local } = opts
+    const out: string[] = []
+    if (used.account && used.account !== account) {
+        out.push(
+            `${env}: ${file} sets account_id ${used.account}, not the env's account ${account}; wrangler deploys there`,
+        )
+    }
+    if (local === undefined) return out
+    const show = (t: WranglerTarget) =>
+        `Worker ${t.worker}, routes ${[...t.hosts, ...t.zones].join(', ') || 'none'}${t.account ? `, account_id ${t.account}` : ''}`
+    const sameAs = (t: WranglerTarget) => show(t) === show(used)
+    if (local instanceof Error) {
+        out.push(
+            `${env}: the local ${file} does not resolve (${local.message}); the plan uses the default branch's`,
+        )
+    } else if (!sameAs(local)) {
+        out.push(
+            `${env}: the local ${file} (${show(local)}) differs from the default branch's (${show(used)}), which the plan uses. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+        )
+    }
+    return out
 }
 
 // ---- config from elsewhere --------------------------------------------------
@@ -219,6 +356,7 @@ const ENV_FIELDS = [
     'secret',
     'worker',
     'zones',
+    'd1',
     'wrangler',
     'wranglerEnv',
     'account',
@@ -285,6 +423,8 @@ export function checkRepos(x: unknown): Record<string, RepoConfig> {
                 (!Array.isArray(env.zones) || !env.zones.every(isStr))
             )
                 bad(`${e}.zones`, 'not a list of zone names')
+            if (env.d1 !== undefined && typeof env.d1 !== 'boolean')
+                bad(`${e}.d1`, 'not true or false')
             if (env.account !== undefined && !isAcct(env.account))
                 bad(`${e}.account`, 'not a 32-hex account id')
             if (
@@ -346,6 +486,13 @@ export function policies(
             effect: 'allow',
             permission_groups: [{ id: WORKERS_ROUTES_WRITE }],
             resources,
+        })
+    }
+    if (env.d1) {
+        out.push({
+            effect: 'allow',
+            permission_groups: [{ id: D1_WRITE }],
+            resources: { [acct]: '*' },
         })
     }
     if (env.fallback) {
@@ -411,7 +558,7 @@ export function plan(
     want: Policy[],
     have: Token[],
     now: Date,
-    opts: { rotate?: boolean; secretMissing?: boolean } = {},
+    opts: { rotate?: boolean; secretMissing?: boolean; name?: string } = {},
 ): Action[] {
     if (have.length === 0) return [{ kind: 'create', reason: 'missing' }]
     if (have.length > 1) {
@@ -444,6 +591,11 @@ export function plan(
     }
     if (normalise(token.policies) !== normalise(want)) {
         return [{ kind: 'update', token, reason: 'policies differ' }]
+    }
+    // A token found under a differently cased repo name is renamed to the
+    // canonical one (the update PUT sets the name).
+    if (opts.name !== undefined && token.name !== opts.name) {
+        return [{ kind: 'update', token, reason: 'name differs' }]
     }
     return [{ kind: 'ok', token }]
 }

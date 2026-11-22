@@ -3,27 +3,52 @@
  * settings voidflow wants. Safe to re-run: identical files are `unchanged`,
  * settings already as desired are `unchanged`.
  *
- *   voidflow init --kind tool                    # files and settings, current dir
- *   voidflow init --kind site --dry-run ../app   # plan only
- *   voidflow init --preset settings              # settings only, no --kind needed
+ *   voidflow init --kind tool                    # plan only (the default), current dir
+ *   voidflow init --kind site --apply ../app     # write the files, change the settings
+ *   voidflow init --preset settings --apply      # settings only, no --kind needed
  *
  * node: APIs only, so it runs under Node 24+ as well as Bun.
  */
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { VoidflowConfig } from '../config/index.ts'
+import { enabledGroups } from '../config/settings.ts'
+import { checkFleet, type Fleet } from '../rulesets/index.ts'
+import {
+    credentialNotes,
+    defaultGhActionsLock,
+    type GhActionsLock,
+    lockScope,
+    relockCredentials,
+    runActionsLock,
+} from './init/actions-lock.ts'
+import { colorEnabled, type Paint, painter, statusStyle } from './init/color.ts'
+import { mergeSettings, withSettings } from './init/config-settings.ts'
 import {
     applyFiles,
     FILE_ITEMS,
     type FileAction,
     fileNames,
     planFiles,
+    selectedItems,
 } from './init/files.ts'
-import { type Gh, ghAvailable, ghCli, resolveRepo } from './init/gh.ts'
+import { addToFleet } from './init/fleet.ts'
+import {
+    credentialSource,
+    type Gh,
+    ghAvailable,
+    ghCli,
+    ownerType,
+    resolveRepo,
+    rulesetsPlanGated,
+} from './init/gh.ts'
 import {
     resolveSha as defaultResolveSha,
     type Kind,
     type RenderCtx,
 } from './init/render.ts'
+import { defaultFleet, runRulesets } from './init/rulesets.ts'
 import {
     manualReminders,
     runSettings,
@@ -31,8 +56,11 @@ import {
     settingNames,
 } from './init/settings.ts'
 import { parseOrExit } from './lib/args.ts'
+import { loadOrExit } from './lib/config.ts'
+import { configPath } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import { capture } from './lib/proc.ts'
+import { CONFIG_FILE, loadVoidflowConfig } from './lib/repo-config.ts'
 
 /**
  * Presets are data: each names the file items it selects and whether the
@@ -40,11 +68,16 @@ import { capture } from './lib/proc.ts'
  */
 export const PRESETS: Record<
     string,
-    { files: 'all' | string[] | null; settings: boolean }
+    { files: 'all' | string[] | null; settings: boolean; rulesets?: boolean }
 > = {
     full: { files: 'all', settings: true },
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
+    ci: { files: ['ci'], settings: false },
+    codeowners: { files: ['codeowners'], settings: false },
+    // Opt-in only: rulesets block direct pushes to main, which surprises a
+    // fresh repo before its first push.
+    rulesets: { files: null, settings: false, rulesets: true },
 }
 
 const KINDS: Kind[] = ['tool', 'site']
@@ -52,26 +85,39 @@ const KINDS: Kind[] = ['tool', 'site']
 const OPTIONS = {
     kind: { type: 'string' },
     preset: { type: 'string', default: 'full' },
-    'skip-file': { type: 'string', multiple: true, default: [] as string[] },
-    'skip-setting': { type: 'string', multiple: true, default: [] as string[] },
+    skip: { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
+    'enable-agentic': { type: 'boolean', default: false },
+    'agentic-stage': { type: 'string', default: 'shadow' },
+    'enable-actions-lock': { type: 'boolean', default: false },
+    'enable-actions-relock': { type: 'boolean', default: false },
     repo: { type: 'string' },
+    owner: { type: 'string' },
+    config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
     'dry-run': { type: 'boolean', default: false },
+    'no-color': { type: 'boolean', default: false },
+    apply: { type: 'boolean', default: false },
 } as const
 
 const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
 
-  --kind tool|site        which starter files to write (not needed with --preset settings)
-  --preset <name>         ${Object.keys(PRESETS).join('|')} (default full)
-  --skip-file <name>      leave this file out (repeatable)
-  --skip-setting <name>   leave this setting alone (repeatable)
+  --kind tool|site        required, except with --preset settings (it writes no files)
+  --preset <name>         ${Object.keys(PRESETS).join('|')}(default full)
+  --skip <name>           leave this file or setting out (repeatable, names below)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
-  --enable-ai-scan        opt in: AI Scan for pull requests
+  --enable-ai-scan        opt in: AI Scan for pull requests and the repository
+  --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
+  --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
+  --enable-actions-lock   opt in: verify-lockfile.yml, then run gh actions-lock once to write .github/workflows/actions.lock
+  --enable-actions-relock opt in (implies --enable-actions-lock): relock-actions.yml, which relocks and pushes actions.lock on Renovate PRs and PRs labelled relock-actions; needs a GitHub App
   --repo owner/name       the GitHub repo (default: the origin remote)
-  -f, --force             overwrite files that differ
-  --dry-run               plan both halves, write and change nothing
+  --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
+  --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
+  --no-color              no ANSI colors (also off when NO_COLOR is set or stdout is not a terminal; FORCE_COLOR=1 forces them on)
+  --apply                 write the files and change the settings (default: plan only)
+  -f, --force             with --apply, overwrite files that differ
 
 dir defaults to the current directory and must be a git work tree. Settings
 need the gh CLI, authenticated as someone with admin on the repo.
@@ -81,7 +127,14 @@ Settings: ${settingNames().join(', ')}`
 
 type Deps = {
     gh?: Gh
+    /** Runs `gh aw` in dir; for tests. */
+    ghAw?: (
+        args: string[],
+        dir: string,
+    ) => Promise<{ code: number; err: string }>
     resolveSha?: (version: string) => Promise<string | null>
+    /** Runs `gh actions-lock` in dir; for tests. */
+    ghActionsLock?: GhActionsLock
 }
 
 function fail(msg: string, prog: string): never {
@@ -89,18 +142,85 @@ function fail(msg: string, prog: string): never {
     process.exit(2)
 }
 
-const row = (status: string, name: string, extra = '') =>
-    `  ${status.padEnd(16)}${extra ? `${name.padEnd(28)} ${extra}` : name}`
+/** Set once per run from the flags and environment; plain text until then. */
+let paint: Paint = (_style, text) => text
 
-/** The cron minute from a voidflow-written ci.yml, so a re-run stays unchanged. */
+const row = (status: string, name: string, extra = '') => {
+    const style = statusStyle(status)
+    const label = status.padEnd(16)
+    return `  ${style ? paint(style, label) : label}${extra ? `${name.padEnd(28)} ${extra}` : name}`
+}
+
+/**
+ * The cron minute from a voidflow-written ci.yml, or else verify-lockfile.yml
+ * (which shares it), so a re-run stays unchanged even when ci.yml is skipped.
+ */
 function existingCronMinute(dir: string): number | null {
-    const path = join(dir, '.github/workflows/ci.yml')
-    if (!existsSync(path)) return null
-    const text = readFileSync(path, 'utf8')
-    if (!text.includes('Written by voidflow v')) return null
-    const m = /cron:\s*'(\d{1,2}) 6 \* \* \*'/.exec(text)
-    const n = m ? Number(m[1]) : Number.NaN
-    return n >= 0 && n <= 59 ? n : null
+    const sources: [string, RegExp][] = [
+        ['ci.yml', /cron:\s*'(\d{1,2}) 6 \* \* \*'/],
+        ['verify-lockfile.yml', /cron:\s*'(\d{1,2}) 7 \* \* 1'/],
+    ]
+    for (const [file, re] of sources) {
+        const path = join(dir, '.github/workflows', file)
+        if (!existsSync(path)) continue
+        const text = readFileSync(path, 'utf8')
+        if (!text.includes('Written by voidflow v')) continue
+        const m = re.exec(text)
+        const n = m ? Number(m[1]) : Number.NaN
+        if (n >= 0 && n <= 59) return n
+    }
+    return null
+}
+
+async function defaultGhAw(
+    args: string[],
+    dir: string,
+): Promise<{ code: number; err: string }> {
+    try {
+        const r = await capture(['gh', 'aw', ...args], undefined, {
+            timeoutMs: 120_000,
+            cwd: dir,
+        })
+        return { code: r.code, err: r.err }
+    } catch (e) {
+        return { code: 127, err: (e as Error).message }
+    }
+}
+
+/** The gh-aw version the reusable agentic-locks workflow compiles with by default. */
+function agenticLocksGhAwVersion(): string | null {
+    try {
+        const text = readFileSync(
+            join(packageRoot(), 'templates/common/gh-aw-version'),
+            'utf8',
+        ).trim()
+        return /^v\d[\w.-]*$/.test(text) ? text : null
+    } catch {
+        return null
+    }
+}
+
+/** Install the deps-review workflow with `gh aw add`, pinned to this version. */
+async function installDepsReview(
+    dir: string,
+    version: string,
+    dryRun: boolean,
+    run: NonNullable<Deps['ghAw']>,
+): Promise<{ name: string; status: string; detail: string }> {
+    const name = 'deps-review'
+    const spec = `taraxvoid/voidflow/agentic@v${version}`
+    if (existsSync(join(dir, '.github/workflows/deps-review.md')))
+        return { name, status: 'unchanged', detail: '' }
+    if (dryRun)
+        return { name, status: 'would-apply', detail: `gh aw add ${spec}` }
+    const r = await run(['add', spec], dir)
+    return r.code === 0
+        ? { name, status: 'applied', detail: `gh aw add ${spec}` }
+        : {
+              name,
+              status: 'failed',
+              detail: `${r.err.trim().split('\n')[0] || `exit ${r.code}`}; install gh-aw and run: gh aw add ${spec}`,
+          }
 }
 
 async function isWorkTree(dir: string): Promise<boolean> {
@@ -116,6 +236,25 @@ async function isWorkTree(dir: string): Promise<boolean> {
     } catch {
         return false
     }
+}
+
+/**
+ * The rulesets config file `--config` names, read the way the fleet verbs
+ * read it (configPath: `~/` is home, relative is against VOIDFLOW_CONFIG_BASE
+ * else cwd): a directory means its rulesets.ts.
+ */
+function rulesetsFile(config: string): string {
+    const file = configPath(config, {
+        env: process.env,
+        cwd: process.cwd(),
+        home: homedir(),
+    })
+    try {
+        if (statSync(file).isDirectory()) return join(file, 'rulesets.ts')
+    } catch {
+        // missing: reported where it is read
+    }
+    return file
 }
 
 /** `prog` names the command in the --help usage; `deps` are for tests. */
@@ -146,30 +285,86 @@ export async function main(
     if (wantFiles && kind === undefined)
         fail(`--preset ${values.preset} needs --kind tool|site`, prog)
 
-    const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
-    for (const n of values['skip-file']) {
-        if (!validFiles.includes(n))
-            fail(
-                `unknown --skip-file "${n}", expected one of: ${validFiles.join(', ')}`,
-                prog,
-            )
+    if (preset.rulesets && !values.config && kind !== 'tool') {
+        fail(
+            kind === 'site'
+                ? '--preset rulesets for a site needs --config <module> (no default site rulesets yet)'
+                : '--preset rulesets needs --kind tool or --config <module>',
+            prog,
+        )
     }
-    for (const n of values['skip-setting']) {
-        if (!settingNames().includes(n)) {
+
+    const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
+    const valid = [...validFiles, ...settingNames()]
+    for (const n of values.skip) {
+        if (!valid.includes(n))
             fail(
-                `unknown --skip-setting "${n}", expected one of: ${settingNames().join(', ')}`,
+                `unknown --skip "${n}", expected one of: ${valid.join(', ')}`,
                 prog,
             )
-        }
     }
 
     const dir = resolve(positionals[0] ?? '.')
     if (!(await isWorkTree(dir)))
         fail(`${dir} is not a git work tree (run git init first)`, prog)
 
-    const dryRun = values['dry-run']
+    const owner = values.owner
+    if (
+        owner !== undefined &&
+        !/^@[A-Za-z0-9][\w-]*(?:\/[A-Za-z0-9][\w-]*)?$/.test(owner)
+    )
+        fail(`invalid --owner "${owner}", expected @user or @org/team`, prog)
+
+    const stage = values['agentic-stage']
+    if (stage !== 'shadow' && stage !== 'gate')
+        fail(
+            `unknown --agentic-stage "${stage}", expected shadow or gate`,
+            prog,
+        )
+
+    if (values.force && !values.apply) fail('--force needs --apply', prog)
+    const dryRun = !values.apply
     const enablePvr = values['enable-pvr']
     const enableAiScan = values['enable-ai-scan']
+    const enableAgentic = values['enable-agentic']
+    const enableActionsRelock = values['enable-actions-relock']
+    // Relock without verify is half a feature: relock implies lock.
+    const enableActionsLock =
+        values['enable-actions-lock'] || enableActionsRelock
+    const flagGroups = (
+        [
+            [enablePvr, 'pvr'],
+            [enableAiScan, 'ai-scan'],
+            [enableAgentic, 'agentic'],
+            [enableActionsLock, 'actions-lock'],
+            [enableActionsRelock, 'actions-relock'],
+        ] as const
+    )
+        .filter(([on]) => on)
+        .map(([, g]) => g)
+    // A repo's voidflow.config.ts adds its settings to the flags', and gets
+    // the flags' written back. A broken one stops here: the rewrite would
+    // throw it away.
+    const configFile = join(dir, CONFIG_FILE)
+    let existingConfig: VoidflowConfig | undefined
+    if (existsSync(configFile)) {
+        try {
+            existingConfig = await loadVoidflowConfig(configFile)
+        } catch (e) {
+            console.error((e as Error).message)
+            process.exit(2)
+        }
+    }
+    const merged = mergeSettings(
+        existingConfig?.settings,
+        flagGroups,
+        values.skip,
+    )
+    const enabled = enabledGroups(merged.settings?.enable)
+    const settingSkip = new Set([
+        ...values.skip,
+        ...(merged.settings?.skip ?? []),
+    ])
     const version = JSON.parse(
         readFileSync(join(packageRoot(), 'package.json'), 'utf8'),
     ).version as string
@@ -185,6 +380,8 @@ export async function main(
     }
 
     const out: string[] = []
+    const refusal: string[] = []
+    paint = painter(colorEnabled(values['no-color']))
     const notes: string[] = []
     let exitCode = 0
 
@@ -198,6 +395,41 @@ export async function main(
                 `could not resolve the v${version} tag (offline?); ci.yml pins @v${version}, Renovate pins the digest later`,
             )
         }
+        const picked = preset.files === 'all' ? null : new Set(preset.files)
+        // An organization cannot be a code owner, only its users and teams.
+        let ownerHandle = owner ?? null
+        const codeownersWanted =
+            (picked === null || picked.has('codeowners')) &&
+            !values.skip.includes('codeowners')
+        let ownerWhy: string | null = null
+        if (owner === undefined && codeownersWanted && !repo)
+            ownerWhy = 'there is no repo to take the owner from'
+        if (owner === undefined && codeownersWanted && repo) {
+            const login = repo.split('/')[0] as string
+            const gh = deps.gh ?? ghCli()
+            const type =
+                (await ghAvailable(gh)) === null
+                    ? await ownerType(gh, login)
+                    : null
+            if (type === 'Organization') {
+                ownerWhy = `${login} is an organization, which cannot be a code owner`
+            } else {
+                ownerHandle = `@${login}`
+                if (type === null)
+                    notes.push(
+                        `could not tell whether ${login} is a user; if it is an organization, pass --owner @${login}/team or @user for CODEOWNERS`,
+                    )
+            }
+        }
+        // No usable owner: a placeholder would ship a CODEOWNERS that owns
+        // nothing, so require --owner instead of writing it.
+        const dropCodeowners = ownerWhy !== null
+        if (ownerWhy !== null) {
+            const need = `${ownerWhy}; pass --owner @user or @org/team (needs write access)`
+            if (preset.files !== 'all' && picked?.size === 1)
+                fail(`cannot write CODEOWNERS: ${need}`, prog)
+            notes.push(`CODEOWNERS skipped: ${need}`)
+        }
         const ctx: RenderCtx = {
             version,
             sha,
@@ -205,34 +437,153 @@ export async function main(
             repo,
             cronMinute:
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
+            stage,
+            owner: ownerHandle,
+            config: withSettings(existingConfig ?? { kind }, merged.settings),
         }
-        const picked = preset.files === 'all' ? null : new Set(preset.files)
         const skip = new Set([
-            ...values['skip-file'],
+            ...values.skip,
+            ...(dropCodeowners ? ['codeowners'] : []),
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
-        fileActions = planFiles(
-            dir,
-            { kind, skip, force: values.force, enablePvr },
-            ctx,
-        )
+        const sel = {
+            kind,
+            skip,
+            force: values.force,
+            enablePvr,
+            enableAgentic: values['enable-agentic'],
+            enableActionsLock,
+            enableActionsRelock,
+            configChange:
+                existingConfig && merged.added.length > 0
+                    ? `${merged.added.join(', ')}; comments in the file are not kept`
+                    : undefined,
+        }
+        const scope = enableActionsLock
+            ? lockScope(
+                  dir,
+                  selectedItems(sel).map((i) => i.target),
+                  enableAgentic,
+              )
+            : { paths: null, skipped: [] }
+        if (scope.skipped.length > 0)
+            notes.push(
+                `actions-lock is limited to plainly named workflows; lock these by hand: ${scope.skipped.join(', ')}`,
+            )
+        fileActions = planFiles(dir, { ...sel, lockPaths: scope.paths }, ctx)
         const conflicts = fileActions.filter((a) => a.status === 'conflict')
-        out.push(dryRun ? 'files (dry run):' : 'files:')
-        for (const a of fileActions)
+        const blocked = conflicts.length > 0
+        // Rows that would change a file read "would ..." whenever nothing is
+        // written (dry run, or blocked by a conflict), so a row never claims
+        // a change that did not happen.
+        const writesNothing = dryRun || blocked
+        const changes = new Set(['create', 'overwrite', 'merge'])
+        out.push(
+            blocked
+                ? 'files (nothing written):'
+                : dryRun
+                  ? 'files (dry run):'
+                  : 'files:',
+        )
+        for (const a of fileActions) {
+            const status =
+                writesNothing && changes.has(a.status)
+                    ? `would ${a.status}`
+                    : a.status
+            const detail =
+                a.detail ??
+                (a.status === 'conflict'
+                    ? 'exists and differs from the voidflow template'
+                    : '')
             out.push(
                 row(
-                    a.status,
+                    status,
                     a.name,
-                    [a.target, a.detail].filter(Boolean).join('  '),
+                    [a.target, detail].filter(Boolean).join('  '),
                 ),
             )
-        if (conflicts.length > 0) {
+        }
+        if (blocked) {
             exitCode = 1
-            out.push(
-                `  nothing written: ${conflicts.length} file(s) differ (${conflicts.map((a) => a.target).join(', ')}); re-run with --force to overwrite`,
+            // Printed first, above every section, so the refusal is the
+            // first thing read.
+            refusal.push(
+                paint(
+                    'red',
+                    `refused: nothing was written, ${conflicts.length} existing file(s) differ from the voidflow templates:`,
+                ),
+                ...conflicts.map(
+                    (a) => `  ${a.target}${a.detail ? `  (${a.detail})` : ''}`,
+                ),
+                `re-run with ${paint('bold', '--force')} to overwrite them, or ${paint('bold', '--skip <name>')} to leave one alone`,
+                '',
             )
         } else if (!dryRun) {
             applyFiles(dir, fileActions)
+        }
+        if (fileActions.some((a) => a.name === 'codeowners')) {
+            const gh = deps.gh ?? ghCli()
+            if (
+                repo &&
+                (await ghAvailable(gh)) === null &&
+                (await rulesetsPlanGated(gh, repo))
+            )
+                notes.push(
+                    `CODEOWNERS is written but not enforced: ${repo} is private on a plan without rulesets (upgrade to GitHub Pro or make it public)`,
+                )
+        }
+        const agenticPlanned = fileActions.some((a) => a.name === 'agentic')
+        if (enableAgentic && (!agenticPlanned || conflicts.length > 0)) {
+            notes.push(
+                conflicts.length > 0
+                    ? 'deps-review was not installed (file conflicts, nothing written)'
+                    : 'deps-review was not installed (the files half did not include agentic)',
+            )
+        } else if (enableAgentic) {
+            const r = await installDepsReview(
+                dir,
+                version,
+                dryRun,
+                deps.ghAw ?? defaultGhAw,
+            )
+            out.push('agentic:')
+            out.push(row(r.status, r.name, r.detail))
+            if (r.status === 'failed' && !dryRun) exitCode = 1
+        }
+        // Lock last, after every workflow (deps-review included) is in place.
+        const lockPlanned = fileActions.some((a) => a.name === 'actions-lock')
+        if (enableActionsLock && (!lockPlanned || conflicts.length > 0)) {
+            notes.push(
+                conflicts.length > 0
+                    ? 'gh actions-lock was not run (file conflicts, nothing written)'
+                    : 'gh actions-lock was not run (the files half did not include actions-lock)',
+            )
+        } else if (enableActionsLock) {
+            const r = await runActionsLock(
+                dir,
+                scope.paths,
+                dryRun,
+                deps.ghActionsLock ?? defaultGhActionsLock,
+            )
+            out.push('actions-lock:')
+            out.push(row(r.status, r.name, r.detail))
+            if (r.status === 'failed' && !dryRun) exitCode = 1
+        }
+        if (
+            enableActionsRelock &&
+            !fileActions.some((a) => a.name === 'actions-relock')
+        )
+            notes.push(
+                'relock-actions.yml was not written (the files half did not include actions-relock)',
+            )
+        else if (enableActionsRelock) {
+            const gh = deps.gh ?? ghCli()
+            const unavailable = repoError ?? (await ghAvailable(gh))
+            const creds =
+                repo && unavailable === null
+                    ? await relockCredentials(gh, repo)
+                    : { variable: null, secret: null }
+            notes.push(...credentialNotes(repo ?? 'OWNER/REPO', creds))
         }
     }
 
@@ -246,17 +597,80 @@ export async function main(
             out.push(row('unavailable', 'settings', unavailable))
             if (!dryRun) exitCode = 1
         } else if (repo) {
-            settingResults = await runSettings(gh, repo, {
-                skip: new Set(values['skip-setting']),
-                enablePvr,
-                enableAiScan,
+            const run = await runSettings(gh, repo, {
+                enabled,
+                skip: settingSkip,
                 dryRun,
             })
+            settingResults = run.results
+            if (run.notAdmin !== undefined) {
+                out.push(
+                    row(
+                        'unavailable',
+                        'settings',
+                        `settings need admin on ${repo} (${credentialSource(process.env)} has ${run.notAdmin})`,
+                    ),
+                )
+                if (!dryRun) exitCode = 1
+            }
             for (const r of settingResults)
                 out.push(row(r.status, r.name, r.detail))
             if (settingResults.some((r) => r.status === 'failed')) exitCode = 1
         }
     }
+
+    // Rulesets half. A bad --config is reported even when gh is unavailable.
+    if (preset.rulesets) {
+        let fleet: Fleet | undefined
+        if (values.config) {
+            fleet = await loadOrExit(rulesetsFile(values.config), checkFleet)
+            const key = repo
+                ? Object.keys(fleet).find(
+                      (k) => k.toLowerCase() === repo?.toLowerCase(),
+                  )
+                : undefined
+            if (repo && key) repo = key
+            if (repo && !key) {
+                console.error(
+                    `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
+                )
+                process.exit(2)
+            }
+        }
+        out.push(dryRun ? 'rulesets (dry run):' : 'rulesets:')
+        const gh = deps.gh ?? ghCli()
+        const unavailable = repoError ?? (await ghAvailable(gh))
+        if (unavailable) {
+            out.push(row('unavailable', 'rulesets', unavailable))
+            if (!dryRun) exitCode = 1
+        } else if (repo) {
+            const results = await runRulesets(
+                gh,
+                repo,
+                fleet ?? defaultFleet(repo),
+                dryRun,
+            )
+            for (const r of results) out.push(row(r.status, r.name, r.detail))
+            if (results.some((r) => r.status === 'failed')) exitCode = 1
+        }
+    }
+
+    // Settings the flags add, when the file is not being rewritten with them.
+    // A conflict anywhere writes no files, the config included.
+    const configWritten =
+        !fileActions.some((a) => a.status === 'conflict') &&
+        fileActions.some(
+            (a) =>
+                a.name === 'config' &&
+                (a.status === 'merge' || a.status === 'overwrite'),
+        )
+    if (existingConfig && !configWritten)
+        for (const a of merged.added) {
+            const [path, value] = a.split(' + ')
+            notes.push(
+                `add '${value}' to ${path} in ${CONFIG_FILE} so voidflow check covers it`,
+            )
+        }
 
     // Opt-ins act only on the halves that ran; say what was left out.
     if (enablePvr) {
@@ -271,20 +685,115 @@ export async function main(
         }
     }
 
+    const relockPlanned = fileActions.some((a) => a.name === 'actions-relock')
+    if (relockPlanned && !preset.settings) {
+        notes.push(
+            "the relock-actions label was not created (the settings half did not run); create it, or rely on Renovate's PRs alone",
+        )
+    }
+    if (relockPlanned) {
+        notes.push(
+            'relock-actions runs on renovate[bot] PRs by itself; label any other PR that changes a uses: line relock-actions. The hosted Renovate app has no postUpgradeTasks, so it cannot relock on its own',
+        )
+    }
+    if (enableAgentic && !preset.settings) {
+        notes.push(
+            'agentic settings were not applied (the settings half did not run)',
+        )
+    }
+    if (enableAgentic) {
+        const pin = agenticLocksGhAwVersion()
+        if (pin) {
+            notes.push(
+                `agentic-locks recompiles with gh-aw ${pin} and fails on a different lock; use the same version locally: gh extension install github/gh-aw --pin ${pin}`,
+            )
+        }
+    }
+
     if (repo && preset.settings) {
         out.push('manual:')
-        for (const l of manualReminders(repo, enableAiScan)) out.push(`  ${l}`)
+        for (const l of manualReminders(repo, enabled)) out.push(`  ${l}`)
     }
     if (notes.length > 0) {
         out.push('notes:')
         for (const n of notes) out.push(`  ${n}`)
     }
+    // Fleet half: add the repo to the infra repo's rulesets config. With
+    // --preset rulesets, --config is read above instead (the entry must exist).
+    let fleetDone = false
+    let fleetFile = ''
+    if (values.config !== undefined && !preset.rulesets) {
+        const file = rulesetsFile(values.config)
+        fleetFile = file
+        out.push(dryRun ? 'fleet (dry run):' : 'fleet:')
+        if (!repo) {
+            out.push(row('unavailable', 'rulesets', repoError ?? ''))
+            exitCode = 1
+        } else if (!existsSync(file)) {
+            out.push(row('failed', 'rulesets', `${file} does not exist`))
+            exitCode = 1
+        } else {
+            // A path that is a directory, or a file that cannot be read or
+            // written, is a failed row like any other, not a crash that drops
+            // the results buffered in `out`.
+            try {
+                const edit = addToFleet(readFileSync(file, 'utf8'), repo)
+                if (edit.status === 'failed') {
+                    out.push(
+                        row('failed', 'rulesets', `${file}: ${edit.detail}`),
+                    )
+                    exitCode = 1
+                } else {
+                    if (edit.status === 'added' && !dryRun)
+                        writeFileSync(file, edit.text)
+                    fleetDone = true
+                    out.push(row(edit.status, 'rulesets', `${repo} in ${file}`))
+                }
+            } catch (e) {
+                out.push(
+                    row(
+                        'failed',
+                        'rulesets',
+                        `${file}: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                )
+                exitCode = 1
+            }
+        }
+    }
+
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
-    out.push(
-        `  add the repo to your infra repo's rulesets config: '${repo ?? 'OWNER/REPO'}': tool(),`,
-        '    (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
-    )
-    console.log(out.join('\n'))
+    if (fleetDone) {
+        // Discovery from this repo would not find the infra repo's config,
+        // so the commands name it.
+        out.push(
+            '  review and commit the rulesets config, then run:',
+            `    voidflow plan rulesets --config ${fleetFile} --repo ${repo}`,
+            `    voidflow apply rulesets --config ${fleetFile} --repo ${repo}`,
+        )
+    } else if (preset.rulesets && values.config) {
+        // The fleet path's own text stays until the fleet config goes away.
+    } else if (
+        fileActions.some((a) => a.name === 'config') &&
+        !fileActions.some((a) => a.status === 'conflict')
+    ) {
+        out.push(
+            '  review and commit voidflow.config.ts, then run:',
+            '    voidflow plan',
+            '    voidflow apply rulesets',
+            '    voidflow apply settings',
+            '  (see https://github.com/taraxvoid/voidflow/blob/main/docs/config.md)',
+        )
+    } else {
+        out.push(
+            '  add the repo to your fleet rulesets config: rerun with --config <path to it>, e.g. ../infra/rulesets.ts',
+            `  or add this entry by hand: '${repo ?? 'OWNER/REPO'}': {},`,
+            '  (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
+        )
+    }
+    if (dryRun) out.push('plan only: re-run with --apply to make these changes')
+    console.log([...refusal, ...out].join('\n'))
+
     process.exit(exitCode)
 }

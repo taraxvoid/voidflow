@@ -38,16 +38,16 @@ describe('tool-ci.yml shape', () => {
     })
 
     test('checkout keeps full history for gitleaks and drops credentials', () => {
-        expect(steps[0].uses).toMatch(/^actions\/checkout@[0-9a-f]{40}$/)
+        expect(steps[0].uses).toMatch(/^actions\/checkout@v\d+\.\d+\.\d+$/)
         expect(steps[0].with).toEqual({
             'fetch-depth': 0,
             'persist-credentials': false,
         })
     })
 
-    test('every action is pinned to a full SHA', () => {
+    test('every action is pinned to a version tag (commits live in actions.lock)', () => {
         for (const s of steps.filter((s) => s.uses)) {
-            expect(s.uses).toMatch(/@[0-9a-f]{40}$/)
+            expect(s.uses).toMatch(/@v\d+\.\d+\.\d+$/)
         }
     })
 })
@@ -93,7 +93,7 @@ describe('tool-ci.yml optional inputs', () => {
 describe('tool-ci.yml script steps', () => {
     test('detects exactly the scripts it runs', () => {
         expect(step('Detect package scripts').run).toContain(
-            'for name in lint check build test check:licenses; do',
+            'for name in lint check build test check:licenses check:voidflow; do',
         )
     })
 
@@ -197,6 +197,6 @@ describe('upload-sarif.yml', () => {
             'zizmor',
         ])
         for (const s of upSteps.filter((s) => s.uses))
-            expect(s.uses).toMatch(/@[0-9a-f]{40}$/)
+            expect(s.uses).toMatch(/@v\d+\.\d+\.\d+$/)
     })
 })

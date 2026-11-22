@@ -3,6 +3,7 @@
  * node: APIs only, so the CLI runs under Node as well as Bun.
  */
 import { basename, extname } from 'node:path'
+import { configSource } from '../../config/source.ts'
 import { capture } from '../lib/proc.ts'
 import { json } from '../lib/template-format.ts'
 
@@ -14,10 +15,34 @@ export type RenderCtx = {
     kind: Kind
     repo: string | null
     cronMinute: number
+    /** Agentic rollout stage; shadow when unset. */
+    stage?: 'shadow' | 'gate'
+    /** `@user`, `@org` or `@org/team` for CODEOWNERS; null renders a placeholder. */
+    owner?: string | null
+    /** voidflow.config.ts's default export; unset renders `{ kind }`. */
+    config?: Record<string, unknown>
 }
 
-/** Fill the init-time placeholders. A null sha pins the tag instead. */
+/**
+ * The default export's literal in the voidflow.config.ts template, swapped
+ * whole for the config init writes (so the template stays valid TypeScript).
+ */
+export const CONFIG_LITERAL = "{ kind: '{{kind}}' }"
+
+/**
+ * Fill the init-time placeholders. A null sha pins the tag instead. The
+ * config literal goes in last and verbatim, so its values never meet a
+ * placeholder or a `$` replacement pattern.
+ */
 export function render(template: string, ctx: RenderCtx): string {
+    const head = `export default ${CONFIG_LITERAL}`
+    const parts = template.split(head)
+    if (parts.length === 1) return fill(template, ctx)
+    const literal = `export default ${configSource(ctx.config ?? { kind: ctx.kind })}`
+    return parts.map((p) => fill(p, ctx)).join(literal)
+}
+
+function fill(template: string, ctx: RenderCtx): string {
     const pinned =
         ctx.sha === null
             ? template.replaceAll('@{{sha}} # v{{version}}', '@v{{version}}')
@@ -28,12 +53,13 @@ export function render(template: string, ctx: RenderCtx): string {
         .replaceAll('{{kind}}', ctx.kind)
         .replaceAll('{{cron_minute}}', String(ctx.cronMinute))
         .replaceAll('{{repo}}', ctx.repo ?? 'OWNER/REPO')
+        .replaceAll('{{owner}}', ctx.owner ?? '@OWNER')
 }
 
 function markerLines(ctx: RenderCtx): [string, string] {
     return [
         `Written by voidflow v${ctx.version}: https://www.npmjs.com/package/@taraxvoid/voidflow`,
-        `Set up a repo the same way: npx @taraxvoid/voidflow init --kind ${ctx.kind}`,
+        `Set up a repo the same way: npx @taraxvoid/voidflow init --kind ${ctx.kind} --apply`,
     ]
 }
 
@@ -55,10 +81,15 @@ export function withMarker(
         const parsed = JSON.parse(content)
         return json({ ...parsed, description: lines })
     }
-    if (name === 'biome.json' || name === 'tsconfig.json')
-        return prefixed('// ')
+    // biome.json takes no comments: Biome 2.5 rejects them in a .json file.
+    if (name === 'tsconfig.json') return prefixed('// ')
     if (ext === '.json') return content
-    if (HASH.has(ext) || name === '.gitignore' || name === 'gitignore')
+    if (
+        HASH.has(ext) ||
+        name === '.gitignore' ||
+        name === 'gitignore' ||
+        name === 'CODEOWNERS'
+    )
         return prefixed('# ')
     if (SLASH.has(ext)) return prefixed('// ')
     if (ext === '.md') return `<!--\n${lines.join('\n')}\n-->\n\n${content}`

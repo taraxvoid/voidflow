@@ -54,7 +54,7 @@ describe('STABILITY.md', () => {
             expect(experimental).toContain(`\`${name}\``)
             expect(covered).not.toContain(`\`${name}\``)
         }
-        for (const command of ['cf-tokens', 'rulesets', 'init']) {
+        for (const command of ['tokens', 'rulesets', 'init']) {
             expect(experimental).toContain(`\`${command}\``)
         }
     })

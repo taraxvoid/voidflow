@@ -52,3 +52,37 @@ describe('loadConfig', () => {
         )
     })
 })
+
+describe('loadConfig with org-grouped configs', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'voidflow-config-orgs-'))
+    writeFileSync(
+        join(dir, 'orgs.ts'),
+        "export default { orgs: { 'example-org': { repos: { site: { n: 1 }, 'b.sh': { n: 2 } } } } }",
+    )
+    writeFileSync(
+        join(dir, 'bad-orgs.ts'),
+        "export default { orgs: { o: { repos: { 'a/b': {} } } } }",
+    )
+    const seen: unknown[] = []
+    const check = (x: unknown) => {
+        seen.push(x)
+        return x as Record<string, { n: number }>
+    }
+
+    test('check sees the flat "owner/name" map', async () => {
+        expect(await loadConfig('orgs.ts', dir, check)).toEqual({
+            'example-org/site': { n: 1 },
+            'example-org/b.sh': { n: 2 },
+        })
+        expect(seen.at(-1)).toEqual({
+            'example-org/site': { n: 1 },
+            'example-org/b.sh': { n: 2 },
+        })
+    })
+
+    test('an orgs problem is prefixed with the file', async () => {
+        await expect(loadConfig('bad-orgs.ts', dir, check)).rejects.toThrow(
+            `${join(dir, 'bad-orgs.ts')}: orgs.o.repos."a/b": name has a slash`,
+        )
+    })
+})

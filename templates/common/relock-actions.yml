@@ -1,0 +1,90 @@
+# Keeps .github/workflows/actions.lock in step with workflow edits that
+# cannot run gh actions-lock themselves. Renovate (the hosted app has no
+# postUpgradeTasks) bumps an action tag; this relocks and pushes the result
+# so verify-lockfile passes without a human.
+#
+# Runs for pull requests opened by renovate[bot], or any same-repo pull
+# request carrying the `relock-actions` label (apply it after a rebase or a
+# hand edit). The push uses a GitHub App token so the new commit triggers CI;
+# commits pushed with GITHUB_TOKEN would not. The app needs Contents and
+# Workflows read and write on this repo; set its client ID as the
+# RELEASE_BOT_CLIENT_ID variable and its private key as the
+# RELEASE_BOT_APP_PRIVATE_KEY secret.
+#
+# Only the lockfile tooling runs here; nothing from the pull request is
+# executed. Never run `gh actions-lock --accept-moved` from automation.
+#
+# pull_request_target, not pull_request: the workflow then runs as it is on
+# the base branch, checked against the base branch's actions.lock. Under
+# pull_request a PR that bumps an action this workflow uses (Renovate groups
+# every action bump) would have the Require lockfile policy refuse this very
+# run at startup, the stale lock it exists to fix. The PR head is checked out
+# by SHA as data, without credentials, and only same-repo PRs run.
+
+name: relock-actions
+
+on:
+  # zizmor: ignore[dangerous-triggers] same-repo PRs only; the PR's files are read as data, never run
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '.github/workflows/**'
+
+permissions: {}
+
+concurrency:
+  group: relock-actions-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  relock:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.pull_request.user.login == 'renovate[bot]' ||
+      contains(github.event.pull_request.labels.*.name, 'relock-actions'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VERSION: v0.4.1 # renovate: datasource=github-releases depName=github/gh-actions-lock
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Install gh-actions-lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh extension install github/gh-actions-lock --pin "$VERSION"
+
+      - name: Relock
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh actions-lock
+
+      - name: Commit and push
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # --porcelain also lists an untracked actions.lock (a first lock).
+          if [ -z "$(git status --porcelain -- .github/workflows)" ]; then
+            echo "Lockfile already in step."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows
+          git commit -m "chore(deps): relock workflow actions"
+          git push "https://x-access-token:${TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${HEAD_REF}"

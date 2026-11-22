@@ -1,6 +1,6 @@
 {
     "name": "@taraxvoid/voidflow",
-    "version": "1.0.0-next.3",
+    "version": "1.0.0",
     "description": "Reusable GitHub Actions CI/CD for TypeScript sites and tools: supply-chain and security gates, accessibility and performance budgets, Cloudflare Workers deploys.",
     "type": "module",
     "license": "MIT",
@@ -44,6 +44,11 @@
             "bun": "./cloudflare/tokens.ts",
             "default": "./dist/cloudflare/tokens.js"
         },
+        "./config": {
+            "types": "./config/index.ts",
+            "bun": "./config/index.ts",
+            "default": "./dist/config/index.js"
+        },
         "./rulesets": {
             "types": "./rulesets/index.ts",
             "bun": "./rulesets/index.ts",
@@ -59,6 +64,7 @@
         "scripts/deps-signals.ts",
         "dist",
         "cloudflare",
+        "config",
         "rulesets",
         "templates"
     ],
@@ -67,12 +73,13 @@
         "node": ">=24"
     },
     "scripts": {
-        "build": "bun build ./scripts/cli.ts ./cloudflare/tokens.ts ./rulesets/index.ts --outdir=dist --root=. --target=node --format=esm --splitting --packages=external",
+        "build": "bun build ./scripts/cli.ts ./cloudflare/tokens.ts ./rulesets/index.ts ./config/index.ts --outdir=dist --root=. --target=node --format=esm --splitting --packages=external",
         "prepack": "rm -rf dist && bun run build",
         "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
         "lint": "biome check .",
         "format": "biome check --write .",
         "check": "tsc -p .",
+        "audit": "bun audit --audit-level high --production",
         "test": "bun test"
     },
     "peerDependencies": {
@@ -84,13 +91,15 @@
         }
     },
     "devDependencies": {
-        "@biomejs/biome": "2.6.4",
+        "@biomejs/biome": "2.6.7",
         "@playwright/test": "1.64.1",
         "@socketsecurity/bun-security-scanner": "1.1.3",
         "@types/bun": "1.4.4",
         "typescript": "7.0.2"
     },
     "dependencies": {
-        "license-checker-rseidelsohn": "5.0.1"
+        "jsonc-parser": "3.3.1",
+        "license-checker-rseidelsohn": "5.0.1",
+        "smol-toml": "1.9.1"
     }
 }
