@@ -26,8 +26,6 @@
  * `gh secret set` and never printed.
  */
 
-import { parse as parseJsonc } from 'jsonc-parser'
-import { parse as parseToml } from 'smol-toml'
 import {
     type Action,
     checkRepos,
@@ -50,6 +48,7 @@ import {
 import { parseOrExit } from './lib/args.ts'
 import { loadOrExit } from './lib/config.ts'
 import { capture, inherit } from './lib/proc.ts'
+import { parseWranglerConfig } from './lib/wrangler-config.ts'
 
 const OPTIONS = {
     apply: { type: 'boolean', default: false },
@@ -235,7 +234,7 @@ export async function main(argv: string[], prog = 'voidflow cf-tokens') {
             '-H',
             'Accept: application/vnd.github.raw',
         ])
-        return path.endsWith('.toml') ? parseToml(text) : parseJsonc(text)
+        return parseWranglerConfig(path, text)
     })
 
     /** The env's Worker and zones, and the ids its policies reference them by. */
