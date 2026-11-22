@@ -152,6 +152,7 @@ function existingCronMinute(dir: string): number | null {
     const sources: [string, RegExp][] = [
         ['ci.yml', /cron:\s*'(\d{1,2}) 6 \* \* \*'/],
         ['verify-lockfile.yml', /cron:\s*'(\d{1,2}) 7 \* \* 1'/],
+        ['voidflow-drift.yml', /cron:\s*'(\d{1,2}) 5 \* \* 1'/],
     ]
     for (const [file, re] of sources) {
         const path = join(dir, '.github/workflows', file)

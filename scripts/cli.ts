@@ -3,8 +3,9 @@
  * The `voidflow` bin, run inside a repo with a voidflow.config.ts:
  *
  *   voidflow plan|check [rulesets|settings|tokens]
- *   voidflow apply rulesets|settings|tokens [--prune] [--rotate]
+ *   voidflow apply rulesets|settings|tokens [--prune] [--rotate] [--yes]
  *   voidflow try tokens <env> -- <command...>
+ *   voidflow validate
  *   voidflow init --kind tool|site [...]
  *   voidflow --version
  *
@@ -17,7 +18,7 @@ import { packageRoot } from './lib/package-root.ts'
 
 type Main = (argv: string[], prog: string) => Promise<void>
 
-const verb = (v: 'plan' | 'check' | 'apply' | 'try') => () =>
+const verb = (v: 'plan' | 'check' | 'apply' | 'try' | 'validate') => () =>
     import('./verbs.ts').then((m) => ({ main: m.verbMain(v) }))
 
 const COMMANDS: Record<
@@ -32,6 +33,10 @@ const COMMANDS: Record<
     apply: {
         load: verb('apply'),
         about: 'make GitHub (or Cloudflare) match voidflow.config.ts',
+    },
+    validate: {
+        load: verb('validate'),
+        about: 'check voidflow.config.ts, with no network calls',
     },
     try: {
         load: verb('try'),

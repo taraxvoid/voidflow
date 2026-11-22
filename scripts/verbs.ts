@@ -6,11 +6,13 @@
  *   voidflow check [rulesets|settings|tokens]   # exit 1 on drift
  *   voidflow apply  rulesets|settings|tokens    # write
  *   voidflow try    tokens <env> -- <command...>
+ *   voidflow validate                           # load and check the file, offline
  *
  * Each preset runs in this process (scripts/presets/). See docs/config.md.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { createInterface } from 'node:readline/promises'
 import { adminTokenVar, type VoidflowConfig } from '../config/index.ts'
 import { credentialSource } from './init/gh.ts'
 import { packageRoot } from './lib/package-root.ts'
@@ -29,6 +31,9 @@ import {
 import type { TokensMode } from './presets/tokens.ts'
 
 export type { Preset, Verb }
+
+/** Every command this module runs: the verbs, plus try and validate. */
+export type Command = Verb | 'try' | 'validate'
 
 /** Flags that belonged to the fleet tools or the per-tool commands. */
 const REMOVED: Record<string, string> = {
@@ -52,19 +57,22 @@ export type VerbArgs = {
     groups: boolean
     noColor: boolean
     help: boolean
+    /** apply: write without asking. */
+    yes: boolean
     /** try: the env, then the command after `--`. */
     env?: string
     cmd: string[]
 }
 
 /** Parse a verb's arguments; throws with the reason on a bad one. */
-export function parseVerbArgs(verb: Verb | 'try', argv: string[]): VerbArgs {
+export function parseVerbArgs(verb: Command, argv: string[]): VerbArgs {
     const out: VerbArgs = {
         prune: false,
         rotate: false,
         groups: false,
         noColor: false,
         help: false,
+        yes: false,
         cmd: [],
     }
     const pos: string[] = []
@@ -82,10 +90,20 @@ export function parseVerbArgs(verb: Verb | 'try', argv: string[]): VerbArgs {
         else if (a === '--rotate') out.rotate = true
         else if (a === '--groups') out.groups = true
         else if (a === '--no-color') out.noColor = true
+        else if (a === '--yes' || a === '-y') out.yes = true
         else if (a.startsWith('-')) throw new Error(`unknown flag ${a}`)
         else pos.push(a)
     }
     if (out.help) return out
+    if (verb === 'validate') {
+        if (pos.length > 0 || out.cmd.length > 0)
+            throw new Error(
+                'validate takes no preset: it checks the whole file',
+            )
+        if (out.prune || out.rotate || out.groups || out.yes)
+            throw new Error('validate takes no flags but --no-color')
+        return out
+    }
 
     const [first, ...more] = pos
     if (first !== undefined) {
@@ -125,28 +143,34 @@ export function parseVerbArgs(verb: Verb | 'try', argv: string[]): VerbArgs {
         throw new Error('--rotate is a tokens flag')
     if (out.prune && out.preset === 'settings')
         throw new Error('--prune is a rulesets and tokens flag')
+    if (out.yes && verb !== 'apply') throw new Error('--yes goes with apply')
     return out
 }
 
-export const usage = (verb: Verb | 'try') =>
+export const usage = (verb: Command) =>
     verb === 'try'
         ? `usage: voidflow try tokens <env> -- <command...>
 
 Runs the command with a throwaway Cloudflare token scoped like <env>'s, the
 admin token removed from its environment; the token is deleted afterwards.
 Needs the cloudflare section's admin token variable.`
-        : `usage: voidflow ${verb} ${verb === 'apply' ? PRESETS.join('|') : `[${PRESETS.join('|')}]`} [flags]
+        : verb === 'validate'
+          ? `usage: voidflow validate [--no-color]
+
+Loads the ${CONFIG_FILE} found from here up to the git root and checks it,
+with no network calls: exit 0 when it is valid, 2 naming each problem by path.`
+          : `usage: voidflow ${verb} ${verb === 'apply' ? PRESETS.join('|') : `[${PRESETS.join('|')}]`} [flags]
 
   --prune      ${verb === 'apply' ? 'also delete' : 'with apply, delete'} what the config lists under retire (rulesets, tokens)
   --rotate     tokens: rotate every token now
-${verb === 'plan' ? '  --groups     tokens: print the live names of the permission groups used\n' : ''}  --no-color   no ANSI colors
+${verb === 'plan' ? '  --groups     tokens: print the live names of the permission groups used\n' : ''}${verb === 'apply' ? '  -y, --yes    write without asking (needed without a terminal)\n' : ''}  --no-color   no ANSI colors
 
 ${
     verb === 'plan'
         ? 'Read-only: prints what apply would change.'
         : verb === 'check'
           ? 'Read-only: exit 1 on drift, 2 on a config or auth error.'
-          : 'Writes the repo the config sits in.'
+          : 'Shows the plan, asks, then writes the repo the config sits in.'
 }${
     verb === 'apply'
         ? ''
@@ -192,7 +216,7 @@ export function presetsFor(
 }
 
 /** The command that applies what a plan of `preset` shows. */
-export function applyHint(preset: Preset, a: VerbArgs): string {
+export function applyCommand(preset: Preset, a: VerbArgs): string {
     return [
         'voidflow apply',
         preset,
@@ -251,6 +275,22 @@ function fail(msg: string): never {
     process.exit(2)
 }
 
+/** Ask a yes/no question on the terminal; only `y` or `yes` is yes. */
+export async function confirm(
+    question: string,
+    io: {
+        input: NodeJS.ReadableStream
+        output: NodeJS.WritableStream
+    } = { input: process.stdin, output: process.stderr },
+): Promise<boolean> {
+    const rl = createInterface(io)
+    try {
+        return /^y(es)?$/i.test((await rl.question(question)).trim())
+    } finally {
+        rl.close()
+    }
+}
+
 /** Run one preset, loaded when it runs, so --help and usage errors stay cheap. */
 async function run(
     preset: Preset,
@@ -286,7 +326,7 @@ async function runPreset(
 }
 
 /** The `main` of one verb, for scripts/cli.ts. */
-export function verbMain(verb: Verb | 'try') {
+export function verbMain(verb: Command) {
     return async (argv: string[], prog = `voidflow ${verb}`): Promise<void> => {
         let a: VerbArgs
         try {
@@ -296,6 +336,20 @@ export function verbMain(verb: Verb | 'try') {
         }
         if (a.help) {
             console.log(usage(verb))
+            process.exit(0)
+        }
+        if (verb === 'validate') {
+            const file = findRepoConfig(process.cwd())
+            if (!file)
+                fail(
+                    `${prog}: no ${CONFIG_FILE} in ${process.cwd()} or above it up to the git root`,
+                )
+            try {
+                await loadVoidflowConfig(file)
+            } catch (e) {
+                fail(`${prog}: ${(e as Error).message}`)
+            }
+            console.log(`${file}: valid`)
             process.exit(0)
         }
         const { file, cfg, repo } = await loadRepo(prog)
@@ -309,7 +363,7 @@ export function verbMain(verb: Verb | 'try') {
             rotate: a.rotate,
             noColor: a.noColor,
             bare,
-            applyHint: applyHint(preset, a),
+            applyHint: `run \`${applyCommand(preset, a)}\``,
         })
 
         if (verb === 'try') {
@@ -326,10 +380,39 @@ export function verbMain(verb: Verb | 'try') {
                 `${prog}: tokens: no cloudflare section in ${file} (see docs/config.md#cloudflare-tokens)`,
             )
 
-        const { run, skipped } = presetsFor(a.preset, cfg, process.env)
+        // apply shows the plan (as a check, so drift is exit 1) and asks
+        // before writing, unless --yes. Without a terminal there is no one to
+        // ask, so it refuses rather than writing unreviewed.
+        if (verb === 'apply' && a.preset && !a.yes) {
+            if (!process.stdin.isTTY)
+                fail(
+                    `${prog}: apply asks before writing; run it in a terminal, or pass --yes to write without asking`,
+                )
+            const preset = a.preset
+            const preview = await runPreset(
+                preset,
+                {
+                    ...ctx(preset, false),
+                    verb: 'check',
+                    applyHint: 'confirm below',
+                },
+                prog,
+            )
+            if (preview === 0) {
+                console.error(`${prog}: nothing to apply`)
+                process.exit(0)
+            }
+            if (preview === 2) process.exit(2)
+            if (!(await confirm(`Apply these changes to ${repo}? [y/N] `))) {
+                console.error(`${prog}: not applied`)
+                process.exit(1)
+            }
+        }
+
+        const { run: presets, skipped } = presetsFor(a.preset, cfg, process.env)
         if (skipped) console.error(`${prog}: ${skipped}`)
         const codes: number[] = []
-        for (const preset of run) {
+        for (const preset of presets) {
             const mode: TokensMode | undefined = a.groups
                 ? { kind: 'groups' }
                 : undefined

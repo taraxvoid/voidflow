@@ -169,6 +169,7 @@ voidflow plan tokens        # the cloudflare section's tokens
 voidflow apply tokens       # create, update and rotate them; set each env's secret
 voidflow apply tokens --prune    # also delete `retire` tokens
 voidflow plan tokens --groups    # the live names of the permission groups used
+voidflow validate           # load and check the file, with no network calls
 voidflow try tokens prod -- bunx wrangler deploy   # a throwaway token scoped like prod's
 ```
 
@@ -187,7 +188,7 @@ is missing); tokens are skipped, with the reason, otherwise. Neither skip
 changes the exit code, so a repo's CI (which has neither) still checks
 rulesets. Naming the preset (`voidflow check settings`) makes a missing admin
 an error (exit 2) instead, and so does naming tokens in a file without a
-`cloudflare` section. `apply` always names one preset.
+`cloudflare` section. `apply` always names one preset, shows its plan and asks before writing (`--yes` skips the question).
 
 | Code | Meaning |
 |---|---|
@@ -207,28 +208,45 @@ the `cf-tokens.ts` entry into `cloudflare`, adding `adminTokenEnv` if its
 account's admin token is not `CF_TOKEN_ADMIN`), run `voidflow plan` in the
 repo (it should show no changes), then delete the fleet entries.
 
-### Keeping it in sync
+### Reviewing and applying a change
 
-The tool and site templates add a `check:voidflow` script (`voidflow check`).
-It runs in two places, both skipped when a repo does not define the script:
+A change to `voidflow.config.ts` goes through a PR like any other: reviewed
+as a plan there, applied after merge, and checked for drift from then on.
 
-- CI (`tool-ci.yml`, `site-ci.yml`): drift (exit 1) fails the job. Exit 2 (the
-  default token cannot read rulesets, or a config error) only warns. CI skips
-  settings and tokens, since its token is not an admin and it has no admin
-  token.
-- The `pre-push` hook in `lefthook/base.yml`, on pushes to `main`, `next` and
-  `release/*` when `voidflow.config.ts` exists. Settings are checked too when
-  `gh` is an admin of the repo, and tokens when the `cloudflare` section's
-  admin token variable is set. The hook then runs
-  the repo's optional `try:deploy` script, so a missing token grant shows up
-  before CI depends on it:
+1. **On the PR**, CI (`tool-ci.yml`, `site-ci.yml`) runs `voidflow validate`,
+   which fails the job on a file that does not load or validate, then
+   `voidflow plan` against live GitHub, printed in the job summary. Drift
+   never fails CI: the PR's config is not applied yet, and drift someone made
+   in the GitHub UI is not the PR's problem. Exit 1 or 2 from the plan (a read
+   failed, or the default token cannot read something) is a warning.
+2. **After merge**, run `voidflow apply <preset>` from an up-to-date checkout
+   of `main`. It shows the plan and asks before writing; `--yes` writes
+   without asking, and without a terminal `apply` refuses unless given
+   `--yes`.
+3. **On `main`**, the `voidflow-drift` workflow (`init` writes its caller,
+   `.github/workflows/voidflow-drift.yml`) runs `voidflow check` after each
+   push and weekly, and keeps one issue open while GitHub differs from the
+   file, closing it once a later run is in sync. It runs the voidflow version
+   `package.json` pins, with `npx`.
 
-  ```json
-  "try:deploy": "voidflow try tokens prod -- bunx wrangler deploy --dry-run"
-  ```
+Both CI steps run only when the repo defines a `check:voidflow` script (the
+templates add `voidflow check`) and `node_modules/.bin/voidflow` is
+installed. CI and the drift workflow use `GITHUB_TOKEN`, which is not an
+admin: settings are skipped and rulesets are compared without their
+`bypass_actors`, and tokens are never checked there.
 
-  `try` creates and deletes a real Cloudflare token, so guard the script on
-  the admin token being set.
+The `pre-push` hook in `lefthook/base.yml` runs when the pushed commits
+change `voidflow.config.ts`, on any branch: `voidflow validate` blocks the
+push on a bad file, and `voidflow plan` prints what applying would change
+without blocking. It then runs the repo's optional `try:deploy` script, so a
+missing token grant shows up before CI depends on it:
+
+```json
+"try:deploy": "voidflow try tokens prod -- bunx wrangler deploy --dry-run"
+```
+
+`try` creates and deletes a real Cloudflare token, so guard the script on
+the admin token being set.
 
 A file that does not load, or fails validation, exits 2 naming the file, before
 anything is sent to GitHub.

@@ -174,36 +174,37 @@ pre-push:
         unset $(git rev-parse --local-env-vars)
         {pm} run --if-present test:push
     voidflow-sync:
-      # Pushes to a release branch (main, next, release/*) only: keep GitHub
-      # and Cloudflare in sync with voidflow.config.ts. Needs the repo's
-      # voidflow.config.ts; skipped without one.
-      #   check:voidflow  voidflow check: exit 1 on ruleset drift (and token
-      #                   drift when the cloudflare section's admin token
-      #                   variable is set, else tokens are skipped with a note).
+      # Pushes whose new commits change voidflow.config.ts, on any branch: the
+      # file must validate (a bad one blocks the push), and the plan of what
+      # `voidflow apply` would change is printed, never blocking. Applying
+      # stays a manual step after merge; drift on main is the voidflow-drift
+      # workflow's to report. Skipped without the file, the check:voidflow
+      # script or an installed voidflow bin.
       #   try:deploy      optional repo script, e.g. `voidflow try tokens
       #                   prod -- bunx wrangler deploy --dry-run`; proves the
-      #                   token policies
-      #                   are enough. Guard it on the admin token being set.
-      # Exit 2 from the check (no gh admin, config error) warns, never blocks.
+      #                   token policies are enough. Guard it on the admin
+      #                   token being set.
       use_stdin: true
       run: |
         [ -f voidflow.config.ts ] || exit 0
-        [ -d node_modules ] || exit 0
-        release=false
-        while read -r _local_ref local_sha remote_ref _remote_sha; do
-          case "$local_sha" in *[!0]*) ;; *) continue ;; esac
-          case "$remote_ref" in
-            refs/heads/main|refs/heads/next|refs/heads/release/*) release=true ;;
-          esac
-        done
-        [ "$release" = true ] || exit 0
         grep -q '"check:voidflow"' package.json || exit 0
+        vf=./node_modules/.bin/voidflow
+        [ -x "$vf" ] || exit 0
+        changed=false
+        while read -r _local_ref local_sha _remote_ref _remote_sha; do
+          case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+          # A commit counts as new when no ref of the remote contains it.
+          if [ -n "$(git log -n 1 --format=%H "$local_sha" --not --remotes="{1}" -- voidflow.config.ts 2>/dev/null)" ]; then
+            changed=true
+          fi
+        done
+        [ "$changed" = true ] || exit 0
         unset $(git rev-parse --local-env-vars)
         code=0
-        {pm} run --if-present check:voidflow || code=$?
-        if [ "$code" = 2 ]; then
-          echo "pre-push: voidflow check could not run (exit 2), not blocking the push."
-        elif [ "$code" != 0 ]; then
-          exit "$code"
+        "$vf" validate || code=$?
+        if [ "$code" != 0 ]; then
+          echo "pre-push: voidflow.config.ts does not validate (see above); fix it before pushing."
+          exit 1
         fi
+        "$vf" plan || echo "pre-push: voidflow plan did not finish (see above), not blocking the push."
         {pm} run --if-present try:deploy

@@ -27,6 +27,6 @@ export type PresetCtx = {
     noColor: boolean
     /** No preset was named, so one that cannot run here skips instead of failing. */
     bare: boolean
-    /** The command that applies what a plan shows, for its summary line. */
+    /** How to apply what a plan shows, for its summary line: `run `voidflow apply ...``. */
     applyHint: string
 }
