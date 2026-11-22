@@ -83,7 +83,7 @@ const OPTIONS = {
     repo: { type: 'string' },
     config: { type: 'string' },
     'repo-config': { type: 'string' },
-    'local-wrangler': { type: 'boolean', default: false },
+    'local-wrangler': { type: 'string', multiple: true },
 } as const
 
 const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
@@ -103,9 +103,10 @@ const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
   --groups           print the live names of the permission group ids used
   --try <env>        run the command after -- with a throwaway token scoped
                      like the env's
-  --local-wrangler   with --repo-config, read the wrangler config from this
-                     checkout instead of the default branch (to mint a first
-                     preview token before its env block merges)
+  --local-wrangler <env>  with --repo-config, read this env's wrangler config
+                     from the checkout instead of the default branch (to mint
+                     a first preview token before its env block merges);
+                     repeatable, other envs still read the default branch
 
 Needs the admin token (cloudflare.adminTokenEnv with --repo-config, default
 CF_TOKEN_ADMIN) and gh with admin on the repos.`
@@ -153,10 +154,11 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         process.exit(2)
     }
 
-    const localWranglerFlag = values['local-wrangler']
-    if (localWranglerFlag && repoConfig === undefined) {
+    /** Envs whose wrangler config comes from the checkout, not the default branch. */
+    const localEnvs = new Set(values['local-wrangler'] ?? [])
+    if (localEnvs.size > 0 && repoConfig === undefined) {
         console.error(
-            `${prog}: --local-wrangler reads the checkout a voidflow.config.ts sits in; run it inside that repo (voidflow plan tokens --local-wrangler)`,
+            `${prog}: --local-wrangler reads the checkout a voidflow.config.ts sits in; run it inside that repo (voidflow plan tokens --local-wrangler preview)`,
         )
         process.exit(2)
     }
@@ -182,6 +184,18 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
             if (cfg.cloudflare) adminVar = adminTokenVar(cfg.cloudflare)
         } catch (e) {
             console.error(`${prog}: ${(e as Error).message}`)
+            process.exit(2)
+        }
+    }
+
+    const known = new Set(
+        Object.values(REPOS).flatMap((c) => c.envs.map((e) => e.env)),
+    )
+    for (const e of localEnvs) {
+        if (!known.has(e)) {
+            console.error(
+                `${prog}: --local-wrangler ${e}: no such env in the cloudflare section (${[...known].join(', ')})`,
+            )
             process.exit(2)
         }
     }
@@ -336,10 +350,13 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
     const zonesIn = memo((acct) =>
         cfAll<{ id: string; name: string }>(`/zones?account.id=${acct}`),
     )
-    /** A repo's wrangler config on its default branch, parsed. Key: repo:path. */
+    /**
+     * A repo's wrangler config, parsed: on its default branch, or in this
+     * checkout for a --local-wrangler env. Key: repo:path:remote|local.
+     */
     const wranglerAt = memo(async (key) => {
-        const [repo, path] = key.split(':')
-        if (localWranglerFlag) {
+        const [repo, path, where] = key.split(':')
+        if (where === 'local') {
             const parsed = localWrangler(path)
             if (parsed === undefined)
                 throw new Error(
@@ -385,10 +402,13 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
         const zones = await zonesIn(acct)
         const zoneNames = zones.map((z) => z.name)
         const file = env.wrangler ?? 'wrangler.jsonc'
+        const fromLocal = localEnvs.has(env.env)
         const wrangler =
             env.worker && env.zones
                 ? undefined
-                : await wranglerAt(`${repo}:${file}`)
+                : await wranglerAt(
+                      `${repo}:${file}:${fromLocal ? 'local' : 'remote'}`,
+                  )
         let t: ReturnType<typeof resolveTarget>
         try {
             t = resolveTarget(env, wrangler, zoneNames)
@@ -420,14 +440,14 @@ export async function main(argv: string[], prog = 'voidflow tokens cf') {
                 : env.wranglerEnv
         let source = 'worker and zones from the config'
         if (wrangler !== undefined) {
-            source = localWranglerFlag
+            source = fromLocal
                 ? `${file} in this checkout, not the default branch`
                 : `${file} on the default branch`
             const used = fromWrangler(wrangler, env.env, env.wranglerEnv)
             block = used.block
             let local: WranglerTarget | Error | undefined
             // With --local-wrangler the plan already reads the local copy.
-            if (!localWranglerFlag) {
+            if (!fromLocal) {
                 try {
                     const parsed = localWrangler(file)
                     if (parsed !== undefined)

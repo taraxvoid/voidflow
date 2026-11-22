@@ -60,7 +60,7 @@ export type EnvConfig = {
     /**
      * Wrangler config path in the repo, read from its default branch (a plan
      * inside a checkout warns when the local file resolves differently, and
-     * `--local-wrangler` reads the checkout's instead).
+     * `--local-wrangler <env>` reads the checkout's instead).
      * Default: wrangler.jsonc.
      */
     wrangler?: string
@@ -320,7 +320,7 @@ export function missingWorkerMessage(
  * branch yet (a first preview's `env.preview` block, say).
  */
 export const UNMERGED_WRANGLER_HINT =
-    "Merge it first, pass --local-wrangler to read this checkout's instead, or set worker and zones on the env in voidflow.config.ts"
+    "Merge it first, pass --local-wrangler <env> to read this checkout's for that env, or set worker and zones on the env in voidflow.config.ts"
 
 /**
  * Warnings about an env's wrangler config: an `account_id` other than the

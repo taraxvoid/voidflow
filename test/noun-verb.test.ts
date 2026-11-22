@@ -28,6 +28,12 @@ describe('nounVerb', () => {
             verb: 'check',
             argv: ['tokens', 'cf', '--try', 'prod'],
         })
+        expect(
+            nounVerb('tokens', ['--local-wrangler', 'plan', 'apply']),
+        ).toEqual({
+            verb: 'apply',
+            argv: ['tokens', '--local-wrangler', 'plan'],
+        })
     })
     test('a flag value or a command after -- is not a verb', () => {
         expect(nounVerb('rulesets', ['--repo', 'apply'])).toBeNull()

@@ -108,12 +108,12 @@ export function splitVerbArgs(argv: string[]): VerbArgs {
             out.entireFleet = true
         } else if (a.startsWith('-')) {
             out.rest.push(a)
-            if (flag === '--repo') {
+            if (flag === '--repo' || flag === '--local-wrangler') {
                 const v = inline ?? argv[i + 1]
                 if (!v || (inline === undefined && v.startsWith('-')))
-                    throw new Error('--repo needs a value')
+                    throw new Error(`${flag} needs a value`)
                 if (inline === undefined) out.rest.push(argv[++i])
-                out.repo = v
+                if (flag === '--repo') out.repo = v
             }
         } else {
             pos.push(a)

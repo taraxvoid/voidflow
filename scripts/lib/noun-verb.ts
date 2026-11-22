@@ -32,4 +32,10 @@ export function nounVerb(
 const NOUNS = new Set(['rulesets', 'settings', 'tokens'])
 const VERBS = new Set(['plan', 'check', 'apply'])
 /** The flags the tools take a separate value for (`--repo x`, not `--repo=x`). */
-const VALUE_FLAGS = new Set(['--repo', '--config', '--repo-config', '--try'])
+const VALUE_FLAGS = new Set([
+    '--repo',
+    '--config',
+    '--repo-config',
+    '--try',
+    '--local-wrangler',
+])

@@ -99,6 +99,18 @@ describe('splitVerbArgs', () => {
         expect(splitVerbArgs(['--repo', 'rulesets']).tool).toBeUndefined()
     })
 
+    test('forwards --local-wrangler with its env, not as the tool', () => {
+        expect(
+            splitVerbArgs(['tokens', '--local-wrangler', 'preview']),
+        ).toMatchObject({
+            tool: 'cf-tokens',
+            rest: ['--local-wrangler', 'preview'],
+        })
+        expect(() => splitVerbArgs(['tokens', '--local-wrangler'])).toThrow(
+            '--local-wrangler needs a value',
+        )
+    })
+
     test('passes other flags through', () => {
         expect(splitVerbArgs(['rulesets', '--prune']).rest).toEqual(['--prune'])
     })

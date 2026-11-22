@@ -146,6 +146,9 @@ describe('cloudflare-preview failure hints', () => {
         )
         expect(err).toContain("'wrangler deploy --env preview'")
         expect(err).toContain(
+            "'--local-wrangler preview' if the block is not merged",
+        )
+        expect(err).toContain(
             "CLOUDFLARE_API_TOKEN in the 'preview' environment",
         )
         expect(err.indexOf('default branch')).toBeLessThan(

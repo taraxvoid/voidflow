@@ -145,10 +145,14 @@ runs:
         fi
         msg="wrangler preview failed (its error is above). On a first preview, check in this order:"
         if [ -n "$INPUT_ENV" ]; then
-          msg="$msg the env.$INPUT_ENV block is in the wrangler config on the default branch (voidflow reads it there, so until it merges the token is scoped to the production Worker; 'voidflow apply tokens --local-wrangler' reads this checkout's instead);"
+          msg="$msg the env.$INPUT_ENV block is in the wrangler config on the default branch (voidflow reads it there, so until it merges a plain 'voidflow apply tokens' scopes this token to the production Worker);"
         fi
         msg="$msg $worker has a deployed script, from '$deploy' run once with your own login (a Worker with only Previews does not count);"
-        msg="$msg 'voidflow apply tokens' has run since then, which mints the token scoped to that Worker and sets CLOUDFLARE_API_TOKEN$where."
+        if [ -n "$INPUT_ENV" ]; then
+          msg="$msg 'voidflow apply tokens' has run since then (with '--local-wrangler $INPUT_ENV' if the block is not merged yet), which mints the token scoped to that Worker and sets CLOUDFLARE_API_TOKEN$where. Check with 'voidflow plan tokens' that $INPUT_ENV shows that Worker, not the production one."
+        else
+          msg="$msg 'voidflow apply tokens' has run since then, which mints the token scoped to that Worker and sets CLOUDFLARE_API_TOKEN."
+        fi
         echo "::error::$msg" >&2
 
     - name: Remove secrets file

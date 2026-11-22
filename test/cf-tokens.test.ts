@@ -672,15 +672,31 @@ describe('voidflow tokens cf --repo-config', () => {
     })
 
     test('--local-wrangler needs --repo-config', async () => {
-        const r = await run(['--config', 'x.ts', '--local-wrangler'])
+        const r = await run(['--config', 'x.ts', '--local-wrangler', 'prod'])
         expect(r.code).toBe(2)
         expect(r.err).toContain('--local-wrangler reads the checkout')
     })
 
-    test('--local-wrangler is accepted with --repo-config', async () => {
-        const r = await run(['--repo-config', '@file', '--local-wrangler'])
+    test('--local-wrangler takes an env from the cloudflare section', async () => {
+        const r = await run([
+            '--repo-config',
+            '@file',
+            '--local-wrangler',
+            'prod',
+        ])
         expect(r.code).toBe(2)
         expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
+    })
+
+    test('--local-wrangler rejects an env the config does not list', async () => {
+        const r = await run([
+            '--repo-config',
+            '@file',
+            '--local-wrangler',
+            'preview',
+        ])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('--local-wrangler preview: no such env')
     })
 
     test('a config with no cloudflare section exits 2', async () => {

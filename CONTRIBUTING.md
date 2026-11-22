@@ -253,20 +253,21 @@ nothing it needs exists yet. Set it up in this order:
 
 1. Add the `env.preview` block (and its `previews` block) to the wrangler
    config. Either merge it on its own first, or keep it on the branch and pass
-   `--local-wrangler` in steps 3 and 4.
+   `--local-wrangler preview` in steps 3 and 4.
 2. Create the preview Worker once with your own login:
    `wrangler deploy --env preview`. It has to be a deployed script; Previews
    alone do not count.
-3. `voidflow plan tokens` (with `--local-wrangler` if the block is not merged
+3. `voidflow plan tokens` (with `--local-wrangler preview` if the block is not merged
    yet). Check that `preview` shows Worker `<name>-preview`, not the prod
    Worker.
 4. `voidflow apply tokens` (with the same flag). This mints the token and sets
    `CLOUDFLARE_API_TOKEN` in the `preview` environment.
 5. Re-run the preview job on the pull request.
 
-`--local-wrangler` reads the wrangler config from the checkout the
-`voidflow.config.ts` sits in instead of the default branch, and the plan says
-so on each env. It only works inside a repo (a fleet `--config` run has no
+`--local-wrangler <env>` reads that env's wrangler config from the checkout
+the `voidflow.config.ts` sits in instead of the default branch, and the plan
+says so on the env. Only the envs named (it repeats) read the checkout, so an
+unmerged change to prod's block cannot reach prod's token. It only works inside a repo (a fleet `--config` run has no
 checkout); there, set `worker: '<name>-preview'` and `zones: []` on the env
 until the block merges, then drop them. Once the block is on the default
 branch, a plan without the flag shows no drift.
