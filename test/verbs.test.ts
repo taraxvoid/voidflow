@@ -297,6 +297,12 @@ describe('voidflow plan|check|apply|try', () => {
         expect(r.ghCalled).toBe(true)
     })
 
+    test('a read that fails is exit 2 under check, never drift', async () => {
+        const r = await inRepo(['check', 'rulesets'], TOOL)
+        expect(r.ghCalled).toBe(true)
+        expect(r.code).toBe(2)
+    })
+
     test('VOIDFLOW_CONFIG no longer redirects a run away from the repo file, and says so', async () => {
         const r = await inRepo(['plan', 'rulesets'], TOOL, {
             VOIDFLOW_CONFIG: '/nonexistent/infra',

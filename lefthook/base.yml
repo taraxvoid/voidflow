@@ -191,14 +191,23 @@ pre-push:
         vf=./node_modules/.bin/voidflow
         [ -x "$vf" ] || exit 0
         changed=false
+        other=false
+        head=$(git rev-parse HEAD)
         while read -r _local_ref local_sha _remote_ref _remote_sha; do
           case "$local_sha" in *[!0]*) ;; *) continue ;; esac
           # A commit counts as new when no ref of the remote contains it.
           if [ -n "$(git log -n 1 --format=%H "$local_sha" --not --remotes="{1}" -- voidflow.config.ts 2>/dev/null)" ]; then
-            changed=true
+            if [ "$local_sha" = "$head" ]; then changed=true; else other=true; fi
           fi
         done
+        if [ "$other" = true ]; then
+          echo "pre-push: voidflow.config.ts changes in a commit that is not checked out; not checked here (CI validates it)."
+        fi
         [ "$changed" = true ] || exit 0
+        if ! git diff --quiet HEAD -- voidflow.config.ts; then
+          echo "pre-push: voidflow.config.ts has uncommitted changes; not checked here (CI validates the pushed commit)."
+          exit 0
+        fi
         unset $(git rev-parse --local-env-vars)
         code=0
         "$vf" validate || code=$?

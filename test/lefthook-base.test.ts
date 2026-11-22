@@ -303,6 +303,45 @@ describe('lefthook/base.yml voidflow sync on config changes', () => {
         expect(logged(log)).toEqual(['validate'])
     })
 
+    test('a pushed commit that is not checked out is a note, not checked against the working tree', async () => {
+        const { repo, log, pushed } = setup()
+        writeFileSync(
+            join(repo, 'voidflow.config.ts'),
+            "export default { kind: 'site' }\n",
+        )
+        git(repo, 'commit', '-q', '-am', 'change', '--no-verify')
+        const changed = git(repo, 'rev-parse', 'HEAD')
+        git(repo, 'checkout', '-q', pushed)
+        const r = await run(
+            repo,
+            `refs/heads/feature ${changed} refs/heads/feature ${ZERO}\n`,
+        )
+        expect(r.code).toBe(0)
+        expect(r.out).toContain('not checked out')
+        expect(logged(log)).toEqual([])
+    })
+
+    test('uncommitted edits to the config skip the check', async () => {
+        const { repo, log, pushed } = setup()
+        writeFileSync(
+            join(repo, 'voidflow.config.ts'),
+            "export default { kind: 'site' }\n",
+        )
+        git(repo, 'commit', '-q', '-am', 'change', '--no-verify')
+        const head = git(repo, 'rev-parse', 'HEAD')
+        writeFileSync(
+            join(repo, 'voidflow.config.ts'),
+            "export default { kind: 'x' }\n",
+        )
+        const r = await run(
+            repo,
+            `refs/heads/main ${head} refs/heads/main ${pushed}\n`,
+        )
+        expect(r.code).toBe(0)
+        expect(r.out).toContain('uncommitted changes')
+        expect(logged(log)).toEqual([])
+    })
+
     test('a push that leaves the config alone runs nothing', async () => {
         const { repo, log, pushed } = setup()
         git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'other')
