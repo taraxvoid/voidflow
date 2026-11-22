@@ -96,7 +96,10 @@ token commands run locally, never from CI. Like a fleet run, a plan needs `gh`
 with admin on the repo; it reads the wrangler config from the default branch,
 prints where each env's Worker and zones came from, and warns when the
 checkout's wrangler file resolves differently or its `account_id` is not the
-env's account. The admin token's permissions are listed in
+env's account. `--local-wrangler` reads the checkout's file instead, for a
+first preview whose `env.preview` block is not merged yet: until then
+`preview` resolves to the prod Worker (see
+[First preview](../CONTRIBUTING.md#first-preview)). The admin token's permissions are listed in
 [Cloudflare deploy tokens as code](../CONTRIBUTING.md#cloudflare-deploy-tokens-as-code).
 
 ## Settings
