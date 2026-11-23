@@ -7,7 +7,8 @@ name: Validation
 # merge queue (the required check must report there or the queue stalls),
 # and must grant `contents: read` and `pull-requests: read`.
 # Callers may add `closed` to the pull_request types (e.g. to clean up PR
-# previews); validation skips closed events, so they need no guard of their own.
+# previews); validation skips closed events, and PR runs take a per-PR
+# concurrency group, so a merge's `closed` run can't cancel its push run.
 # e2e:all runs on ready (non-draft) PRs, merge_group and push; the heavy,
 # non-blocking a11y and lighthouse suites run only on schedule and
 # workflow_dispatch. The cron lives in the caller; remove it to stop paying.
@@ -123,7 +124,10 @@ on:
         default: false
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # pull_request runs group by PR number, not github.ref: a merged PR's
+  # `closed` run has github.ref = refs/heads/<base>, so it would share the
+  # base branch's group and cancel the merge's push run (and its deploy).
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   # Only superseded PR pushes are cancelled: on trunk, a second quick merge to
   # main must not cancel the first one's validation (and so its deploy).
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

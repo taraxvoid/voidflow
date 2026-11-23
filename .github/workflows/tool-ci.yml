@@ -27,7 +27,10 @@ on:
         default: false
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # pull_request runs group by PR number, not github.ref: a merged PR's
+  # `closed` run has github.ref = refs/heads/<base>, so it would share the
+  # base branch's group and cancel the merge's push run (and its deploy).
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: true
 
 permissions:
