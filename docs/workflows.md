@@ -167,16 +167,16 @@ jobs:
 
 ## Tool release
 
-For tools published to npm: release-please on branch channels (`main` to
-`latest`, `next` to `next`, `release/N.x` to `release-N.x`), then the packed
+For tools published to npm: release-please on `main` (stable releases to
+`latest`; canaries are cut from `main` on demand and published under `next`), then the packed
 tarball is attested and staged with `npm stage publish`, so nothing goes live
 until you approve it with 2FA, and the bytes on npm are the attested bytes.
-Each channel reads `.release-please/<main|next|maintenance>.json` and its
-`-manifest.json`; a branch without one fails. Needs a release bot GitHub App
+Release-please reads `.release-please/main.json` and its
+`main-manifest.json`. Needs a release bot GitHub App
 (so the release PR's CI runs) and npm trusted publishing configured with
 **your** workflow file (e.g. `release.yml`) and the `npm` environment.
-Create that environment yourself and limit its deployment branches to your
-release branches (`main`, `next`, `release/*`): npm only checks the workflow
+Create that environment yourself and limit its deployment branches to
+`main`: npm only checks the workflow
 file and environment name, so an unrestricted environment would let any
 branch's run of the caller publish.
 
