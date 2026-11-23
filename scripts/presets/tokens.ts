@@ -46,10 +46,10 @@ import {
     sameToken,
     type Token,
     tokenName,
+    UNMERGED_WRANGLER_HINT,
     WORKER_EDITOR,
     WORKERS_ROUTES_WRITE,
     WORKERS_SCRIPTS_WRITE,
-    UNMERGED_WRANGLER_HINT,
     type WranglerTarget,
     wranglerWarnings,
 } from '../../cloudflare/tokens.ts'
