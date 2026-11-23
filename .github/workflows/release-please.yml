@@ -3,10 +3,9 @@ name: Release Please
 # Release channels (see RELEASING.md):
 #   main         stable      npm dist-tag `latest`
 #   main+canary  canary      npm dist-tag `next`  (X.Y.Z-next.N, on demand)
-#   release/N.x  maintenance npm dist-tag `release-N.x`
 #
-# On every push to main or a maintenance branch release-please maintains a
-# standing release PR using that branch's config from .release-please/. Merging
+# On every push to main release-please maintains a standing release PR using
+# .release-please/main.json. Merging
 # it bumps the version files, pushes the vX.Y.Z tag and creates the GitHub
 # release (all by release-please itself), then the publish job pushes the
 # tagged commit to npm and JSR under the channel's dist-tag.
@@ -29,15 +28,14 @@ name: Release Please
 #
 on:
   push:
-    branches: [main, "release/**"]
+    branches: [main]
   # Manual run, from the branch you pick under "Use workflow from". Give it
   # exactly one of:
   #  - tag: republish an existing release's tag (e.g. after fixing npm
   #    trusted-publisher config); skips release-please and only runs `publish`.
-  #    main takes a stable tag or a canary tag (X.Y.Z-next.N), release/N.x its
-  #    own line's tags. A tag whose version does not fit that channel, or whose
-  #    commit is not on that branch (a canary's parent, for a canary tag), is
-  #    rejected.
+  #    main takes a stable tag or a canary tag (X.Y.Z-next.N). A tag whose
+  #    version does not fit that channel, or whose commit is not on main (a
+  #    canary's parent, for a canary tag), is rejected.
   #  - canary: cut and publish a canary from main's tip.
   workflow_dispatch:
     inputs:
@@ -267,10 +265,9 @@ jobs:
 
       # Abort before anything is published unless the tag belongs to this
       # channel: its version fits the channel (a -next tag on a stable run, a
-      # stable tag on a canary run, or another line's tag on release/N.x are
-      # rejected) and the tagged commit is on this branch (so a maintenance tag
-      # cannot be republished from main, or the reverse). A canary's commit is
-      # never on main; its parent is, and it may change only the version files.
+      # stable tag on a canary run are rejected) and the tagged commit is on
+      # this branch. A canary's commit is never on main; its parent is, and it
+      # may change only the version files.
       # Compare against the branch tip (origin/<branch>, fetched by the checkout
       # above), not HEAD: release-please tags the branch as it is when it runs,
       # so if the release PR merges while an earlier push's run is in flight,
@@ -507,7 +504,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Stable releases only: v<major> (v0 until 1.0) follows the newest stable
-  # release. Prereleases and maintenance releases never move it. Immutable
+  # release. Prereleases never move it. Immutable
   # vX.Y.Z tags are untouched.
   floating-tag:
     name: Move floating major tag
