@@ -55,6 +55,8 @@ export type VerbArgs = {
     prune: boolean
     rotate: boolean
     groups: boolean
+    /** tokens: envs to read the checkout's wrangler config for. */
+    localWrangler: string[]
     noColor: boolean
     help: boolean
     /** apply: write without asking. */
@@ -70,6 +72,7 @@ export function parseVerbArgs(verb: Command, argv: string[]): VerbArgs {
         prune: false,
         rotate: false,
         groups: false,
+        localWrangler: [],
         noColor: false,
         help: false,
         yes: false,
@@ -83,7 +86,14 @@ export function parseVerbArgs(verb: Command, argv: string[]): VerbArgs {
             break
         }
         const flag = a.split('=', 1)[0]
-        if (a === '-h' || a === '--help') out.help = true
+        if (flag === '--local-wrangler') {
+            const eq = a.indexOf('=')
+            const v = eq >= 0 ? a.slice(eq + 1) : argv[i + 1]
+            if (!v || (eq < 0 && v.startsWith('-')))
+                throw new Error('--local-wrangler needs a value')
+            if (eq < 0) i++
+            out.localWrangler.push(v)
+        } else if (a === '-h' || a === '--help') out.help = true
         else if (Object.hasOwn(REMOVED, flag))
             throw new Error(`${flag}: ${REMOVED[flag]}`)
         else if (a === '--prune') out.prune = true
@@ -137,6 +147,12 @@ export function parseVerbArgs(verb: Command, argv: string[]): VerbArgs {
                 `apply needs a preset: voidflow apply ${PRESETS.join('|')}`,
             )
     }
+    if (
+        out.localWrangler.length > 0 &&
+        out.preset !== 'tokens' &&
+        !(verb === 'try' || out.preset === undefined)
+    )
+        throw new Error('--local-wrangler is a tokens flag')
     if (out.groups && (verb !== 'plan' || out.preset !== 'tokens'))
         throw new Error('--groups goes with `voidflow plan tokens`')
     if (out.rotate && out.preset !== undefined && out.preset !== 'tokens')
@@ -163,6 +179,7 @@ with no network calls: exit 0 when it is valid, 2 naming each problem by path.`
 
   --prune      ${verb === 'apply' ? 'also delete' : 'with apply, delete'} what the config lists under retire (rulesets, tokens)
   --rotate     tokens: rotate every token now
+  --local-wrangler <env>  tokens: read this env's wrangler config from the checkout, not the default branch (to mint a first preview token before its env block merges); repeatable
 ${verb === 'plan' ? '  --groups     tokens: print the live names of the permission groups used\n' : ''}${verb === 'apply' ? '  -y, --yes    write without asking (needed without a terminal)\n' : ''}  --no-color   no ANSI colors
 
 ${
@@ -222,6 +239,9 @@ export function applyCommand(preset: Preset, a: VerbArgs): string {
         preset,
         ...(a.prune ? ['--prune'] : []),
         ...(a.rotate && preset === 'tokens' ? ['--rotate'] : []),
+        ...(preset === 'tokens'
+            ? a.localWrangler.flatMap((e) => ['--local-wrangler', e])
+            : []),
     ].join(' ')
 }
 
@@ -367,6 +387,7 @@ export function verbMain(verb: Command) {
             prune: a.prune,
             rotate: a.rotate,
             noColor: a.noColor,
+            localWrangler: a.localWrangler,
             bare,
             applyHint: `run \`${applyCommand(preset, a)}\``,
         })

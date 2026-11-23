@@ -26,6 +26,8 @@ export type PresetCtx = {
     /** tokens: rotate every token now. */
     rotate: boolean
     noColor: boolean
+    /** tokens: envs whose wrangler config is read from the checkout, not the default branch. */
+    localWrangler: string[]
     /** No preset was named, so one that cannot run here skips instead of failing. */
     bare: boolean
     /** How to apply what a plan shows, for its summary line: `run `voidflow apply ...``. */
