@@ -37,6 +37,41 @@ function need<T>(v: T | undefined, what: string): T {
     return v
 }
 
+/**
+ * A site's fnox.toml: the admin token for the token verbs, behind fnox's
+ * proxy. The [proxy] tables are voidflow's own (fnox.toml), so the two stay
+ * the same.
+ */
+function siteFnox(root: string): string {
+    const own = read(root, 'fnox.toml')
+    const at = own.indexOf('[proxy]')
+    if (at === -1)
+        throw new Error('build-templates: [proxy] not found in fnox.toml')
+    return `# The Cloudflare admin token for \`voidflow plan tokens\` and \`apply tokens\`
+# (the cloudflare section of voidflow.config.ts), declared without its value.
+# fnox: https://fnox.jdx.dev (\`mise use fnox\`). Nothing here is secret.
+#
+# Store the token once (hidden input), then run the verbs behind fnox's proxy:
+#   fnox set -k "voidflow-cf-token-admin:{{repo}}" CF_TOKEN_ADMIN
+#   fnox proxy run -- bunx voidflow plan tokens
+# voidflow sees a placeholder; fnox puts the real token into the Authorization
+# header only on Cloudflare API calls. If cloudflare.adminTokenEnv names
+# another variable, rename the secret and the rule's \`secret\` to match. To
+# keep the token on a YubiKey (fido2) or another backend, redefine the secret
+# in a gitignored fnox.local.toml: https://github.com/taraxvoid/voidflow/blob/main/docs/config.md#cloudflare-tokens
+
+[providers.cf-admin]
+type = "keychain"
+service = "fnox"
+
+[secrets]
+# env = false: the shell hook and \`fnox exec\` leave it out, so it reaches no
+# shell; only \`fnox proxy run\` resolves it.
+CF_TOKEN_ADMIN = { provider = "cf-admin", value = "voidflow-cf-token-admin:{{repo}}", if_missing = "error", env = false }
+
+${own.slice(at)}`
+}
+
 const sarifJob = `# Uncomment to upload gitleaks/zizmor results to code scanning (public repos, or private with GitHub Code Security).
 #   sarif:
 #     needs: validate
@@ -501,9 +536,10 @@ export default definePreviewConfig({ ciPort: 4141 })
             },
         }),
     )
+    t.set('site/fnox.toml', siteFnox(root))
     t.set(
         'site/gitignore',
-        '.unlighthouse/\ntest-results/\nplaywright-report/\n',
+        '.unlighthouse/\ntest-results/\nplaywright-report/\nfnox.local.toml\n',
     )
 
     return new Map([...t].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))

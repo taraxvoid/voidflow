@@ -89,6 +89,30 @@ describe('planFiles', () => {
         expect(t).not.toContain('tsconfig.json')
         expect(fileNames('site')).not.toContain('tsconfig')
         expect(fileNames('tool')).toContain('tsconfig')
+        expect(fileNames('tool')).not.toContain('fnox')
+    })
+    test('site fnox.toml: repo-owned, admin token only behind the proxy', () => {
+        const a = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
+            (x) => x.name === 'fnox',
+        )
+        expect(a?.target).toBe('fnox.toml')
+        expect(a?.content).not.toContain('Written by voidflow')
+        expect(a?.content).not.toContain('{{')
+        expect(a?.content).toContain('"voidflow-cf-token-admin:o/r"')
+        expect(a?.content).toMatch(/^CF_TOKEN_ADMIN = \{.*env = false \}$/m)
+        // The same proxy tables as voidflow's own fnox.toml.
+        const own = readFileSync(
+            new URL('../fnox.toml', import.meta.url),
+            'utf8',
+        )
+        const proxy = own.slice(own.indexOf('[proxy]'))
+        expect(a?.content.endsWith(proxy)).toBe(true)
+        writeFileSync(join(dir, 'fnox.toml'), 'mine\n')
+        const kept = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
+            (x) => x.name === 'fnox',
+        )
+        expect(kept?.status).toBe('unchanged')
+        expect(kept?.content).toBe('mine\n')
     })
     test('config renders kind only, without a marker', () => {
         const a = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(

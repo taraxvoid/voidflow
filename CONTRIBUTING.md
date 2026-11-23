@@ -276,34 +276,24 @@ hook doesn't export it into your shell either. To use another fnox provider
 fnox. A repo's `cloudflare.adminTokenEnv` other than `CF_TOKEN_ADMIN` has no
 proxy rule; set that variable yourself.
 
-To keep the token behind a YubiKey touch, use fnox's `fido2` provider in
-`fnox.local.toml`:
-
-```sh
-fnox -c fnox.local.toml provider add cf-admin fido2   # PIN if set, two touches
-fnox -c fnox.local.toml set CF_TOKEN_ADMIN --provider cf-admin
-```
-
-Then add `env = false` to that secret in `fnox.local.toml` (an entry there
-replaces the one in `fnox.toml` whole, and the shell hook can't run `fido2`).
-Run `just cf-tokens-plan` once to check it, then delete the Keychain copy
-with `security delete-generic-password -s fnox -a voidflow-cf-token-admin`.
-Keep the provider named `cf-admin`: the name is part of key derivation. The
-ciphertext only decrypts with the key, so copying `fnox.local.toml` into a
-new worktree is fine. Leave `fnox daemon` off: it caches resolved values, so
-after one touch any process of yours could read the token from it.
+To keep the token behind a YubiKey touch, set up fnox's `fido2` provider in
+`fnox.local.toml` as in [Keeping the admin token out of voidflow](docs/config.md#keeping-the-admin-token-out-of-voidflow)
+(here the Keychain copy to delete is `-a voidflow-cf-token-admin`, and
+`just cf-tokens-plan --config <module>` is the check).
 
 A repo can also hold its own tokens in the `cloudflare` section of its
 `voidflow.config.ts` ([`docs/config.md`](docs/config.md#cloudflare-tokens)).
 There `cloudflare.adminTokenEnv` names the variable with the admin token
 (default `CF_TOKEN_ADMIN`), so a repo in another Cloudflare account uses a
-token for that account. Run the verbs inside the repo, with that variable
-set:
+token for that account. Fleet configs are deprecated, so this is the way to
+go. Run the verbs inside the repo, behind `fnox proxy run` with the repo's
+`fnox.toml` (`voidflow init --kind site` writes a sample; see
+[Keeping the admin token out of voidflow](docs/config.md#keeping-the-admin-token-out-of-voidflow)):
 
 ```sh
 cd ../example_project
-bunx @taraxvoid/voidflow@<version> plan tokens   # tokens means tokens cf
-bunx @taraxvoid/voidflow@<version> apply tokens
+fnox proxy run -- bunx @taraxvoid/voidflow@<version> plan tokens   # tokens means tokens cf
+fnox proxy run -- bunx @taraxvoid/voidflow@<version> apply tokens
 ```
 
 For the fleet, with the infra repo found as in [`docs/fleet.md`](docs/fleet.md#discovery):
