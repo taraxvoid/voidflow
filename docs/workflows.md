@@ -135,9 +135,14 @@ jobs:
 `voidflow-drift.yml` checks GitHub against the caller's `voidflow.config.ts`
 and keeps one issue, titled "voidflow: GitHub differs from voidflow.config.ts",
 open while they differ, updating its body on each run and closing it once a
-run is in sync. It runs the voidflow version the caller's `package.json` pins
-(`npx`, no install). Exit 2 (the token cannot read something, or the config
-does not load) warns and leaves the issue alone. Input: `runner`.
+run is in sync. It always checks the default branch. A `check` job installs
+the caller's dependencies from its lockfile (bun, pnpm or aube, detected as
+the lefthook hooks do) and runs the voidflow it pins; a separate `report` job,
+the only one with `issues: write`, edits the issue from that result, so the
+token that writes issues never shares a job with installed code. Exit 2 (a
+read failed, the token cannot read something, or the config does not load)
+warns and leaves the issue alone; a failed install fails the run and leaves
+it alone too. Inputs: `runner`, `socket-scanner` (as in tool-ci).
 `voidflow init` writes this caller:
 
 ```yaml

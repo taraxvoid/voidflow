@@ -226,8 +226,9 @@ as a plan there, applied after merge, and checked for drift from then on.
 3. **On `main`**, the `voidflow-drift` workflow (`init` writes its caller,
    `.github/workflows/voidflow-drift.yml`) runs `voidflow check` after each
    push and weekly, and keeps one issue open while GitHub differs from the
-   file, closing it once a later run is in sync. It runs the voidflow version
-   `package.json` pins, with `npx`.
+   file, closing it once a later run is in sync. It installs from the
+   lockfile and runs the voidflow version `package.json` pins, on the
+   default branch.
 
 Both CI steps run only when the repo defines a `check:voidflow` script (the
 templates add `voidflow check`) and `node_modules/.bin/voidflow` is
