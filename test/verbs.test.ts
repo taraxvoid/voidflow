@@ -58,6 +58,23 @@ describe('parseVerbArgs', () => {
             expect(() => parseVerbArgs('plan', ['rulesets', flag])).toThrow(why)
     })
 
+    test('--local-wrangler collects its envs and needs a value', () => {
+        expect(
+            parseVerbArgs('plan', [
+                'tokens',
+                '--local-wrangler',
+                'preview',
+                '--local-wrangler=staging',
+            ]).localWrangler,
+        ).toEqual(['preview', 'staging'])
+        expect(() =>
+            parseVerbArgs('plan', ['tokens', '--local-wrangler']),
+        ).toThrow('--local-wrangler needs a value')
+        expect(() =>
+            parseVerbArgs('plan', ['rulesets', '--local-wrangler', 'x']),
+        ).toThrow('tokens flag')
+    })
+
     test('an unknown flag is an error', () => {
         expect(() => parseVerbArgs('plan', ['--nope'])).toThrow(
             'unknown flag --nope',
@@ -178,6 +195,12 @@ describe('applyCommand', () => {
         expect(
             applyCommand('tokens', args(['tokens', '--rotate', '--prune'])),
         ).toBe('voidflow apply tokens --prune --rotate')
+        expect(
+            applyCommand(
+                'tokens',
+                args(['tokens', '--local-wrangler', 'preview']),
+            ),
+        ).toBe('voidflow apply tokens --local-wrangler preview')
     })
 })
 

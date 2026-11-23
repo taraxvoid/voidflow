@@ -66,9 +66,19 @@ runs:
         INPUT_DELETE: ${{ inputs.delete }}
         INPUT_ENV: ${{ inputs.env }}
         SECRETS: ${{ inputs.secrets }}
+        # Only whether it is set: the token itself stays out of this step.
+        TOKEN_SET: ${{ inputs.cloudflare-api-token != '' }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         REF_NAME: ${{ github.head_ref || github.ref_name }}
       run: |
+        # An unset secret expands to '', which 'required' lets through.
+        if [ "$TOKEN_SET" != true ]; then
+          where="the job's environment"
+          [ -n "$INPUT_ENV" ] && where="the '$INPUT_ENV' environment"
+          echo "::error::cloudflare-api-token is empty. Check that the job sets 'environment: ${INPUT_ENV:-<env>}' and that CLOUDFLARE_API_TOKEN exists in $where; 'voidflow apply tokens' mints the token and sets that secret." >&2
+          exit 1
+        fi
+
         name="$INPUT_NAME"
         if [ -z "$name" ]; then
           if [ -n "$PR_NUMBER" ]; then name="pr-$PR_NUMBER"; else name="$REF_NAME"; fi
@@ -115,6 +125,35 @@ runs:
         # a lockfile-inferred bun would be missing. It needs only Wrangler.
         packageManager: ${{ inputs.delete == 'true' && 'npm' || '' }}
         command: ${{ steps.resolve.outputs.cmd }}
+
+    - name: Explain a failed Preview
+      id: explain
+      if: ${{ failure() && steps.preview.outcome == 'failure' }}
+      shell: bash
+      env:
+        INPUT_ENV: ${{ inputs.env }}
+      # wrangler's own error is above; on a first preview it rarely says
+      # which piece is missing, so list them in setup order.
+      run: |
+        worker="the production Worker"
+        deploy="wrangler deploy"
+        where=""
+        if [ -n "$INPUT_ENV" ]; then
+          worker="env.$INPUT_ENV's Worker (default <name>-$INPUT_ENV)"
+          deploy="wrangler deploy --env $INPUT_ENV"
+          where=" in the '$INPUT_ENV' environment"
+        fi
+        msg="wrangler preview failed (its error is above). On a first preview, check in this order:"
+        if [ -n "$INPUT_ENV" ]; then
+          msg="$msg the env.$INPUT_ENV block is in the wrangler config on the default branch (voidflow reads it there, so until it merges a plain 'voidflow apply tokens' scopes this token to the production Worker);"
+        fi
+        msg="$msg $worker has a deployed script, from '$deploy' run once with your own login (a Worker with only Previews does not count);"
+        if [ -n "$INPUT_ENV" ]; then
+          msg="$msg 'voidflow apply tokens' has run since then (with '--local-wrangler $INPUT_ENV' if the block is not merged yet), which mints the token scoped to that Worker and sets CLOUDFLARE_API_TOKEN$where. Check with 'voidflow plan tokens' that $INPUT_ENV shows that Worker, not the production one."
+        else
+          msg="$msg 'voidflow apply tokens' has run since then, which mints the token scoped to that Worker and sets CLOUDFLARE_API_TOKEN."
+        fi
+        echo "::error::$msg" >&2
 
     - name: Remove secrets file
       if: ${{ always() && inputs.secrets != '' }}
