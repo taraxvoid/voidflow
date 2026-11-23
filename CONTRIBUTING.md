@@ -263,7 +263,8 @@ deploy tokens, so it stays on a maintainer's machine and never goes into CI.
 it: the committed [`fnox.toml`](fnox.toml) declares the secret, but no value,
 and a `cf-admin` provider backed by the macOS Keychain. Store the value once
 with `fnox set -k voidflow-cf-token-admin CF_TOKEN_ADMIN` (it prompts with
-hidden input), and confirm with `just doctor`. The targets run under `fnox
+hidden input), and confirm it resolves with `fnox check` (`just doctor` only
+validates the proxy config, so it never asks for a YubiKey touch). The targets run under `fnox
 proxy run`: the script sees a placeholder, and fnox puts the real token into
 the `Authorization` header only on calls to `api.cloudflare.com/client/v4`
 (the `[proxy]` table in `fnox.toml`), so the token never reaches the `bun`

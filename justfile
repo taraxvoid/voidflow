@@ -113,7 +113,7 @@ doctor:
     @command -v act >/dev/null && echo "act:  $(act --version)" || echo "act:  NOT FOUND (needed for local dry-run - not a blocker to commit/push)"
     @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (run 'mise install'; holds CF_TOKEN_ADMIN for 'just cf-tokens-*')"
     @# `fnox proxy rules` validates the config without resolving the secret (a fido2 provider would need a touch)
-    @command -v fnox >/dev/null && { fnox proxy rules >/dev/null 2>&1 && echo "fnox proxy:  config valid (CF_TOKEN_ADMIN is resolved on use)" || echo "fnox proxy:  config invalid (run 'fnox proxy rules'; see CONTRIBUTING.md)"; } || true
+    @command -v fnox >/dev/null && { fnox proxy rules >/dev/null 2>&1 && echo "fnox proxy:  config valid (not the stored token: 'fnox check' resolves CF_TOKEN_ADMIN)" || echo "fnox proxy:  config invalid (run 'fnox proxy rules'; see CONTRIBUTING.md)"; } || true
 
 # So a relative --config (another repo's fleet map) resolves from where `just`
 # was run, not this directory. See scripts/lib/config.ts.
