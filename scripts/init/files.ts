@@ -218,6 +218,11 @@ type Selection = {
     lockPaths?: string[] | null
     /** What merging settings changes in an existing voidflow.config.ts; unset when nothing. */
     configChange?: string
+    /**
+     * The existing voidflow.config.ts's data, before the merge: the file is
+     * rewritten only when it is exactly what init would write for it.
+     */
+    configBefore?: Record<string, unknown>
 }
 
 /** The file items `sel` selects, in FILE_ITEMS order. */
@@ -395,17 +400,31 @@ function planPackage(
  * A repo-owned file: created when missing, merged when `change` says what
  * init adds to it, otherwise kept unless forced.
  */
+/**
+ * A file the repo owns once written. `change` is what a merge would add, and
+ * `pristine` what init would write for the file's current data: a merge
+ * happens only when the file still is that, so comments and layout someone
+ * added are never rewritten away.
+ */
 function planRepoOwned(
     path: string,
     content: string,
     sel: Selection,
     change?: string,
+    pristine?: string,
 ): Pick<FileAction, 'status' | 'content' | 'detail'> {
     if (!existsSync(path)) return { status: 'create', content }
     const existing = readFileSync(path, 'utf8')
     if (existing === content) return { status: 'unchanged', content }
     if (sel.force) return { status: 'overwrite', content }
-    if (change) return { status: 'merge', content, detail: change }
+    if (change && existing === pristine)
+        return { status: 'merge', content, detail: change }
+    if (change)
+        return {
+            status: 'unchanged',
+            content: existing,
+            detail: 'edited by hand, kept (see notes for what to add)',
+        }
     return {
         status: 'unchanged',
         content: existing,
@@ -458,6 +477,12 @@ export function planFiles(
                     texts[0] ?? '',
                     sel,
                     item.name === 'config' ? sel.configChange : undefined,
+                    item.name === 'config' && sel.configBefore
+                        ? templateTexts(item, {
+                              ...ctx,
+                              config: sel.configBefore,
+                          })[0]
+                        : undefined,
                 ),
             })
             continue

@@ -29,8 +29,11 @@ export default {
   the rulesets `RepoConfig` (see [`rulesets/index.ts`](../rulesets/index.ts):
   `tiers`, `checks`, `codeowners`, `linearHistory`, `mergeQueue`, `bypass`,
   `aka`, `retire`, `environments`), or spells the rulesets out in full as
-  `{ rulesets: Ruleset[], retire: string[] }` for protection that does not fit
-  the tiers. Unknown fields are errors, reported by path.
+  `{ raw: Ruleset[], retire?: string[] }` for protection that does not fit
+  the tiers. A snapshot of what GitHub has now (`gh api
+  repos/<owner>/<repo>/rulesets/<id>`, keeping `name`, `target`,
+  `enforcement`, `conditions`, `bypass_actors` and `rules`) plans with no
+  drift. Unknown fields are errors, reported by path.
 - `cloudflare` is optional: the repo's scoped Cloudflare deploy tokens, for
   `voidflow plan|check|apply tokens` (see [Cloudflare tokens](#cloudflare-tokens)).
 - `settings` is optional: the repo settings to check on top of the baseline,
@@ -123,9 +126,10 @@ export default {
 - `init` writes both: a fresh config records the run's `--enable-*` flags and
   setting `--skip`s. In a repo that already has a config, the file's settings
   run along with the flags', and when the flags add any, `init` writes the file
-  back from its data. Comments in it are not kept (its row says so), so review
-  the diff before committing. With `--skip config`, it prints the lines to add
-  instead.
+  back from its data, but only when the file is exactly what `init` would
+  write for that data. A file with comments or its own layout is kept as it
+  is, and `init` prints the lines to add instead, as it does with
+  `--skip config`. `--force` overwrites it anyway.
 
 <!-- settings:start -->
 | group | settings |
