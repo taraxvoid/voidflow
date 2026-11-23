@@ -10,6 +10,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { proxyTables } from '../scripts/build-templates.ts'
 import { applyFiles, fileNames, planFiles } from '../scripts/init/files.ts'
 import type { Kind, RenderCtx } from '../scripts/init/render.ts'
 import { loadVoidflowConfig } from '../scripts/lib/repo-config.ts'
@@ -106,14 +107,35 @@ describe('planFiles', () => {
             new URL('../fnox.toml', import.meta.url),
             'utf8',
         )
-        const proxy = own.slice(own.indexOf('[proxy]'))
-        expect(a?.content.endsWith(proxy)).toBe(true)
+        expect(a?.content.endsWith(proxyTables(own))).toBe(true)
+        expect(a?.content).toContain('egress = "strict"')
         writeFileSync(join(dir, 'fnox.toml'), 'mine\n')
         const kept = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
             (x) => x.name === 'fnox',
         )
         expect(kept?.status).toBe('unchanged')
         expect(kept?.content).toBe('mine\n')
+    })
+    test('proxyTables stops at the next non-proxy table', () => {
+        const toml = [
+            '[secrets]',
+            'A = { value = "a" }',
+            '',
+            '[proxy]',
+            'egress = "strict"',
+            '',
+            '[[proxy.rules]]',
+            'secret = "A"',
+            '',
+            '# about B',
+            '[secrets.more]',
+            'B = { value = "b" }',
+            '',
+        ].join('\n')
+        expect(proxyTables(toml)).toBe(
+            '[proxy]\negress = "strict"\n\n[[proxy.rules]]\nsecret = "A"\n',
+        )
+        expect(() => proxyTables('[secrets]\n')).toThrow('[proxy] not found')
     })
     test('config renders kind only, without a marker', () => {
         const a = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(

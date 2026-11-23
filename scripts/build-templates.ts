@@ -38,27 +38,47 @@ function need<T>(v: T | undefined, what: string): T {
 }
 
 /**
+ * The `[proxy]` and `[[proxy.rules]]` tables of a fnox.toml, wherever they
+ * sit: from the `[proxy]` header up to the next table that isn't a proxy one,
+ * less the comments and blank lines that lead into that table.
+ */
+export function proxyTables(toml: string): string {
+    const lines = toml.split('\n')
+    const start = lines.findIndex((l) => l.trim() === '[proxy]')
+    if (start === -1)
+        throw new Error('build-templates: [proxy] not found in fnox.toml')
+    let end = lines.length
+    for (let i = start + 1; i < lines.length; i++) {
+        const l = lines[i].trim()
+        if (l.startsWith('[') && !/^\[\[?proxy[.\]]/.test(l)) {
+            end = i
+            break
+        }
+    }
+    while (end > start && /^\s*(#.*)?$/.test(lines[end - 1])) end--
+    return `${lines.slice(start, end).join('\n')}\n`
+}
+
+/**
  * A site's fnox.toml: the admin token for the token verbs, behind fnox's
  * proxy. The [proxy] tables are voidflow's own (fnox.toml), so the two stay
  * the same.
  */
 function siteFnox(root: string): string {
-    const own = read(root, 'fnox.toml')
-    const at = own.indexOf('[proxy]')
-    if (at === -1)
-        throw new Error('build-templates: [proxy] not found in fnox.toml')
+    const proxy = proxyTables(read(root, 'fnox.toml'))
     return `# The Cloudflare admin token for \`voidflow plan tokens\` and \`apply tokens\`
 # (the cloudflare section of voidflow.config.ts), declared without its value.
 # fnox: https://fnox.jdx.dev (\`mise use fnox\`). Nothing here is secret.
 #
 # Store the token once (hidden input), then run the verbs behind fnox's proxy:
 #   fnox set -k "voidflow-cf-token-admin:{{repo}}" CF_TOKEN_ADMIN
-#   fnox proxy run -- bunx voidflow plan tokens
+#   fnox proxy run -- bun run voidflow plan tokens
 # voidflow sees a placeholder; fnox puts the real token into the Authorization
-# header only on Cloudflare API calls. If cloudflare.adminTokenEnv names
+# header only on Cloudflare API calls, and refuses other hosts but GitHub's
+# API. If cloudflare.adminTokenEnv names
 # another variable, rename the secret and the rule's \`secret\` to match. To
 # keep the token on a YubiKey (fido2) or another backend, redefine the secret
-# in a gitignored fnox.local.toml: https://github.com/taraxvoid/voidflow/blob/main/docs/config.md#cloudflare-tokens
+# in a gitignored fnox.local.toml: https://github.com/taraxvoid/voidflow/blob/main/docs/config.md#keeping-the-admin-token-out-of-voidflow
 
 [providers.cf-admin]
 type = "keychain"
@@ -69,7 +89,7 @@ service = "fnox"
 # shell; only \`fnox proxy run\` resolves it.
 CF_TOKEN_ADMIN = { provider = "cf-admin", value = "voidflow-cf-token-admin:{{repo}}", if_missing = "error", env = false }
 
-${own.slice(at)}`
+${proxy}`
 }
 
 const sarifJob = `# Uncomment to upload gitleaks/zizmor results to code scanning (public repos, or private with GitHub Code Security).

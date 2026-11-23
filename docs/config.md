@@ -111,12 +111,13 @@ instead, for a first preview whose `env.preview` block is not merged yet: until 
 `fnox.local.toml`); like `voidflow.config.ts`, the repo owns it, and an
 existing one is kept. It declares the admin token in the macOS Keychain for
 [fnox](https://fnox.jdx.dev), without its value, plus a proxy rule. Store the
-token once, then run the token verbs behind `fnox proxy run`:
+token once, then run the token verbs behind `fnox proxy run`, with the
+voidflow your `package.json` pins (`bun run` never downloads one):
 
 ```sh
 fnox set -k "voidflow-cf-token-admin:<owner/name>" CF_TOKEN_ADMIN  # hidden input
-fnox proxy run -- bunx voidflow plan tokens
-fnox proxy run -- bunx voidflow apply tokens
+fnox proxy run -- bun run voidflow plan tokens
+fnox proxy run -- bun run voidflow apply tokens
 ```
 
 voidflow (and every dependency it loads) sees a placeholder, and fnox puts
@@ -124,8 +125,20 @@ the real token into the `Authorization` header only on calls to
 `api.cloudflare.com/client/v4`. The secret has `env = false`, so the fnox
 shell hook doesn't export it into your shell, where voidflow would read the
 real value. If `adminTokenEnv` names another variable, rename the secret and
-the rule's `secret` to match. `try tokens` works behind the proxy too: the command
-gets the throwaway token, not the placeholder.
+the rule's `secret` to match.
+
+Egress is strict: the proxy refuses every host but `api.cloudflare.com` and
+`api.github.com` (the verbs call `gh`). That binds only clients that honor
+`HTTPS_PROXY`; the token is safe either way, since only the proxy holds it.
+
+`try tokens` works behind the proxy too: the command gets the throwaway
+token, which fnox passes through untouched (it replaces only the
+placeholder). The command shares the proxy's limits, though. On
+`api.cloudflare.com` only the rule's methods and paths get through, and
+request bodies need a `Content-Length` and stay under 10 MiB; other hosts it
+needs, such as `registry.npmjs.org` for a `bunx` that downloads, are refused.
+To allow more, restate the whole `[proxy]` table in `fnox.local.toml` with
+them added (a `[proxy]` there replaces the committed one).
 
 To keep the token behind a YubiKey touch, redefine it in `fnox.local.toml`
 with fnox's `fido2` provider:
