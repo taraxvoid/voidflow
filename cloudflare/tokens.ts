@@ -59,7 +59,8 @@ export type EnvConfig = {
     d1?: boolean
     /**
      * Wrangler config path in the repo, read from its default branch (a plan
-     * inside a checkout warns when the local file resolves differently).
+     * inside a checkout warns when the local file resolves differently, and
+     * `--local-wrangler <env>` reads the checkout's instead).
      * Default: wrangler.jsonc.
      */
     wrangler?: string
@@ -315,6 +316,13 @@ export function missingWorkerMessage(
 }
 
 /**
+ * What to do when the wrangler config this checkout has is not on the default
+ * branch yet (a first preview's `env.preview` block, say).
+ */
+export const UNMERGED_WRANGLER_HINT =
+    "Merge it first, pass --local-wrangler <env> to read this checkout's for that env, or set worker and zones on the env in voidflow.config.ts"
+
+/**
  * Warnings about an env's wrangler config: an `account_id` other than the
  * env's account (wrangler would deploy there), and a local copy that resolves
  * to another Worker or zones than the one the plan read.
@@ -343,7 +351,7 @@ export function wranglerWarnings(opts: {
         )
     } else if (!sameAs(local)) {
         out.push(
-            `${env}: the local ${file} (${show(local)}) differs from the default branch's (${show(used)}), which the plan uses. Merge it first, or set worker and zones on the env in voidflow.config.ts`,
+            `${env}: the local ${file} (${show(local)}) differs from the default branch's (${show(used)}), which the plan uses. ${UNMERGED_WRANGLER_HINT}`,
         )
     }
     return out

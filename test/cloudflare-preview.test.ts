@@ -32,7 +32,7 @@ function run(script: string, env: Record<string, string>) {
                 l.slice(l.indexOf('=') + 1),
             ]),
     )
-    return { code: proc.exitCode, outputs, dir }
+    return { code: proc.exitCode, outputs, dir, err: proc.stderr.toString() }
 }
 
 const resolve = (env: Record<string, string>) =>
@@ -43,6 +43,7 @@ const resolve = (env: Record<string, string>) =>
         SECRETS: '',
         PR_NUMBER: '',
         REF_NAME: '',
+        TOKEN_SET: 'true',
         ...env,
     })
 
@@ -97,6 +98,21 @@ describe('cloudflare-preview resolve step', () => {
         ).toBe(1)
     })
 
+    test('an empty token fails before wrangler, naming the environment secret', () => {
+        const r = resolve({
+            PR_NUMBER: '7',
+            INPUT_ENV: 'preview',
+            TOKEN_SET: 'false',
+        })
+        expect(r.code).toBe(1)
+        expect(r.outputs).toEqual({})
+        expect(r.err).toContain('environment: preview')
+        expect(r.err).toContain(
+            "CLOUDFLARE_API_TOKEN exists in the 'preview' environment",
+        )
+        expect(r.err).toContain('voidflow apply tokens')
+    })
+
     test('secrets go to a private file passed with --secrets-file', () => {
         const { outputs, dir } = resolve({
             PR_NUMBER: '7',
@@ -108,6 +124,44 @@ describe('cloudflare-preview resolve step', () => {
         )
         expect(readFileSync(file, 'utf8')).toBe('A=1\nB=2\n')
         expect(statSync(file).mode & 0o777).toBe(0o600)
+    })
+})
+
+describe('cloudflare-preview failure hints', () => {
+    const explain = (INPUT_ENV: string) =>
+        run(step('explain').run, { INPUT_ENV })
+
+    test('runs only when the wrangler step failed', () => {
+        expect(step('explain').if).toBe(
+            "${{ failure() && steps.preview.outcome == 'failure' }}",
+        )
+    })
+
+    test('with env, lists the default-branch block, the deploy and the token', () => {
+        const { code, err } = explain('preview')
+        expect(code).toBe(0)
+        expect(err).toStartWith('::error::wrangler preview failed')
+        expect(err).toContain(
+            'env.preview block is in the wrangler config on the default branch',
+        )
+        expect(err).toContain("'wrangler deploy --env preview'")
+        expect(err).toContain(
+            "'--local-wrangler preview' if the block is not merged",
+        )
+        expect(err).toContain(
+            "CLOUDFLARE_API_TOKEN in the 'preview' environment",
+        )
+        expect(err.indexOf('default branch')).toBeLessThan(
+            err.indexOf('wrangler deploy'),
+        )
+    })
+
+    test('without env, points at the production Worker', () => {
+        const { err } = explain('')
+        expect(err).not.toContain('env.')
+        expect(err).toContain(
+            "the production Worker has a deployed script, from 'wrangler deploy'",
+        )
     })
 })
 
