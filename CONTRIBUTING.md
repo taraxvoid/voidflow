@@ -263,11 +263,34 @@ deploy tokens, so it stays on a maintainer's machine and never goes into CI.
 it: the committed [`fnox.toml`](fnox.toml) declares the secret, but no value,
 and a `cf-admin` provider backed by the macOS Keychain. Store the value once
 with `fnox set -k voidflow-cf-token-admin CF_TOKEN_ADMIN` (it prompts with
-hidden input), and confirm with `just doctor`. To use another fnox provider
+hidden input), and confirm with `just doctor`. The targets run under `fnox
+proxy run`: the script sees a placeholder, and fnox puts the real token into
+the `Authorization` header only on calls to `api.cloudflare.com/client/v4`
+(the `[proxy]` table in `fnox.toml`), so the token never reaches the `bun`
+process or its dependencies. The secret has `env = false`, so the fnox shell
+hook doesn't export it into your shell either. To use another fnox provider
 (age, 1Password, `pass`...), redefine `[providers.cf-admin]` in a gitignored
 `fnox.local.toml` at the repo root (one per checkout or worktree). If
 `CF_TOKEN_ADMIN` is already in the environment, the targets use it and skip
-fnox.
+fnox. A repo's `cloudflare.adminTokenEnv` other than `CF_TOKEN_ADMIN` has no
+proxy rule; set that variable yourself.
+
+To keep the token behind a YubiKey touch, use fnox's `fido2` provider in
+`fnox.local.toml`:
+
+```sh
+fnox -c fnox.local.toml provider add cf-admin fido2   # PIN if set, two touches
+fnox -c fnox.local.toml set CF_TOKEN_ADMIN --provider cf-admin
+```
+
+Then add `env = false` to that secret in `fnox.local.toml` (an entry there
+replaces the one in `fnox.toml` whole, and the shell hook can't run `fido2`).
+Run `just cf-tokens-plan` once to check it, then delete the Keychain copy
+with `security delete-generic-password -s fnox -a voidflow-cf-token-admin`.
+Keep the provider named `cf-admin`: the name is part of key derivation. The
+ciphertext only decrypts with the key, so copying `fnox.local.toml` into a
+new worktree is fine. Leave `fnox daemon` off: it caches resolved values, so
+after one touch any process of yours could read the token from it.
 
 A repo can also hold its own tokens in the `cloudflare` section of its
 `voidflow.config.ts` ([`docs/config.md`](docs/config.md#cloudflare-tokens)).
@@ -415,9 +438,11 @@ recipe's own directory:
 ```just
 # justfile in the org's infra repo
 vf := "bunx @taraxvoid/voidflow@<version>"
-# CF_TOKEN_ADMIN from fnox unless already set. fnox.toml is a copy of
-# voidflow's; -c finds it from a [no-cd] recipe too.
-fnox := "fnox -c " + quote(justfile_directory() / "fnox.toml") + " exec -- "
+# CF_TOKEN_ADMIN from fnox's proxy unless already set. fnox.toml is a copy of
+# voidflow's (with its [proxy] table); -c finds it from a [no-cd] recipe too,
+# but loads only that file and fnox's global config, not fnox.local.toml, so a
+# fido2 override goes in the global config.
+fnox := "fnox -c " + quote(justfile_directory() / "fnox.toml") + " proxy run -- "
 cf := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { fnox + vf } else { vf }
 cfg := quote(justfile_directory())
 

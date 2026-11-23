@@ -112,7 +112,8 @@ doctor:
     @command -v gitleaks >/dev/null && echo "gitleaks:  $(gitleaks version)" || echo "gitleaks:  NOT FOUND (needed for 'just lint')"
     @command -v act >/dev/null && echo "act:  $(act --version)" || echo "act:  NOT FOUND (needed for local dry-run - not a blocker to commit/push)"
     @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (run 'mise install'; holds CF_TOKEN_ADMIN for 'just cf-tokens-*')"
-    @command -v fnox >/dev/null && { fnox check >/dev/null 2>&1 && echo "CF_TOKEN_ADMIN:  resolvable via fnox" || echo "CF_TOKEN_ADMIN:  not resolvable (run 'fnox check'; see README)"; } || true
+    @# `fnox proxy rules` validates the config without resolving the secret (a fido2 provider would need a touch)
+    @command -v fnox >/dev/null && { fnox proxy rules >/dev/null 2>&1 && echo "fnox proxy:  config valid (CF_TOKEN_ADMIN is resolved on use)" || echo "fnox proxy:  config invalid (run 'fnox proxy rules'; see CONTRIBUTING.md)"; } || true
 
 # So a relative --config (another repo's fleet map) resolves from where `just`
 # was run, not this directory. See scripts/lib/config.ts.
@@ -131,7 +132,9 @@ rulesets-apply *args:
     {{ config_base }} bun scripts/cli.ts rulesets --apply {{ args }}
 
 # CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
-cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox exec --" } else { "" }
+# `fnox proxy run` gives the command a placeholder and swaps the real token in
+# only on Cloudflare API calls (the [proxy] table in fnox.toml).
+cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox proxy run --" } else { "" }
 cf_tokens := cf_admin + " " + config_base + " bun scripts/cli.ts tokens cf"
 
 # Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
