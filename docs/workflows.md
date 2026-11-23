@@ -130,6 +130,41 @@ jobs:
     uses: taraxvoid/voidflow/.github/workflows/tool-ci.yml@<sha> # vX.Y.Z
 ```
 
+## voidflow drift
+
+`voidflow-drift.yml` checks GitHub against the caller's `voidflow.config.ts`
+and keeps one issue, titled "voidflow: GitHub differs from voidflow.config.ts",
+open while they differ, updating its body on each run and closing it once a
+run is in sync. It always checks the default branch. A `check` job installs
+the caller's dependencies from its lockfile (bun, pnpm or aube, detected as
+the lefthook hooks do) and runs the voidflow it pins; a separate `report` job,
+the only one with `issues: write`, edits the issue from that result, so the
+token that writes issues never shares a job with installed code. Exit 2 (a
+read failed, the token cannot read something, or the config does not load)
+warns and leaves the issue alone; a failed install fails the run and leaves
+it alone too. Inputs: `runner`, `socket-scanner` (as in tool-ci).
+`voidflow init` writes this caller:
+
+```yaml
+name: voidflow drift
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  drift:
+    permissions:
+      contents: read
+      issues: write # the drift issue
+      actions: read # environments
+    uses: taraxvoid/voidflow/.github/workflows/voidflow-drift.yml@<sha> # vX.Y.Z
+```
+
 ## Tool release
 
 For tools published to npm: release-please on branch channels (`main` to

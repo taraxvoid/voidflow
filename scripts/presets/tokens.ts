@@ -691,7 +691,10 @@ export async function tokens(
     const summary =
         pending === 0
             ? 'in sync'
-            : `${pending} change(s) ${apply ? 'applied' : `pending (run \`${ctx.applyHint}\`)`}`
+            : `${pending} change(s) ${apply ? 'applied' : `pending (${ctx.applyHint})`}`
     console.log(`\n${summary}${failed ? `, ${failed} env(s) failed` : ''}`)
-    return failed > 0 || (ctx.verb === 'check' && pending > 0) ? 1 : 0
+    // A read that failed is "could not tell" (2) when planning or checking,
+    // so it never reads as drift; a failed write is 1.
+    if (failed > 0) return apply ? 1 : 2
+    return ctx.verb === 'check' && pending > 0 ? 1 : 0
 }

@@ -10,9 +10,11 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { PassThrough } from 'node:stream'
 import type { VoidflowConfig } from '../config/index.ts'
 import {
-    applyHint,
+    applyCommand,
+    confirm,
     parseVerbArgs,
     presetsFor,
     worstExit,
@@ -104,6 +106,24 @@ describe('parseVerbArgs', () => {
         ).toEqual(['x', '--config'])
     })
 
+    test('--yes goes with apply only', () => {
+        expect(parseVerbArgs('apply', ['rulesets', '--yes']).yes).toBe(true)
+        expect(parseVerbArgs('apply', ['rulesets', '-y']).yes).toBe(true)
+        expect(() => parseVerbArgs('plan', ['--yes'])).toThrow(
+            '--yes goes with apply',
+        )
+    })
+
+    test('validate takes no preset and no flags but --no-color', () => {
+        expect(parseVerbArgs('validate', ['--no-color']).noColor).toBe(true)
+        expect(() => parseVerbArgs('validate', ['rulesets'])).toThrow(
+            'validate takes no preset',
+        )
+        expect(() => parseVerbArgs('validate', ['--prune'])).toThrow(
+            'no flags but --no-color',
+        )
+    })
+
     test('--help wins over everything else', () => {
         expect(parseVerbArgs('apply', ['--help']).help).toBe(true)
     })
@@ -146,16 +166,34 @@ describe('presetsFor', () => {
     })
 })
 
-describe('applyHint', () => {
+describe('applyCommand', () => {
     const args = (argv: string[]) => parseVerbArgs('plan', argv)
     test('names the preset and carries --prune and --rotate', () => {
-        expect(applyHint('settings', args([]))).toBe('voidflow apply settings')
-        expect(applyHint('rulesets', args(['--prune']))).toBe(
+        expect(applyCommand('settings', args([]))).toBe(
+            'voidflow apply settings',
+        )
+        expect(applyCommand('rulesets', args(['--prune']))).toBe(
             'voidflow apply rulesets --prune',
         )
         expect(
-            applyHint('tokens', args(['tokens', '--rotate', '--prune'])),
+            applyCommand('tokens', args(['tokens', '--rotate', '--prune'])),
         ).toBe('voidflow apply tokens --prune --rotate')
+    })
+})
+
+describe('confirm', () => {
+    async function answer(text: string) {
+        const input = new PassThrough()
+        const output = new PassThrough()
+        const asked = confirm('Apply? [y/N] ', { input, output })
+        input.end(text)
+        return asked
+    }
+    test('only y or yes, in any case, is yes', async () => {
+        for (const yes of ['y\n', 'Y\n', 'yes\n', ' YES \n'])
+            expect(await answer(yes)).toBe(true)
+        for (const no of ['\n', 'n\n', 'no\n', 'yep\n', 'sure\n'])
+            expect(await answer(no)).toBe(false)
     })
 })
 
@@ -259,6 +297,12 @@ describe('voidflow plan|check|apply|try', () => {
         expect(r.ghCalled).toBe(true)
     })
 
+    test('a read that fails is exit 2 under check, never drift', async () => {
+        const r = await inRepo(['check', 'rulesets'], TOOL)
+        expect(r.ghCalled).toBe(true)
+        expect(r.code).toBe(2)
+    })
+
     test('VOIDFLOW_CONFIG no longer redirects a run away from the repo file, and says so', async () => {
         const r = await inRepo(['plan', 'rulesets'], TOOL, {
             VOIDFLOW_CONFIG: '/nonexistent/infra',
@@ -329,6 +373,33 @@ describe('voidflow plan|check|apply|try', () => {
         const tokens = r.err.indexOf('plan tokens |')
         expect(rules).toBeGreaterThan(-1)
         expect(tokens).toBeGreaterThan(rules)
+    })
+
+    test('validate checks the file offline: 0 when valid, 2 naming the problem', async () => {
+        const ok = await inRepo(['validate'], TOOL, { GITHUB_REPOSITORY: '' })
+        expect(ok.code).toBe(0)
+        expect(ok.out).toContain(`${ok.file}: valid`)
+        expect(ok.ghCalled).toBe(false)
+        const bad = await inRepo(
+            ['validate'],
+            "export default { kind: 'tool', rulesets: { tiers: ['nope'] } }",
+        )
+        expect(bad.code).toBe(2)
+        expect(bad.err).toContain('rulesets.tiers[0]: unknown tier "nope"')
+        expect(bad.ghCalled).toBe(false)
+        const none = await inRepo(['validate'], null)
+        expect(none.code).toBe(2)
+        expect(none.err).toContain('no voidflow.config.ts')
+    })
+
+    test('apply without a terminal refuses unless --yes, before any gh call', async () => {
+        const r = await inRepo(['apply', 'rulesets'], TOOL)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain('pass --yes to write without asking')
+        expect(r.ghCalled).toBe(false)
+        const yes = await inRepo(['apply', 'rulesets', '--yes'], TOOL)
+        expect(yes.err).toContain('apply rulesets | config')
+        expect(yes.ghCalled).toBe(true)
     })
 
     test('try tokens with an env the section lacks exits 2 listing its envs', async () => {

@@ -373,7 +373,7 @@ export async function rulesets(ctx: PresetCtx): Promise<number> {
     else drift += await syncEnvs(repo, fleet[repo], apply)
 
     console.log(
-        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${apply ? 'changed' : `differ (run \`${ctx.applyHint}\`)`}`}`,
+        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${apply ? 'changed' : `differ (${ctx.applyHint})`}`}`,
     )
     return ctx.verb === 'check' && drift > 0 ? 1 : 0
 }

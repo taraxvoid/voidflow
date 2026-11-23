@@ -38,7 +38,7 @@ export async function settingsCommand(
         mode: Verb
         ifAdmin: boolean
         env: Record<string, string | undefined>
-        /** Default: `voidflow apply settings`. */
+        /** How to apply a plan. Default: run `voidflow apply settings`. */
         applyHint?: string
         paint?: Paint
     },
@@ -86,7 +86,7 @@ export async function settingsCommand(
         lines.push('manual:')
         for (const l of manualReminders(repo, enabled)) lines.push(`  ${l}`)
     }
-    const hint = `run \`${opts.applyHint ?? 'voidflow apply settings'}\``
+    const hint = opts.applyHint ?? 'run `voidflow apply settings`'
     if (failed > 0)
         lines.push(
             `${failed} setting(s) failed${opts.mode === 'apply' ? '' : ' to read'}`,

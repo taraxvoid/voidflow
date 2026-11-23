@@ -1,0 +1,220 @@
+name: voidflow drift
+
+# Checks GitHub against the caller's voidflow.config.ts on its default branch
+# and keeps one issue open while they differ: opened (or its body updated) on
+# drift, closed once a later run is in sync. Exit 2 (a read failed, the token
+# cannot read something, or the config does not load) only warns and leaves
+# the issue as it is.
+#
+# Two jobs, so the token that can write issues never shares a job with
+# installed code: `check` installs the caller's dependencies from its
+# lockfile (bun, pnpm or aube, as the lefthook hooks detect it) and runs the
+# voidflow it pins; `report` only reads that job's result and edits the
+# issue.
+#
+# Callers trigger it on push to main, a weekly schedule and workflow_dispatch,
+# and must grant `contents: read`, `actions: read` (environments) and
+# `issues: write`. Settings and tokens are never checked here: GITHUB_TOKEN is
+# not an admin and there is no Cloudflare admin token.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label for both jobs.
+        type: string
+        default: ubuntu-latest
+      socket-scanner:
+        description: >
+          Run the bunfig.toml install-time security scanner during the
+          install, as in tool-ci. Bun only.
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: voidflow-drift-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read # environments
+    outputs:
+      code: ${{ steps.check.outputs.code }}
+      sha: ${{ steps.check.outputs.sha }}
+      result: ${{ steps.check.outputs.result }}
+    steps:
+      # Always the default branch: a manual run from another branch must not
+      # close or rewrite the issue that tracks it.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Detect package manager
+        id: pm
+        # As lefthook/base.yml: aube when packageManager names it (it shares
+        # pnpm-lock.yaml), pnpm with a pnpm-lock.yaml, bun otherwise.
+        run: |
+          if grep -q 'packageManager.*aube@' package.json 2>/dev/null; then pm=aube
+          elif [ -f pnpm-lock.yaml ]; then pm=pnpm
+          else pm=bun; fi
+          echo "pm=$pm" >> "$GITHUB_OUTPUT"
+
+      # The bin needs Node 24+ to load a .ts config by stripping types.
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - uses: oven-sh/setup-bun@v2.2.0
+        if: steps.pm.outputs.pm == 'bun'
+        with:
+          bun-version-file: ${{ hashFiles('.bun-version') != '' && '.bun-version' || '' }}
+
+      - uses: pnpm/action-setup@v6.1.0
+        if: steps.pm.outputs.pm == 'pnpm'
+
+      - uses: jdx/mise-action@v5.1.1
+        if: steps.pm.outputs.pm == 'aube' || (steps.pm.outputs.pm == 'bun' && hashFiles('mise.toml') != '')
+
+      # Same script as actions/bun-install and tool-ci (a test keeps them
+      # identical).
+      - name: Install NPM Dependencies (bun)
+        id: install
+        if: steps.pm.outputs.pm == 'bun'
+        shell: bash
+        env:
+          SOCKET_SCANNER: ${{ inputs.socket-scanner }}
+        run: |
+          # Removes the scanner line as text, then checks the result with a real
+          # TOML parse: it must equal the original minus install.security.scanner.
+          # Anything that can't be removed that way fails the install instead of
+          # running the scanner, or skipping it, silently.
+          # shellcheck disable=SC2016 # JS source; the ${...} in it is for bun, not bash
+          strip_scanner='
+          const src = await Bun.file("bunfig.toml").text()
+          const parse = (text) => { try { return Bun.TOML.parse(text) } catch (e) { console.log(`::error file=bunfig.toml::Could not parse bunfig.toml: ${e.message}`); process.exit(1) } }
+          const original = parse(src)
+          if (original.install?.security?.scanner === undefined) process.exit(10)
+          const key = /^\s*((install\.)?security\.)?("scanner"|scanner)\s*=/
+          const stripped = src.split("\n").filter((line) => !key.test(line)).join("\n")
+          // empty tables left behind by the removal count as absent
+          const prune = (cfg) => {
+            delete cfg.install?.security?.scanner
+            if (cfg.install?.security && Object.keys(cfg.install.security).length === 0) delete cfg.install.security
+            if (cfg.install && Object.keys(cfg.install).length === 0) delete cfg.install
+            return cfg
+          }
+          const after = parse(stripped)
+          if (after.install?.security?.scanner !== undefined || !Bun.deepEquals(prune(after), prune(structuredClone(original)))) {
+            console.log("::error file=bunfig.toml::Could not remove the security scanner from bunfig.toml cleanly; set it as `scanner = \"...\"` under [install.security].")
+            process.exit(1)
+          }
+          await Bun.write(process.env.BUNFIG_OUT, stripped)
+          '
+          if [[ "$SOCKET_SCANNER" != "true" ]] && [[ -f bunfig.toml ]]; then
+            config="$RUNNER_TEMP/bunfig.toml"
+            rc=0
+            BUNFIG_OUT="$config" bun --config=/dev/null -e "$strip_scanner" || rc=$?
+            if [[ $rc -eq 0 ]]; then
+              echo "::notice file=bunfig.toml::Security scanner skipped in CI. Pass socket-scanner: true to run it here; it still runs on local installs."
+              bun install --frozen-lockfile --config="$config"
+              exit
+            elif [[ $rc -ne 10 ]]; then
+              exit "$rc"
+            fi
+          fi
+          bun install --frozen-lockfile
+
+      - name: Install NPM Dependencies (pnpm)
+        if: steps.pm.outputs.pm == 'pnpm'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install NPM Dependencies (aube)
+        if: steps.pm.outputs.pm == 'aube'
+        run: aube ci
+
+      - name: voidflow check
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # voidflow's own repo runs its checkout; everyone else the bin they pin.
+          if [ "$(jq -r .name package.json)" = "@taraxvoid/voidflow" ]; then
+            vf() { bun scripts/cli.ts "$@"; }
+          elif [ -x ./node_modules/.bin/voidflow ]; then
+            vf() { ./node_modules/.bin/voidflow "$@"; }
+          else
+            echo "::error file=package.json::node_modules/.bin/voidflow is missing; add @taraxvoid/voidflow as a devDependency"
+            exit 1
+          fi
+          out="$RUNNER_TEMP/voidflow-check.txt"
+          code=0
+          # Exit 1 is drift only; a read that failed is 2.
+          vf check --no-color > "$out" 2>&1 || code=$?
+          cat "$out"
+          {
+            echo "code=$code"
+            echo "sha=$(git rev-parse HEAD)"
+            delim="voidflow-$(openssl rand -hex 16)"
+            echo "result<<$delim"
+            head -c 60000 "$out"
+            echo
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
+  report:
+    name: Report
+    needs: check
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    permissions:
+      issues: write # the drift issue
+    steps:
+      - name: Open, update or close the drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CODE: ${{ needs.check.outputs.code }}
+          SHA: ${{ needs.check.outputs.sha }}
+          RESULT: ${{ needs.check.outputs.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='voidflow: GitHub differs from voidflow.config.ts'
+          open=$(gh issue list --state open --search "in:title voidflow.config.ts" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          case "$CODE" in
+            0)
+              if [ -n "$open" ]; then
+                gh issue close "$open" --comment "In sync again as of $SHA ($RUN_URL)."
+              fi
+              ;;
+            1)
+              body="$RUNNER_TEMP/voidflow-drift.md"
+              {
+                echo "\`voidflow check\` on \`$SHA\` found GitHub differs from \`voidflow.config.ts\` ([run]($RUN_URL)):"
+                echo
+                echo '```'
+                printf '%s\n' "$RESULT"
+                echo '```'
+                echo
+                echo "Review with \`voidflow plan\` in a checkout of the default branch, then \`voidflow apply <preset>\`. This issue closes itself when a later run is in sync."
+              } > "$body"
+              if [ -n "$open" ]; then
+                gh issue edit "$open" --body-file "$body"
+              else
+                gh issue create --title "$title" --body-file "$body"
+              fi
+              echo "::warning::GitHub differs from voidflow.config.ts; see the drift issue"
+              ;;
+            *)
+              echo "::warning::voidflow check could not finish (exit $CODE); the drift issue was left as it is"
+              ;;
+          esac

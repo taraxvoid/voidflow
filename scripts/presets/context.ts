@@ -3,7 +3,8 @@
  * scripts/verbs.ts: the repo's validated voidflow.config.ts, which repo it
  * belongs to, and how to run. A preset prints its own plan and returns its
  * exit code: 0 in sync or applied, 1 drift under check or a failed write, 2
- * a config, usage or auth error.
+ * a config, usage or auth error, or a read that failed (so it never reads as
+ * drift).
  */
 import type { VoidflowConfig } from '../../config/index.ts'
 
@@ -27,6 +28,6 @@ export type PresetCtx = {
     noColor: boolean
     /** No preset was named, so one that cannot run here skips instead of failing. */
     bare: boolean
-    /** The command that applies what a plan shows, for its summary line. */
+    /** How to apply what a plan shows, for its summary line: `run `voidflow apply ...``. */
     applyHint: string
 }

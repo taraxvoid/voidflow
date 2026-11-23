@@ -89,6 +89,12 @@ export const FILE_ITEMS: FileItem[] = [
         repoOwned: true,
     },
     {
+        name: 'drift',
+        target: '.github/workflows/voidflow-drift.yml',
+        templates: ['common/voidflow-drift.yml'],
+        kinds: BOTH,
+    },
+    {
         name: 'tsconfig',
         target: 'tsconfig.json',
         templates: ['tool/tsconfig.json'],
