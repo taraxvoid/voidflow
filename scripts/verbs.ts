@@ -285,7 +285,8 @@ export async function confirm(
 ): Promise<boolean> {
     const rl = createInterface(io)
     try {
-        return /^y(es)?$/i.test((await rl.question(question)).trim())
+        const answer = (await rl.question(question)).trim().toLowerCase()
+        return answer === 'y' || answer === 'yes'
     } finally {
         rl.close()
     }
@@ -307,7 +308,11 @@ async function run(
     }
 }
 
-/** One preset: the header line on stderr, then the run; a throw is exit 1. */
+/**
+ * One preset: the header line on stderr, then the run. A throw is a failed
+ * write under apply (1), and otherwise "could not tell" (2), so a failed read
+ * is never mistaken for drift.
+ */
 async function runPreset(
     preset: Preset,
     ctx: PresetCtx,
@@ -321,7 +326,7 @@ async function runPreset(
         return await run(preset, ctx, mode)
     } catch (e) {
         console.error(`${prog} ${preset}: ${(e as Error).message}`)
-        return 1
+        return ctx.verb === 'apply' ? 1 : 2
     }
 }
 

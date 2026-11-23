@@ -193,8 +193,8 @@ an error (exit 2) instead, and so does naming tokens in a file without a
 | Code | Meaning |
 |---|---|
 | 0 | in sync, or applied cleanly |
-| 1 | drift (`check`), or a failure while planning or applying |
-| 2 | config, usage or auth error |
+| 1 | drift (`check`), or a failed write (`apply`) |
+| 2 | config, usage or auth error, or a read that failed, so a check that could not finish never reads as drift |
 
 With several presets the worst code wins, 2 over 1 over 0.
 

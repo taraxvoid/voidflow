@@ -34,8 +34,11 @@ jobs:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     steps:
+      # Always the default branch: a manual run from another branch must
+      # not close or rewrite the issue that tracks it.
       - uses: actions/checkout@v7.0.1
         with:
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - uses: actions/setup-node@v7.1.0
@@ -57,6 +60,8 @@ jobs:
           fi
           out="$RUNNER_TEMP/voidflow-check.txt"
           code=0
+          # Exit 1 is drift only; a read that failed, or npx that could not
+          # run voidflow, is 2 or more and leaves the issue alone.
           npx --yes "@taraxvoid/voidflow@$version" check --no-color > "$out" 2>&1 || code=$?
           cat "$out"
           open=$(gh issue list --state open --search "in:title voidflow.config.ts" --json number,title \
