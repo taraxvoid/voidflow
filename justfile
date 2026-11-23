@@ -112,6 +112,8 @@ doctor:
     @command -v gitleaks >/dev/null && echo "gitleaks:  $(gitleaks version)" || echo "gitleaks:  NOT FOUND (needed for 'just lint')"
     @command -v act >/dev/null && echo "act:  $(act --version)" || echo "act:  NOT FOUND (needed for local dry-run - not a blocker to commit/push)"
     @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (run 'mise install'; supplies an admin token for 'voidflow apply tokens', see CONTRIBUTING.md)"
+    @# `fnox proxy rules` validates the config without resolving the secret (a fido2 provider would need a touch)
+    @command -v fnox >/dev/null && { fnox proxy rules >/dev/null 2>&1 && echo "fnox proxy:  config valid (not the stored token: 'fnox check' resolves CF_TOKEN_ADMIN)" || echo "fnox proxy:  config invalid (run 'fnox proxy rules'; see CONTRIBUTING.md)"; } || true
 
 # Show how GitHub differs from this repo's voidflow.config.ts, from the checkout (read-only; needs gh)
 plan *args:

@@ -105,6 +105,58 @@ instead, for a first preview whose `env.preview` block is not merged yet: until 
 [First preview](../CONTRIBUTING.md#first-preview)). The admin token's permissions are listed in
 [Cloudflare deploy tokens as code](../CONTRIBUTING.md#cloudflare-deploy-tokens-as-code).
 
+### Keeping the admin token out of voidflow
+
+`voidflow init --kind site` writes a sample `fnox.toml` (and gitignores
+`fnox.local.toml`); like `voidflow.config.ts`, the repo owns it, and an
+existing one is kept. It declares the admin token in the macOS Keychain for
+[fnox](https://fnox.jdx.dev), without its value, plus a proxy rule. Store the
+token once, then run the token verbs behind `fnox proxy run`, with the
+voidflow your `package.json` pins (`bun run` never downloads one):
+
+```sh
+fnox set -k "voidflow-cf-token-admin:<owner/name>" CF_TOKEN_ADMIN  # hidden input
+fnox proxy run -- bun run voidflow plan tokens
+fnox proxy run -- bun run voidflow apply tokens
+```
+
+voidflow (and every dependency it loads) sees a placeholder, and fnox puts
+the real token into the `Authorization` header only on calls to
+`api.cloudflare.com/client/v4`. The secret has `env = false`, so the fnox
+shell hook doesn't export it into your shell, where voidflow would read the
+real value. If `adminTokenEnv` names another variable, rename the secret and
+the rule's `secret` to match.
+
+Egress is strict: the proxy refuses every host but `api.cloudflare.com` and
+`api.github.com` (the verbs call `gh`). That binds only clients that honor
+`HTTPS_PROXY`; the token is safe either way, since only the proxy holds it.
+
+`try tokens` works behind the proxy too: the command gets the throwaway
+token, which fnox passes through untouched (it replaces only the
+placeholder). The command shares the proxy's limits, though. On
+`api.cloudflare.com` only the rule's methods and paths get through, and
+request bodies need a `Content-Length` and stay under 10 MiB; other hosts it
+needs, such as `registry.npmjs.org` for a `bunx` that downloads, are refused.
+To allow more, restate the whole `[proxy]` table in `fnox.local.toml` with
+them added (a `[proxy]` there replaces the committed one).
+
+To keep the token behind a YubiKey touch, redefine it in `fnox.local.toml`
+with fnox's `fido2` provider:
+
+```sh
+fnox -c fnox.local.toml provider add cf-admin fido2   # PIN if set, two touches
+fnox -c fnox.local.toml set CF_TOKEN_ADMIN --provider cf-admin
+```
+
+Then add `env = false` to that secret in `fnox.local.toml` (an entry there
+replaces the one in `fnox.toml` whole, and the shell hook can't run `fido2`),
+run `plan tokens` once, and delete the Keychain copy (`security
+delete-generic-password -s fnox -a <the value in fnox.toml>`). Keep the
+provider named `cf-admin`, because the name is part of key derivation. The
+ciphertext only decrypts with the key, so copying `fnox.local.toml` into a
+new worktree is fine. Leave `fnox daemon` off: it caches resolved values, so
+after one touch any process of yours could read the token from it.
+
 ## Settings
 
 GitHub repo settings (the ones `voidflow init` applies) are checked like

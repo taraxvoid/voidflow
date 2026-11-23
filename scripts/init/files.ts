@@ -112,6 +112,13 @@ export const FILE_ITEMS: FileItem[] = [
         ],
     },
     {
+        name: 'fnox',
+        target: 'fnox.toml',
+        templates: ['site/fnox.toml'],
+        kinds: ['site'],
+        repoOwned: true,
+    },
+    {
         name: 'unlighthouse',
         target: 'unlighthouse.config.ts',
         templates: ['site/unlighthouse.config.ts'],

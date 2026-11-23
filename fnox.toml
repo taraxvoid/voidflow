@@ -9,4 +9,23 @@ type = "keychain"
 service = "fnox"
 
 [secrets]
-CF_TOKEN_ADMIN= { provider = "cf-admin", value = "voidflow-cf-token-admin", description = "User-owned Cloudflare admin token for voidflow plan|apply tokens in a repo whose voidflow.config.ts cloudflare section uses this variable: Account API Tokens Edit, Workers Scripts Read, Zone Read on its account. Local only, never CI.", if_missing = "error" }
+# env = false: the shell hook and `fnox exec` leave it out, so it reaches no
+# shell; only `fnox proxy run` (below) resolves it.
+CF_TOKEN_ADMIN= { provider = "cf-admin", value = "voidflow-cf-token-admin", description = "User-owned Cloudflare admin token for voidflow plan|apply tokens in a repo whose voidflow.config.ts cloudflare section uses this variable: Account API Tokens Edit, Workers Scripts Read, Zone Read on its account. Local only, never CI.", if_missing = "error", env = false }
+
+# `fnox proxy run -- bun run voidflow plan|apply tokens` hands voidflow a
+# placeholder for CF_TOKEN_ADMIN and puts the real token into the
+# Authorization header only on Cloudflare API calls, so the bun process and its
+# dependencies never see it. Egress is strict: other hosts are refused, except
+# api.github.com (the verbs call gh), which gets an uninspected tunnel and no
+# secret. This only binds clients that honor HTTPS_PROXY.
+[proxy]
+egress = "strict"
+allow_domains = ["api.github.com"]
+
+[[proxy.rules]]
+secret = "CF_TOKEN_ADMIN"
+domain = "api.cloudflare.com"
+header = "authorization"
+methods = ["GET", "POST", "PUT", "DELETE"]
+paths = ["/client/v4/**"]

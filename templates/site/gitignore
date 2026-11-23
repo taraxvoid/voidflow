@@ -1,3 +1,4 @@
 .unlighthouse/
 test-results/
 playwright-report/
+fnox.local.toml

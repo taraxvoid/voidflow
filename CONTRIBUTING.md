@@ -289,9 +289,18 @@ the secret with no value and a `cf-admin` provider backed by the macOS
 Keychain. Store the value once with
 `fnox set -k voidflow-cf-token-admin CF_TOKEN_ADMIN` (it prompts with hidden
 input); to use another fnox provider (age, 1Password, `pass`...), redefine
-`[providers.cf-admin]` in a gitignored `fnox.local.toml`.
+`[providers.cf-admin]` in a gitignored `fnox.local.toml`. Run the verbs
+behind `fnox proxy run`: voidflow sees a placeholder, and fnox puts the real
+token into the `Authorization` header only on calls to
+`api.cloudflare.com/client/v4` (the `[proxy]` table in `fnox.toml`), so the
+token never reaches the `bun` process or its dependencies. The secret has
+`env = false`, so the fnox shell hook doesn't export it into your shell
+either. `voidflow init --kind site` writes a repo-owned sample `fnox.toml`;
+[Keeping the admin token out of voidflow](docs/config.md#keeping-the-admin-token-out-of-voidflow)
+covers it and a YubiKey (`fido2`) override.
 
-Run the verbs inside the repo, with that variable set:
+Run the verbs inside the repo, with that variable set (or behind
+`fnox proxy run --`):
 
 ```sh
 vf="bunx @taraxvoid/voidflow@<version>"

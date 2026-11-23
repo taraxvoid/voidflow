@@ -10,6 +10,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
+import { proxyTables } from '../scripts/build-templates.ts'
 import { applyFiles, fileNames, planFiles } from '../scripts/init/files.ts'
 import type { Kind, RenderCtx } from '../scripts/init/render.ts'
 import { loadVoidflowConfig } from '../scripts/lib/repo-config.ts'
@@ -90,6 +91,51 @@ describe('planFiles', () => {
         expect(t).not.toContain('tsconfig.json')
         expect(fileNames('site')).not.toContain('tsconfig')
         expect(fileNames('tool')).toContain('tsconfig')
+        expect(fileNames('tool')).not.toContain('fnox')
+    })
+    test('site fnox.toml: repo-owned, admin token only behind the proxy', () => {
+        const a = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
+            (x) => x.name === 'fnox',
+        )
+        expect(a?.target).toBe('fnox.toml')
+        expect(a?.content).not.toContain('Written by voidflow')
+        expect(a?.content).not.toContain('{{')
+        expect(a?.content).toContain('"voidflow-cf-token-admin:o/r"')
+        expect(a?.content).toMatch(/^CF_TOKEN_ADMIN = \{.*env = false \}$/m)
+        // The same proxy tables as voidflow's own fnox.toml.
+        const own = readFileSync(
+            new URL('../fnox.toml', import.meta.url),
+            'utf8',
+        )
+        expect(a?.content.endsWith(proxyTables(own))).toBe(true)
+        expect(a?.content).toContain('egress = "strict"')
+        writeFileSync(join(dir, 'fnox.toml'), 'mine\n')
+        const kept = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
+            (x) => x.name === 'fnox',
+        )
+        expect(kept?.status).toBe('unchanged')
+        expect(kept?.content).toBe('mine\n')
+    })
+    test('proxyTables stops at the next non-proxy table', () => {
+        const toml = [
+            '[secrets]',
+            'A = { value = "a" }',
+            '',
+            '[proxy]',
+            'egress = "strict"',
+            '',
+            '[[proxy.rules]]',
+            'secret = "A"',
+            '',
+            '# about B',
+            '[secrets.more]',
+            'B = { value = "b" }',
+            '',
+        ].join('\n')
+        expect(proxyTables(toml)).toBe(
+            '[proxy]\negress = "strict"\n\n[[proxy.rules]]\nsecret = "A"\n',
+        )
+        expect(() => proxyTables('[secrets]\n')).toThrow('[proxy] not found')
     })
     test('config renders kind only, without a marker', () => {
         const a = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
