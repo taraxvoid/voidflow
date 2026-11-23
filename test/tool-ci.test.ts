@@ -17,6 +17,14 @@ const actionInstall: string = yaml(
 ).runs.steps.find((s: any) => s.id === 'install').run
 
 describe('tool-ci.yml shape', () => {
+    // See site-ci.test.ts: keyed on github.ref alone, a merged PR's `closed`
+    // run shared the base branch's group and cancelled the merge's push run.
+    test('PR runs get a per-PR concurrency group, apart from the base branch', () => {
+        expect(wf.concurrency.group).toBe(
+            "ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}",
+        )
+    })
+
     test('is reusable only, with runner and socket-scanner inputs', () => {
         expect(Object.keys(wf.on)).toEqual(['workflow_call'])
         expect(wf.on.workflow_call.inputs.runner.default).toBe('ubuntu-latest')

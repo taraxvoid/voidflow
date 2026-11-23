@@ -28,6 +28,17 @@ describe('site-ci.yml job shape', () => {
         })
     })
 
+    // A merged PR's `closed` run has github.ref = refs/heads/<base>; keyed on
+    // github.ref alone it shared main's group and cancelled the merge's push run.
+    test('PR runs get a per-PR concurrency group, apart from the base branch', () => {
+        expect(wf.concurrency.group).toBe(
+            "ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}",
+        )
+        expect(wf.concurrency['cancel-in-progress']).toBe(
+            "${{ github.event_name == 'pull_request' }}",
+        )
+    })
+
     test('skips drafts and closed PRs, keeps full history for gitleaks', () => {
         expect(validate.if).toBe(
             "github.event.pull_request.draft == false && github.event.action != 'closed'",
