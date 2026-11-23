@@ -139,8 +139,7 @@ published when callers need to act.
 | Line | Gets |
 |---|---|
 | Latest major | Features, fixes, security fixes |
-| Previous major | Security and critical fixes for 90 days after the next major ships, on `release/N.x` (see [RELEASING.md](RELEASING.md#backport-to-an-older-line)) |
-| Older | Nothing |
+| Older majors | Nothing: fixes ship in the latest major only. Upgrade to get them |
 | `0.x` | Nothing once 1.0 ships. Migrate to 1.x |
 
 ## Pinning
