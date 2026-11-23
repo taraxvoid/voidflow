@@ -3,9 +3,10 @@
 voidflow releases from one trunk, `main`, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
 Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`. That environment is the only server-side
-limit on who can publish, so it deploys from `main`, `next` and `release/*`
-only: this repo's `voidflow.config.ts` lists it under
-`rulesets.environments`, and `just plan rulesets` reports drift.
+limit on who can publish, so it deploys from `main` only: this repo's
+`voidflow.config.ts` lists it under `rulesets.environments`, and
+`just plan rulesets` reports drift. A backport branch needs the `maintenance`
+tier added there first (see [Backport to an older line](#backport-to-an-older-line)).
 
 | Source | Channel | Version | npm dist-tag | GitHub release |
 |---|---|---|---|---|
