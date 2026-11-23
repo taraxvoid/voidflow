@@ -1,10 +1,10 @@
 /**
- * Branch rulesets as code: the fleet config shape and the plan logic.
+ * Branch rulesets as code: the config shape and the plan logic.
  *
- * The fleet itself (which repos, with which tiers and bypasses) lives in the
- * org's infra repo and is passed with --config; this module only builds and
- * checks it. `scripts/apply-rulesets.ts` diffs the result against what GitHub
- * has and (with --apply) creates/updates it. Rulesets that exist in a repo but
+ * A repo's voidflow.config.ts says which tiers, checks and bypasses it wants
+ * (config/index.ts turns its `rulesets` section into a one-repo map); this
+ * module only builds and checks it. `scripts/presets/rulesets.ts` diffs the
+ * result against what GitHub has and (with apply) creates/updates it. Rulesets that exist in a repo but
  * are not described in the config are reported, never deleted.
  */
 
@@ -93,7 +93,7 @@ export type RepoConfig = {
 
 /**
  * A repo whose rulesets are spelled out in full instead of built from tiers,
- * for fleets whose protection doesn't fit the tier model (see `--config`).
+ * for a repo whose protection doesn't fit the tier model.
  */
 export type RawConfig = {
     rulesets: Ruleset[]
@@ -310,7 +310,7 @@ export function envDiff(have: EnvPolicy, want: string[]): string[] {
 const TIERS: Tier[] = ['main', 'next', 'live', 'prerelease', 'maintenance']
 
 /**
- * Check an untyped fleet (another repo's `--config` module) and throw with
+ * Check an untyped repo map (from a voidflow.config.ts) and throw with
  * every problem, by path. A tiered repo may leave out any field: it gets
  * `tool()`'s value, so a field added to RepoConfig later defaults for configs
  * written before it. A field that is given must have the default's type, and

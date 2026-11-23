@@ -1,10 +1,10 @@
 /**
- * Scoped Cloudflare deploy tokens: the config shape and the plan logic. The
- * fleet itself (repos, accounts, envs) lives in the org's infra repo and is
- * passed with --config (e.g. taraxvoid/infra's cf-tokens.ts).
+ * Scoped Cloudflare deploy tokens: the config shape and the plan logic. A
+ * repo lists its account and envs in the `cloudflare` section of its
+ * voidflow.config.ts.
  *
- * `scripts/cf-tokens.ts` diffs that config against the account's API tokens and
- * (with --apply) creates, updates or rotates them, writing each new value to
+ * `scripts/presets/tokens.ts` diffs that config against the account's API
+ * tokens and (with apply) creates, updates or rotates them, writing each new value to
  * the repo's `CLOUDFLARE_API_TOKEN` secret (per GitHub environment by default,
  * or repo-wide). Tokens it did not create are left alone unless a repo lists
  * them under `retire` (deleted only with --prune).
@@ -111,7 +111,7 @@ export const TTL_DAYS = 90
 export const RENEW_DAYS = 14
 
 // Permission group ids. Names are cosmetic and can change; ids are stable.
-// `just cf-tokens-groups` prints the live names next to these.
+// `voidflow plan tokens --groups` prints the live names next to these.
 //
 // WORKER_EDITOR is the set the dashboard produced for "Specified Workers >
 // Editor" (2026-10, twice). It mixes the new Workers role groups with legacy
@@ -364,7 +364,7 @@ const ENV_FIELDS = [
 ] satisfies Array<keyof EnvConfig> as string[]
 
 /**
- * Check an untyped config (another repo's `--config` module) and throw with
+ * Check an untyped repo map (from a voidflow.config.ts) and throw with
  * every problem, by path. Returns the config unchanged.
  */
 export function checkRepos(x: unknown): Record<string, RepoConfig> {

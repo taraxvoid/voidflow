@@ -14,7 +14,7 @@ export function parseOrExit<T extends ParseArgsConfig>(
     config: T,
     usage: string,
 ) {
-    // Only before a `--`: what follows is a command's own (tokens cf --try).
+    // Only before a `--`: what follows is a command's own.
     const end = argv.indexOf('--')
     const flags = end === -1 ? argv : argv.slice(0, end)
     if (flags.some((a) => a === '-h' || a === '--help')) {

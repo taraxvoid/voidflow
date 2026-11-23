@@ -1,36 +1,25 @@
 /**
- * Plan or apply the branch rulesets of the fleet in a --config module (the
- * org's infra repo), shaped as in rulesets/index.ts. Every invocation takes
- * --config <module>, e.g. ../infra/rulesets.ts:
+ * `voidflow plan|check|apply rulesets`: the branch rulesets a repo's
+ * voidflow.config.ts asks for (its `kind` defaults, overridden by its
+ * `rulesets` section), planned, checked or applied against GitHub.
  *
- *   voidflow rulesets --config <m>                              # plan (read-only) for every repo
- *   voidflow rulesets --config <m> --repo soundry               # plan for one repo
- *   voidflow rulesets --config <m> --check                      # plan, exit 1 on drift (for CI)
- *   voidflow rulesets --config <m> --apply                      # create/update to match
- *   voidflow rulesets --config <m> --apply --prune              # ...and delete retired rulesets
- *
- * The module exports `REPOS` (or a default); a repo may be tiered or spell
- * out its rulesets in full (see RawConfig and scripts/lib/config.ts).
- *
- * Uses the `gh` CLI for auth, so run it as someone with admin on the repos.
+ * Uses the `gh` CLI for auth, so apply as someone with admin on the repo.
  * Rulesets not described in the config are reported and left alone; only the
- * ones a repo lists under `retire` are deleted, and only with --prune.
- * Private repos on a plan without rulesets (GitHub answers 403) are skipped
- * and reported, never counted as drift, so --check stays green for them.
- * A repo asking for a merge queue it can't have (not org-owned) fails the run
- * up front, before anything is written.
+ * ones listed under `retire` are deleted, and only with --prune. A private
+ * repo on a plan without rulesets (GitHub answers 403) is skipped and
+ * reported, never counted as drift, so check stays green for it. Asking for a
+ * merge queue the repo can't have (not org-owned) fails before anything is
+ * written.
  *
- * A tiered repo's `environments` get an explicit deployment branch list built
- * from their tiers. Applying one creates a missing environment and keeps its
- * wait timer, reviewers and admin bypass as they are; policies for branches or
- * tags outside the list are deleted. Environments not in the config are never
- * read or changed.
+ * A tiered config's `environments` get an explicit deployment branch list
+ * built from their tiers. Applying one creates a missing environment and
+ * keeps its wait timer, reviewers and admin bypass as they are; policies for
+ * branches or tags outside the list are deleted. Environments not in the
+ * config are never read or changed.
  */
 
-import { dirname } from 'node:path'
-import { toFleet } from '../config/index.ts'
+import { toFleet } from '../../config/index.ts'
 import {
-    checkFleet,
     desired,
     diff,
     type EnvPolicy,
@@ -41,32 +30,10 @@ import {
     normalise,
     type Ruleset,
     wantsMergeQueue,
-} from '../rulesets/index.ts'
-import { isPlanGated } from '../rulesets/plan-gate.ts'
-import { parseOrExit } from './lib/args.ts'
-import { loadOrExit } from './lib/config.ts'
-import { capture } from './lib/proc.ts'
-import { loadVoidflowConfig, repoSlug } from './lib/repo-config.ts'
-
-const OPTIONS = {
-    apply: { type: 'boolean', default: false },
-    prune: { type: 'boolean', default: false },
-    check: { type: 'boolean', default: false },
-    repo: { type: 'string' },
-    config: { type: 'string' },
-    'repo-config': { type: 'string' },
-} as const
-
-const usage = (prog: string) => `usage: ${prog} --config <module> [flags]
-       ${prog} --repo-config <file> [flags]
-
-  --config <module>  the fleet map: a module exporting REPOS (or a default)
-  --repo-config <file>  a voidflow.config.ts: manage the repo it sits in
-                     (set by the verbs; takes no --repo)
-  --repo <name>      only this repo (owner/name, or just name)
-  --check            exit 1 on drift
-  --apply            create and update rulesets to match
-  --prune            with --apply, also delete the rulesets listed under retire`
+} from '../../rulesets/index.ts'
+import { isPlanGated } from '../../rulesets/plan-gate.ts'
+import { capture } from '../lib/proc.ts'
+import type { PresetCtx } from './context.ts'
 
 async function gh<T = unknown>(args: string[], body?: unknown): Promise<T> {
     const { code, out, err } = await capture(
@@ -217,7 +184,7 @@ export type RulesetOutcome = {
 
 /**
  * Plan (and with `apply`, write) one repo's rulesets against `fleet`. Shared
- * by `voidflow rulesets` and `voidflow init --preset rulesets`. A repo that is
+ * by `voidflow apply rulesets` and `voidflow init --preset rulesets`. A repo that is
  * private on a plan without rulesets comes back `gated`, never as drift.
  */
 export async function syncRepo(
@@ -314,7 +281,7 @@ export async function syncRepo(
 
 /**
  * Plan (and with `apply`, write) a tiered repo's environment branch policies;
- * returns the number that differ. Only `voidflow rulesets` does this, not
+ * returns the number that differ. Only `voidflow apply rulesets` does this, not
  * `voidflow init --preset rulesets`.
  */
 async function syncEnvs(
@@ -351,97 +318,62 @@ async function syncEnvs(
     return drift
 }
 
-/** `prog` names the command in the --help usage. */
-export async function main(argv: string[], prog = 'voidflow rulesets') {
-    const { values } = parseOrExit(argv, { options: OPTIONS }, usage(prog))
-
-    const repoConfig = values['repo-config']
-    if (repoConfig !== undefined && values.config !== undefined) {
-        console.error(`${prog}: --repo-config and --config are alternatives`)
-        process.exit(2)
-    }
-    if (repoConfig !== undefined && values.repo !== undefined) {
-        console.error(
-            `${prog}: --repo does not apply to a per-repo config; it manages the repo it sits in`,
-        )
-        process.exit(2)
+/** Plan, check or apply the repo's rulesets; returns the exit code. */
+export async function rulesets(ctx: PresetCtx): Promise<number> {
+    const { repo } = ctx
+    const apply = ctx.verb === 'apply'
+    let fleet: Fleet
+    try {
+        fleet = toFleet(ctx.cfg, repo)
+    } catch (e) {
+        console.error(`${ctx.file}: ${(e as Error).message}`)
+        return 2
     }
 
-    let REPOS: Fleet
-    if (repoConfig === undefined) {
-        REPOS = await loadOrExit(values.config, checkFleet)
-    } else {
+    // Fail before any write if the repo wants a merge queue GitHub can't give it.
+    if (wantsMergeQueue(fleet[repo])) {
+        let info: { owner: { type: string }; private: boolean } | undefined
         try {
-            REPOS = toFleet(
-                await loadVoidflowConfig(repoConfig),
-                await repoSlug(process.env, dirname(repoConfig)),
-            )
-        } catch (e) {
-            console.error((e as Error).message)
-            process.exit(2)
-        }
-    }
-
-    const repos = Object.keys(REPOS).filter(
-        (r) =>
-            !values.repo || r === values.repo || r.endsWith(`/${values.repo}`),
-    )
-    if (repos.length === 0) {
-        console.error(`no repo matches --repo ${values.repo}`)
-        process.exit(2)
-    }
-
-    // Fail before any write if a repo wants a merge queue GitHub can't give it.
-    const refused: string[] = []
-    for (const repo of repos.filter((r) => wantsMergeQueue(REPOS[r]))) {
-        let info: { owner: { type: string }; private: boolean }
-        try {
-            info = await gh<typeof info>([`repos/${repo}`])
+            info = await gh<{ owner: { type: string }; private: boolean }>([
+                `repos/${repo}`,
+            ])
         } catch (e) {
             // Without access to the repo, the rulesets call below reports it.
             console.log(
                 `note ${repo}: merge queue eligibility not checked (${e})`,
             )
-            continue
         }
-        const why = mergeQueueIneligible(info)
-        if (why) refused.push(`${repo}: mergeQueue: true, but ${why}`)
-        else if (info.private)
+        const why = info && mergeQueueIneligible(info)
+        if (why) {
+            console.error(`${repo}: mergeQueue: true, but ${why}`)
+            return 2
+        }
+        if (info?.private)
             console.log(
                 `note ${repo}: private org repo; a merge queue needs Enterprise Cloud`,
             )
     }
-    if (refused.length > 0) {
-        console.error(refused.join('\n'))
-        process.exit(2)
-    }
 
-    let drift = 0
-    const gated: string[] = []
     const api: RulesetApi = (method, path, body) =>
         gh(
             method === 'GET' ? [path] : ['-X', method, path, '--input', '-'],
             body,
         )
 
-    for (const repo of repos) {
-        console.log(`\n== ${repo}`)
-        const r = await syncRepo(api, repo, REPOS, values, (l) =>
-            console.log(l),
-        )
-        drift += r.drift
-        if (r.gated) gated.push(repo)
-        else drift += await syncEnvs(repo, REPOS[repo], values.apply)
-    }
-
-    if (gated.length > 0) {
-        console.log(
-            `\nskipped ${gated.length} private repo(s) without ruleset support: ${gated.join(', ')}`,
-        )
-    }
-    const applyHint = process.env.VOIDFLOW_APPLY_HINT ?? 'voidflow apply'
-    console.log(
-        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${values.apply ? 'changed' : `differ (${process.env.VOIDFLOW_VIA_VERB ? `run \`${applyHint}\`` : 're-run with --apply'})`}`}`,
+    const r = await syncRepo(
+        api,
+        repo,
+        fleet,
+        { apply, prune: ctx.prune },
+        (l) => console.log(l),
     )
-    if (values.check && drift > 0) process.exit(1)
+    let drift = r.drift
+    if (r.gated)
+        console.log(`\nskipped ${repo}: private repo without ruleset support`)
+    else drift += await syncEnvs(repo, fleet[repo], apply)
+
+    console.log(
+        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${apply ? 'changed' : `differ (${ctx.applyHint})`}`}`,
+    )
+    return ctx.verb === 'check' && drift > 0 ? 1 : 0
 }

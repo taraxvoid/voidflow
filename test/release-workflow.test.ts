@@ -98,8 +98,8 @@ describe('release-please.yml publish: npm tarballs are attested', () => {
 })
 
 describe('release-please.yml: one trunk, canaries on demand', () => {
-    test('runs on main and maintenance branches only, no back-merge job', () => {
-        expect(wf.on.push.branches).toEqual(['main', 'release/**'])
+    test('runs on main only, no back-merge job', () => {
+        expect(wf.on.push.branches).toEqual(['main'])
         expect(wf.jobs['back-merge']).toBeUndefined()
     })
 

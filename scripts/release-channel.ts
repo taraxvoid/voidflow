@@ -12,6 +12,10 @@
  * without it is the stable channel, which rejects -next versions.
  * Unknown branches fail closed: there is no default channel, in particular no
  * fall-through to `latest`.
+ *
+ * voidflow itself releases from main only (release-please.yml runs on main);
+ * the release/N.x maintenance channel stays here as the spec tool-release.yml
+ * mirrors for callers that cut backport branches.
  */
 
 import { isCanaryVersion, isStableVersion } from './lib/version-shape.ts'

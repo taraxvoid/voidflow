@@ -9,12 +9,10 @@
  *
  * node: APIs only, so it runs under Node 24+ as well as Bun.
  */
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { VoidflowConfig } from '../config/index.ts'
+import { toFleet, type VoidflowConfig } from '../config/index.ts'
 import { enabledGroups } from '../config/settings.ts'
-import { checkFleet, type Fleet } from '../rulesets/index.ts'
 import {
     credentialNotes,
     defaultGhActionsLock,
@@ -33,7 +31,6 @@ import {
     planFiles,
     selectedItems,
 } from './init/files.ts'
-import { addToFleet } from './init/fleet.ts'
 import {
     credentialSource,
     type Gh,
@@ -48,7 +45,7 @@ import {
     type Kind,
     type RenderCtx,
 } from './init/render.ts'
-import { defaultFleet, runRulesets } from './init/rulesets.ts'
+import { runRulesets } from './init/rulesets.ts'
 import {
     manualReminders,
     runSettings,
@@ -56,8 +53,6 @@ import {
     settingNames,
 } from './init/settings.ts'
 import { parseOrExit } from './lib/args.ts'
-import { loadOrExit } from './lib/config.ts'
-import { configPath } from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import { capture } from './lib/proc.ts'
 import { CONFIG_FILE, loadVoidflowConfig } from './lib/repo-config.ts'
@@ -94,7 +89,6 @@ const OPTIONS = {
     'enable-actions-relock': { type: 'boolean', default: false },
     repo: { type: 'string' },
     owner: { type: 'string' },
-    config: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
     'dry-run': { type: 'boolean', default: false },
     'no-color': { type: 'boolean', default: false },
@@ -114,7 +108,6 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --enable-actions-relock opt in (implies --enable-actions-lock): relock-actions.yml, which relocks and pushes actions.lock on Renovate PRs and PRs labelled relock-actions; needs a GitHub App
   --repo owner/name       the GitHub repo (default: the origin remote)
   --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
-  --config <module|dir>   the fleet rulesets config (in your infra repo; a directory means its rulesets.ts): add the repo to it, or with --preset rulesets take this repo's entry from it
   --no-color              no ANSI colors (also off when NO_COLOR is set or stdout is not a terminal; FORCE_COLOR=1 forces them on)
   --apply                 write the files and change the settings (default: plan only)
   -f, --force             with --apply, overwrite files that differ
@@ -159,6 +152,7 @@ function existingCronMinute(dir: string): number | null {
     const sources: [string, RegExp][] = [
         ['ci.yml', /cron:\s*'(\d{1,2}) 6 \* \* \*'/],
         ['verify-lockfile.yml', /cron:\s*'(\d{1,2}) 7 \* \* 1'/],
+        ['voidflow-drift.yml', /cron:\s*'(\d{1,2}) 5 \* \* 1'/],
     ]
     for (const [file, re] of sources) {
         const path = join(dir, '.github/workflows', file)
@@ -238,25 +232,6 @@ async function isWorkTree(dir: string): Promise<boolean> {
     }
 }
 
-/**
- * The rulesets config file `--config` names, read the way the fleet verbs
- * read it (configPath: `~/` is home, relative is against VOIDFLOW_CONFIG_BASE
- * else cwd): a directory means its rulesets.ts.
- */
-function rulesetsFile(config: string): string {
-    const file = configPath(config, {
-        env: process.env,
-        cwd: process.cwd(),
-        home: homedir(),
-    })
-    try {
-        if (statSync(file).isDirectory()) return join(file, 'rulesets.ts')
-    } catch {
-        // missing: reported where it is read
-    }
-    return file
-}
-
 /** `prog` names the command in the --help usage; `deps` are for tests. */
 export async function main(
     argv: string[],
@@ -284,15 +259,6 @@ export async function main(
     const wantFiles = preset.files !== null
     if (wantFiles && kind === undefined)
         fail(`--preset ${values.preset} needs --kind tool|site`, prog)
-
-    if (preset.rulesets && !values.config && kind !== 'tool') {
-        fail(
-            kind === 'site'
-                ? '--preset rulesets for a site needs --config <module> (no default site rulesets yet)'
-                : '--preset rulesets needs --kind tool or --config <module>',
-            prog,
-        )
-    }
 
     const validFiles = kind ? fileNames(kind) : FILE_ITEMS.map((i) => i.name)
     const valid = [...validFiles, ...settingNames()]
@@ -355,6 +321,15 @@ export async function main(
             process.exit(2)
         }
     }
+    // Rulesets come from the repo's config when it has one, else the kind's
+    // defaults.
+    const rulesetsCfg: VoidflowConfig | undefined =
+        existingConfig ?? (kind ? { kind } : undefined)
+    if (preset.rulesets && !rulesetsCfg)
+        fail(
+            `--preset rulesets needs --kind tool|site or a ${CONFIG_FILE}`,
+            prog,
+        )
     const merged = mergeSettings(
         existingConfig?.settings,
         flagGroups,
@@ -456,8 +431,9 @@ export async function main(
             enableActionsRelock,
             configChange:
                 existingConfig && merged.added.length > 0
-                    ? `${merged.added.join(', ')}; comments in the file are not kept`
+                    ? merged.added.join(', ')
                     : undefined,
+            configBefore: existingConfig,
         }
         const scope = enableActionsLock
             ? lockScope(
@@ -619,24 +595,8 @@ export async function main(
         }
     }
 
-    // Rulesets half. A bad --config is reported even when gh is unavailable.
-    if (preset.rulesets) {
-        let fleet: Fleet | undefined
-        if (values.config) {
-            fleet = await loadOrExit(rulesetsFile(values.config), checkFleet)
-            const key = repo
-                ? Object.keys(fleet).find(
-                      (k) => k.toLowerCase() === repo?.toLowerCase(),
-                  )
-                : undefined
-            if (repo && key) repo = key
-            if (repo && !key) {
-                console.error(
-                    `${values.config} has no entry for ${repo}; entries: ${Object.keys(fleet).join(', ') || '(none)'}`,
-                )
-                process.exit(2)
-            }
-        }
+    // Rulesets half.
+    if (preset.rulesets && rulesetsCfg) {
         out.push(dryRun ? 'rulesets (dry run):' : 'rulesets:')
         const gh = deps.gh ?? ghCli()
         const unavailable = repoError ?? (await ghAvailable(gh))
@@ -647,7 +607,7 @@ export async function main(
             const results = await runRulesets(
                 gh,
                 repo,
-                fleet ?? defaultFleet(repo),
+                toFleet(rulesetsCfg, repo),
                 dryRun,
             )
             for (const r of results) out.push(row(r.status, r.name, r.detail))
@@ -718,63 +678,9 @@ export async function main(
         out.push('notes:')
         for (const n of notes) out.push(`  ${n}`)
     }
-    // Fleet half: add the repo to the infra repo's rulesets config. With
-    // --preset rulesets, --config is read above instead (the entry must exist).
-    let fleetDone = false
-    let fleetFile = ''
-    if (values.config !== undefined && !preset.rulesets) {
-        const file = rulesetsFile(values.config)
-        fleetFile = file
-        out.push(dryRun ? 'fleet (dry run):' : 'fleet:')
-        if (!repo) {
-            out.push(row('unavailable', 'rulesets', repoError ?? ''))
-            exitCode = 1
-        } else if (!existsSync(file)) {
-            out.push(row('failed', 'rulesets', `${file} does not exist`))
-            exitCode = 1
-        } else {
-            // A path that is a directory, or a file that cannot be read or
-            // written, is a failed row like any other, not a crash that drops
-            // the results buffered in `out`.
-            try {
-                const edit = addToFleet(readFileSync(file, 'utf8'), repo)
-                if (edit.status === 'failed') {
-                    out.push(
-                        row('failed', 'rulesets', `${file}: ${edit.detail}`),
-                    )
-                    exitCode = 1
-                } else {
-                    if (edit.status === 'added' && !dryRun)
-                        writeFileSync(file, edit.text)
-                    fleetDone = true
-                    out.push(row(edit.status, 'rulesets', `${repo} in ${file}`))
-                }
-            } catch (e) {
-                out.push(
-                    row(
-                        'failed',
-                        'rulesets',
-                        `${file}: ${e instanceof Error ? e.message : String(e)}`,
-                    ),
-                )
-                exitCode = 1
-            }
-        }
-    }
-
     out.push('next:')
     if (wantFiles) out.push('  mise install', '  bun install')
-    if (fleetDone) {
-        // Discovery from this repo would not find the infra repo's config,
-        // so the commands name it.
-        out.push(
-            '  review and commit the rulesets config, then run:',
-            `    voidflow plan rulesets --config ${fleetFile} --repo ${repo}`,
-            `    voidflow apply rulesets --config ${fleetFile} --repo ${repo}`,
-        )
-    } else if (preset.rulesets && values.config) {
-        // The fleet path's own text stays until the fleet config goes away.
-    } else if (
+    if (
         fileActions.some((a) => a.name === 'config') &&
         !fileActions.some((a) => a.status === 'conflict')
     ) {
@@ -787,9 +693,9 @@ export async function main(
         )
     } else {
         out.push(
-            '  add the repo to your fleet rulesets config: rerun with --config <path to it>, e.g. ../infra/rulesets.ts',
-            `  or add this entry by hand: '${repo ?? 'OWNER/REPO'}': {},`,
-            '  (see https://github.com/taraxvoid/voidflow/blob/main/CONTRIBUTING.md#fleet-config---config)',
+            existingConfig
+                ? `  voidflow plan   (checks this repo against ${CONFIG_FILE})`
+                : `  write a ${CONFIG_FILE} (voidflow init --kind ${kind ?? 'tool|site'} --apply) so voidflow plan and check cover this repo`,
         )
     }
     if (dryRun) out.push('plan only: re-run with --apply to make these changes')

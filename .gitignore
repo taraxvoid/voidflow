@@ -19,10 +19,10 @@ fnox.local.toml
 .vscode/
 .idea
 .superpowers
-# agent plans and specs land in docs/; only the published docs are tracked
+# agent plans and specs land in docs/ subdirectories; the published docs are
+# the top-level docs/*.md, so a new one is tracked without editing this file
 docs/*
-!docs/fleet.md
-!docs/config.md
+!docs/*.md
 
 # mise state from runs with HOME at the repo root
 /.cache/

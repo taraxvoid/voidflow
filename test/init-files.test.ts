@@ -45,6 +45,7 @@ const TOOL_TARGETS = [
     '.github/workflows/ci.yml',
     '.github/CODEOWNERS',
     'voidflow.config.ts',
+    '.github/workflows/voidflow-drift.yml',
     'tsconfig.json',
     'package.json',
 ]

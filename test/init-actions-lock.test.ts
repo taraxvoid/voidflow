@@ -545,6 +545,7 @@ describe('voidflow init --enable-actions-relock', () => {
                 '.github/workflows/deploy.yml',
                 '.github/workflows/relock-actions.yml',
                 '.github/workflows/verify-lockfile.yml',
+                '.github/workflows/voidflow-drift.yml',
             ],
         ])
         const relock = readFileSync(

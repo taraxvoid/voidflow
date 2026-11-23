@@ -1,49 +1,27 @@
 /**
- * `voidflow settings --repo-config <file> [--check|--apply]`: the repo
- * settings a voidflow.config.ts asks for (its `settings` section, on top of
- * the baseline), planned, checked or applied with the settings table that
- * `voidflow init` uses (scripts/init/settings.ts). The verbs run it as
- * `voidflow plan|check|apply settings`; see docs/config.md.
+ * `voidflow plan|check|apply settings`: the repo settings a voidflow.config.ts
+ * asks for (its `settings` section, on top of the baseline), planned, checked
+ * or applied with the settings table that `voidflow init` uses
+ * (scripts/init/settings.ts). See docs/config.md.
  *
- * Exit: 0 in sync (or skipped with --if-admin), 1 drift under --check or a
- * failed write under --apply, 2 a config error, a failed read, or a
- * credential without admin.
+ * Exit: 0 in sync (or skipped on a bare run), 1 drift under check or a
+ * failed write under apply, 2 a failed read or a credential without admin.
  */
-import { dirname } from 'node:path'
-import type { VoidflowConfig } from '../config/index.ts'
-import { enabledGroups } from '../config/settings.ts'
-import { colorEnabled, type Paint, painter, statusStyle } from './init/color.ts'
-import { credentialSource, type Gh, ghAvailable, ghCli } from './init/gh.ts'
+import type { VoidflowConfig } from '../../config/index.ts'
+import { enabledGroups } from '../../config/settings.ts'
+import {
+    colorEnabled,
+    type Paint,
+    painter,
+    statusStyle,
+} from '../init/color.ts'
+import { credentialSource, type Gh, ghAvailable, ghCli } from '../init/gh.ts'
 import {
     manualReminders,
     runSettings,
     type SettingResult,
-} from './init/settings.ts'
-import { parseOrExit } from './lib/args.ts'
-import { loadVoidflowConfig, repoSlug } from './lib/repo-config.ts'
-
-const OPTIONS = {
-    'repo-config': { type: 'string' },
-    check: { type: 'boolean', default: false },
-    apply: { type: 'boolean', default: false },
-    'if-admin': { type: 'boolean', default: false },
-    'no-color': { type: 'boolean', default: false },
-} as const
-
-// CLI usage text, not HTML: the <file> is a placeholder.
-// nosemgrep
-const usage = (prog: string) => `usage: ${prog} --repo-config <file> [flags]
-
-  --repo-config <file>  a voidflow.config.ts: manage the repo it sits in
-                        (set by the verbs)
-  --check               exit 1 on drift
-  --apply               change the settings that differ
-  --no-color            no ANSI colors
-
-Reads need gh authenticated as an admin of the repo. Usually run as
-\`voidflow plan|check|apply settings\`; see docs/config.md.`
-
-export type Mode = 'plan' | 'check' | 'apply'
+} from '../init/settings.ts'
+import type { PresetCtx, Verb } from './context.ts'
 
 /** Skips that are not drift: shown, never counted. */
 const SKIPS = new Set(['skipped-plan', 'skipped-no-code'])
@@ -57,9 +35,11 @@ export async function settingsCommand(
     repo: string,
     cfg: VoidflowConfig,
     opts: {
-        mode: Mode
+        mode: Verb
         ifAdmin: boolean
         env: Record<string, string | undefined>
+        /** How to apply a plan. Default: run `voidflow apply settings`. */
+        applyHint?: string
         paint?: Paint
     },
 ): Promise<{ lines: string[]; code: 0 | 1 | 2 }> {
@@ -106,9 +86,7 @@ export async function settingsCommand(
         lines.push('manual:')
         for (const l of manualReminders(repo, enabled)) lines.push(`  ${l}`)
     }
-    const hint = opts.env.VOIDFLOW_VIA_VERB
-        ? `run \`${opts.env.VOIDFLOW_APPLY_HINT ?? 'voidflow apply settings'}\``
-        : 're-run with --apply'
+    const hint = opts.applyHint ?? 'run `voidflow apply settings`'
     if (failed > 0)
         lines.push(
             `${failed} setting(s) failed${opts.mode === 'apply' ? '' : ' to read'}`,
@@ -127,42 +105,23 @@ export async function settingsCommand(
     return { lines, code: 0 }
 }
 
-/** `prog` names the command in the --help usage. */
-export async function main(
-    argv: string[],
-    prog = 'voidflow settings',
+/** Plan, check or apply the repo's settings; returns the exit code. */
+export async function settings(
+    ctx: PresetCtx,
     deps: { gh?: Gh } = {},
-) {
-    const { values } = parseOrExit(argv, { options: OPTIONS }, usage(prog))
-    const file = values['repo-config']
-    if (file === undefined) {
-        console.error(`${prog}: --repo-config is required\n\n${usage(prog)}`)
-        process.exit(2)
-    }
-    if (values.check && values.apply) {
-        console.error(`${prog}: --check and --apply are alternatives`)
-        process.exit(2)
-    }
-    let cfg: VoidflowConfig
-    let repo: string
-    try {
-        cfg = await loadVoidflowConfig(file)
-        repo = await repoSlug(process.env, dirname(file))
-    } catch (e) {
-        console.error((e as Error).message)
-        process.exit(2)
-    }
+): Promise<number> {
     const { lines, code } = await settingsCommand(
         deps.gh ?? ghCli(),
-        repo,
-        cfg,
+        ctx.repo,
+        ctx.cfg,
         {
-            mode: values.apply ? 'apply' : values.check ? 'check' : 'plan',
-            ifAdmin: values['if-admin'],
-            env: process.env,
-            paint: painter(colorEnabled(values['no-color'])),
+            mode: ctx.verb,
+            ifAdmin: ctx.bare,
+            env: ctx.env,
+            applyHint: ctx.applyHint,
+            paint: painter(colorEnabled(ctx.noColor)),
         },
     )
     console.log(lines.join('\n'))
-    process.exit(code)
+    return code
 }

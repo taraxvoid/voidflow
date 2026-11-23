@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 // The published bin, installed from the packed tarball by each package
-// manager the README names, then run the way an infra repo would. A manager
+// manager the README names, then run in a repo without a config. A manager
 // not on PATH skips, except under CI where bun and npm must be present.
 
 const ROOT = resolve(import.meta.dir, '..')
@@ -45,8 +45,6 @@ function run(cmd: string[], cwd: string, home: string) {
             ...process.env,
             HOME: home,
             XDG_CONFIG_HOME: join(home, '.config'),
-            VOIDFLOW_CONFIG: '',
-            VOIDFLOW_CONFIG_BASE: '',
             CF_TOKEN_ADMIN: '',
         },
         stdout: 'pipe',
@@ -69,7 +67,7 @@ describe.each(MANAGERS)('installed with %s', (name, add) => {
             mkdirSync(home)
             writeFileSync(
                 join(project, 'package.json'),
-                '{"name": "infra", "private": true, "type": "module"}',
+                '{"name": "site", "private": true, "type": "module"}',
             )
             // A throwaway npm user config and cache: the tarball's deps are
             // public, and the user's own .npmrc and cache stay out of it.
@@ -95,9 +93,10 @@ describe.each(MANAGERS)('installed with %s', (name, add) => {
             expect({ name, code: help.code }).toEqual({ name, code: 0 })
             expect(help.out).toContain('usage: voidflow plan')
 
+            mkdirSync(join(project, '.git'))
             const apply = run([bin, 'apply', 'rulesets'], project, home)
             expect({ name, code: apply.code }).toEqual({ name, code: 2 })
-            expect(apply.err).toContain('no rulesets.ts found')
+            expect(apply.err).toContain('no voidflow.config.ts')
         },
         120_000,
     )

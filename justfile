@@ -111,47 +111,17 @@ doctor:
     @command -v lefthook >/dev/null && echo "lefthook:  $(lefthook version)" || echo "lefthook:  NOT FOUND (needed to run git hooks - run 'just doctor' then 'lefthook install')"
     @command -v gitleaks >/dev/null && echo "gitleaks:  $(gitleaks version)" || echo "gitleaks:  NOT FOUND (needed for 'just lint')"
     @command -v act >/dev/null && echo "act:  $(act --version)" || echo "act:  NOT FOUND (needed for local dry-run - not a blocker to commit/push)"
-    @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (run 'mise install'; holds CF_TOKEN_ADMIN for 'just cf-tokens-*')"
+    @command -v fnox >/dev/null && echo "fnox:  $(fnox --version)" || echo "fnox:  NOT FOUND (run 'mise install'; supplies an admin token for 'voidflow apply tokens', see CONTRIBUTING.md)"
     @# `fnox proxy rules` validates the config without resolving the secret (a fido2 provider would need a touch)
     @command -v fnox >/dev/null && { fnox proxy rules >/dev/null 2>&1 && echo "fnox proxy:  config valid (not the stored token: 'fnox check' resolves CF_TOKEN_ADMIN)" || echo "fnox proxy:  config invalid (run 'fnox proxy rules'; see CONTRIBUTING.md)"; } || true
 
-# So a relative --config (another repo's fleet map) resolves from where `just`
-# was run, not this directory. See scripts/lib/config.ts.
-config_base := "env VOIDFLOW_CONFIG_BASE=" + quote(invocation_directory())
+# Show how GitHub differs from this repo's voidflow.config.ts, from the checkout (read-only; needs gh)
+plan *args:
+    bun scripts/cli.ts plan {{ args }}
 
-# The rulesets-* and cf-tokens-* recipes all take --config <module>: the fleet
-# map in your infra repo (e.g. taraxvoid/infra), whose justfile wraps these.
-# cf-tokens-* call `voidflow tokens cf`.
-
-# Show how each repo's branch rulesets differ from the config (read-only; needs gh)
-rulesets-plan *args:
-    {{ config_base }} bun scripts/cli.ts rulesets {{ args }}
-
-# Create/update branch rulesets to match the config (needs repo admin via gh)
-rulesets-apply *args:
-    {{ config_base }} bun scripts/cli.ts rulesets --apply {{ args }}
-
-# CF_TOKEN_ADMIN comes from fnox (fnox.toml) unless already in the environment.
-# `fnox proxy run` gives the command a placeholder and swaps the real token in
-# only on Cloudflare API calls (the [proxy] table in fnox.toml).
-cf_admin := if env_var_or_default("CF_TOKEN_ADMIN", "") == "" { "fnox proxy run --" } else { "" }
-cf_tokens := cf_admin + " " + config_base + " bun scripts/cli.ts tokens cf"
-
-# Show how each repo's Cloudflare deploy tokens differ from the config (read-only; needs CF_TOKEN_ADMIN and gh)
-cf-tokens-plan *args:
-    {{ cf_tokens }} {{ args }}
-
-# Create/update/rotate deploy tokens and set each repo's env secret (needs CF_TOKEN_ADMIN and gh)
-cf-tokens-apply *args:
-    {{ cf_tokens }} --apply {{ args }}
-
-# Print the live names of the permission group ids cloudflare/tokens.ts uses
-cf-tokens-groups *args:
-    {{ cf_tokens }} --groups {{ args }}
-
-# Run a command from the invoking directory with a throwaway token scoped like <repo>'s <env> token, e.g. `cf-tokens-try ../infra/cf-tokens.ts example_project prod bunx wrangler deploy`
-cf-tokens-try config repo env +cmd:
-    {{ cf_tokens }} --config {{ quote(config) }} --repo {{ repo }} --try {{ env }} -- {{ cmd }}
+# Make GitHub match one preset (rulesets or settings) of this repo's voidflow.config.ts (needs repo admin via gh)
+apply preset *args:
+    bun scripts/cli.ts apply {{ preset }} {{ args }}
 
 # Cut a canary X.Y.Z-next.N from main's tip and publish it under @next (approve both staged packages on npm after); run `just canary true` to only resolve the version
 canary dry-run="false":
@@ -160,33 +130,3 @@ canary dry-run="false":
 # After approving a stable release on npm, move @next to it (checks it is latest and above next; needs an npm session)
 sync-next version:
     bun scripts/sync-next.ts {{ version }}
-
-# Cut release/N.x from a stable tag in a new worktree (e.g. v0.9.3 release/0.9.x); push it yourself
-cut-maintenance tag branch:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    tag="{{ tag }}"
-    branch="{{ branch }}"
-    if ! bun scripts/release-channel.ts "$branch" | rg -q '^kind=maintenance$'; then
-        echo "branch must look like release/0.9.x or release/1.x" >&2
-        exit 1
-    fi
-    git fetch origin main --tags --quiet
-    dir="$HOME/worktrees/voidflow/${branch//\//-}"
-    git worktree add -b "$branch" "$dir" "$tag"
-    # A branch cut from an older tag still runs that tag's workflows, so bring
-    # the current release tooling with it or releases from it would publish
-    # without dist-tags (or not run at all).
-    for f in .github/workflows/release-please.yml .github/workflows/ci.yml scripts/release-channel.ts scripts/verify-releases.ts .release-please/maintenance.json; do
-        # The verifier only exists on main once this has been promoted; the
-        # workflow copied from main needs it exactly when it is there.
-        if [ "$f" = scripts/verify-releases.ts ] && ! git cat-file -e "origin/main:$f" 2>/dev/null; then
-            continue
-        fi
-        mkdir -p "$dir/$(dirname "$f")"
-        git show "origin/main:$f" > "$dir/$f"
-    done
-    jq -n --arg v "${tag#v}" '{".": $v}' > "$dir/.release-please/maintenance-manifest.json"
-    git -C "$dir" add .github scripts .release-please
-    git -C "$dir" commit -q -m "chore: release tooling and release-please config for ${branch}"
-    echo "Created ${branch} at ${dir}. Review, then: git -C ${dir} push -u origin ${branch}"

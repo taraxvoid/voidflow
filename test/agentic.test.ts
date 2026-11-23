@@ -110,7 +110,7 @@ describe('deps-review agent', () => {
             expect(read('agentic/workflows/deps-review.md')).toContain(
                 `VOIDFLOW: "${pkg.version}" # x-release-please-version`,
             )
-            for (const f of ['main', 'maintenance']) {
+            for (const f of ['main']) {
                 const cfg = JSON.parse(read(`.release-please/${f}.json`))
                 expect(cfg.packages['.']['extra-files']).toContainEqual({
                     type: 'generic',

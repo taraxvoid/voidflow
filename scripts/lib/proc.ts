@@ -1,5 +1,5 @@
 /**
- * Child processes for the fleet tools, on node:child_process so the CLI runs
+ * Child processes for the CLI, on node:child_process so the CLI runs
  * under Node as well as Bun.
  */
 import { spawn } from 'node:child_process'

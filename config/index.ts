@@ -19,8 +19,8 @@ import {
 import {
     checkFleet,
     type Fleet,
-    type RawConfig,
     type RepoConfig,
+    type Ruleset,
     site,
     tool,
 } from '../rulesets/index.ts'
@@ -39,16 +39,27 @@ export type Kind = (typeof KINDS)[number]
 
 export type VoidflowConfig = {
     kind: Kind
-    /** Overrides on the kind's defaults, or a raw ruleset list. */
-    rulesets?: Partial<RepoConfig> | RawConfig
-    /** The repo's scoped Cloudflare deploy tokens (`voidflow tokens cf`). */
+    /** Overrides on the kind's defaults, or the rulesets spelled out in full. */
+    rulesets?: Partial<RepoConfig> | RawRulesets
+    /** The repo's scoped Cloudflare deploy tokens (`voidflow plan tokens`). */
     cloudflare?: CloudflareConfig
-    /** Repo settings to check: opt-in groups and skips (`voidflow settings`). */
+    /** Repo settings to check: opt-in groups and skips (`voidflow plan settings`). */
     settings?: SettingsConfig
 }
 
 /**
- * A fleet cf-tokens entry (cloudflare/tokens.ts) plus the variable holding
+ * Rulesets spelled out in full, for protection that does not fit the tiers:
+ * each as GitHub's API takes it (`name`, `target`, `enforcement`,
+ * `conditions`, `bypass_actors`, `rules`).
+ */
+export type RawRulesets = {
+    raw: Ruleset[]
+    /** Ruleset names to delete with --prune. Default: none. */
+    retire?: string[]
+}
+
+/**
+ * A repo's token entry (cloudflare/tokens.ts) plus the variable holding
  * the admin token for this repo's account.
  */
 export type CloudflareConfig = {
@@ -82,27 +93,40 @@ export function defaultsFor(kind: Kind): RepoConfig {
     return kind === 'site' ? site() : tool()
 }
 
-/** `rulesets` as an entry for checkFleet: tiered overrides on the kind's defaults, or raw. */
+/**
+ * `rulesets` as an entry for checkFleet: tiered overrides on the kind's
+ * defaults, or the `raw` list as a RawConfig. Other keys beside `raw` pass
+ * through, so checkFleet reports them.
+ */
 function entry(kind: Kind, rulesets: unknown): unknown {
     if (!isObj(rulesets)) return rulesets
-    return 'rulesets' in rulesets
-        ? rulesets
-        : { ...defaultsFor(kind), ...rulesets }
+    if ('raw' in rulesets) {
+        const { raw, ...rest } = rulesets
+        return { retire: [], ...rest, rulesets: raw }
+    }
+    return { ...defaultsFor(kind), ...rulesets }
 }
 
 /** checkFleet's messages for one entry, with its repo key rewritten to `rulesets`. */
 function rulesetProblems(kind: Kind, rulesets: unknown): string[] {
+    if (isObj(rulesets) && 'rulesets' in rulesets)
+        return [
+            'rulesets.rulesets: renamed; spell rulesets out in full as rulesets.raw',
+        ]
+    const raw = isObj(rulesets) && 'raw' in rulesets
     try {
         checkFleet({ [PLACEHOLDER]: entry(kind, rulesets) })
         return []
     } catch (e) {
-        return (e as Error).message
-            .split('\n')
-            .map((l) =>
-                l
-                    .replace(`"${PLACEHOLDER}".`, 'rulesets.')
-                    .replace(`"${PLACEHOLDER}"`, 'rulesets'),
-            )
+        return (e as Error).message.split('\n').map((l) =>
+            l
+                .replace(
+                    `"${PLACEHOLDER}".rulesets`,
+                    raw ? 'rulesets.raw' : 'rulesets.rulesets',
+                )
+                .replace(`"${PLACEHOLDER}".`, 'rulesets.')
+                .replace(`"${PLACEHOLDER}"`, 'rulesets'),
+        )
     }
 }
 
@@ -187,7 +211,7 @@ export function checkVoidflowConfig(x: unknown): VoidflowConfig {
     return x as VoidflowConfig
 }
 
-/** The one-repo fleet map the rulesets planner runs on, defaults filled in. */
+/** The one-repo map the rulesets planner runs on, defaults filled in. */
 export function toFleet(cfg: VoidflowConfig, repo: string): Fleet {
     return checkFleet({ [repo]: entry(cfg.kind, cfg.rulesets ?? {}) })
 }
@@ -196,7 +220,7 @@ export function toFleet(cfg: VoidflowConfig, repo: string): Fleet {
 export const adminTokenVar = (cf: CloudflareConfig): string =>
     cf.adminTokenEnv ?? DEFAULT_ADMIN_TOKEN_ENV
 
-/** The one-repo cf-tokens map `voidflow tokens cf` runs on. */
+/** The one-repo token map `voidflow plan|apply tokens` runs on. */
 export function toTokenRepos(
     cfg: VoidflowConfig,
     repo: string,

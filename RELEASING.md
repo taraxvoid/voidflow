@@ -3,15 +3,14 @@
 voidflow releases from one trunk, `main`, driven by
 [release-please](https://github.com/googleapis/release-please) and Conventional
 Commits ([`release-please.yml`](.github/workflows/release-please.yml)). Trusted publishing is configured on NPM using this repo name, the `release-please.yml` release job name, and the GitHub environment `npm`. That environment is the only server-side
-limit on who can publish, so it deploys from `main`, `next` and `release/*`
-only: the infra repo's rulesets config lists it under voidflow's
-`environments`, and `rulesets-plan` reports drift.
+limit on who can publish, so it deploys from `main` only: this repo's
+`voidflow.config.ts` lists it under `rulesets.environments`, and
+`just plan rulesets` reports drift.
 
 | Source | Channel | Version | npm dist-tag | GitHub release |
 |---|---|---|---|---|
 | `main`, release PR merged | stable | `1.1.0` | `latest` | normal |
 | `main`, `just canary` | canary | `1.1.0-next.2` | `next` | prerelease |
-| `release/N.x` | maintenance (patch-only) | `0.9.4` | `release-N.x` | normal |
 
 ```mermaid
 gitGraph
@@ -35,7 +34,6 @@ a deprecating minor.
 | Try unreleased code | `just canary`. Publishes `X.Y.Z-next.N` under `next` after npm approval. |
 | Release stable | Merge release-please's PR on `main`. After approving it on npm, `just sync-next X.Y.Z` moves `@next` to it. |
 | Hotfix | PR to `main`, squash-merge, merge the release PR. |
-| Backport | `release/N.x`, see below. |
 
 **`main` stays releasable.** Work that is not ready to ship either stays on its
 feature branch or lands behind a flag.
@@ -119,29 +117,16 @@ different dist-tag), first reject it with `npm stage reject <id>`.
 ## Hotfix
 
 PR to `main`, squash-merge, merge the release PR. It ships whatever is on `main`:
-if `main` holds something unready, finish it, revert it, or cut a patch from the
-last tag on a `release/N.x` branch.
-
-## Backport to an older line
-
-1. `just cut-maintenance v0.9.3 release/0.9.x` creates the branch in a new
-   worktree. It copies the current release workflow, CI workflow, channel script
-   and maintenance release-please config from `main` onto the old tag, because a
-   branch cut from an older tag would otherwise run that tag's workflows. Push it:
-   `git -C <worktree> push -u origin release/0.9.x`.
-2. Cherry-pick the fix onto a branch from `release/0.9.x`, PR to
-   `release/0.9.x`, squash-merge.
-3. Merge the release PR that release-please opens there. It publishes
-   `0.9.4` under the `release-0.9.x` dist-tag and never touches `latest` or `v1`.
+if `main` holds something unready, finish it or revert it first. There are
+no backport branches: fixes ship in the current line only.
 
 ## Republish a tag
 
-Run the Release Please workflow manually (`workflow_dispatch`) from the branch
-that owns the tag's channel (`main` or `release/N.x`), give it the tag, and tick
-`dry-run` first to check without publishing. A tag is rejected unless its
-version fits the channel (`main` takes `X.Y.Z` and canary `X.Y.Z-next.N` tags;
-only `0.9.x` versions on `release/0.9.x`) and its commit is on that branch (for
-a canary tag, its parent commit and only the version files changed).
+Run the Release Please workflow manually (`workflow_dispatch`) from `main`,
+give it the tag, and tick `dry-run` first to check without publishing. A tag is
+rejected unless its version fits the channel (`X.Y.Z`, or a canary's
+`X.Y.Z-next.N`) and its commit is on `main` (for a canary tag, its parent
+commit and only the version files changed).
 
 ## Consuming
 

@@ -7,7 +7,8 @@ name: Validation
 # merge queue (the required check must report there or the queue stalls),
 # and must grant `contents: read` and `pull-requests: read`.
 # Callers may add `closed` to the pull_request types (e.g. to clean up PR
-# previews); validation skips closed events, so they need no guard of their own.
+# previews); validation skips closed events, and PR runs take a per-PR
+# concurrency group, so a merge's `closed` run can't cancel its push run.
 # e2e:all runs on ready (non-draft) PRs, merge_group and push; the heavy,
 # non-blocking a11y and lighthouse suites run only on schedule and
 # workflow_dispatch. The cron lives in the caller; remove it to stop paying.
@@ -123,7 +124,10 @@ on:
         default: false
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # pull_request runs group by PR number, not github.ref: a merged PR's
+  # `closed` run has github.ref = refs/heads/<base>, so it would share the
+  # base branch's group and cancel the merge's push run (and its deploy).
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   # Only superseded PR pushes are cancelled: on trunk, a second quick merge to
   # main must not cancel the first one's validation (and so its deploy).
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -435,18 +439,34 @@ jobs:
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.check == 'true'
         run: '"$PM" run check'
 
-      - name: Check voidflow config drift
+      - name: voidflow config
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.check_voidflow == 'true'
-        # Exit 1 is drift and fails the job. Exit 2 (no admin on the repo for
-        # the default token, or a config error) only warns: CI has no admin
-        # token, so it cannot always read rulesets. Tokens are never checked here.
+        # The config must load and validate (exit 2 fails the job). What
+        # applying it would change goes to the job summary and never fails:
+        # a PR that changes the config is applied after merge, and drift on
+        # main is the voidflow-drift workflow's to report. Tokens are never
+        # planned here (CI has no admin token).
         run: |
+          vf() { ./node_modules/.bin/voidflow "$@"; }
+          if [ ! -x ./node_modules/.bin/voidflow ]; then
+            echo "::warning::check:voidflow is defined but node_modules/.bin/voidflow is missing; add @taraxvoid/voidflow as a devDependency"
+            exit 0
+          fi
+          vf validate
           code=0
-          "$PM" run check:voidflow || code=$?
-          if [ "$code" = 2 ]; then
-            echo "::warning::voidflow check could not run (exit 2: auth or config error). Run 'voidflow check' locally."
-          elif [ "$code" != 0 ]; then
-            exit "$code"
+          vf plan --no-color > "$RUNNER_TEMP/voidflow-plan.txt" 2>&1 || code=$?
+          cat "$RUNNER_TEMP/voidflow-plan.txt"
+          {
+            echo '### voidflow plan'
+            echo
+            echo 'What voidflow apply would change for this voidflow.config.ts. Drift does not fail CI: apply after merging, from main.'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/voidflow-plan.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$code" != 0 ]; then
+            echo "::warning::voidflow plan exited $code (1: a read failed, 2: the default token cannot read something); see the job summary"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
