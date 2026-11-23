@@ -39,7 +39,7 @@ inputs:
     default: bun
   token-fallback:
     description: >
-      Pass vars.CF_TOKEN_FALLBACK. Set by 'just cf-tokens-apply' when the
+      Pass vars.CF_TOKEN_FALLBACK. Set by 'voidflow apply tokens' when the
       env's token needed an account-wide fallback; non-empty adds a warning
       to every deploy so the wider grant is never silent.
     default: ''

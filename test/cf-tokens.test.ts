@@ -1,7 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { describe, expect, test } from 'bun:test'
 import {
     checkRepos,
     D1_WRITE,
@@ -26,7 +23,7 @@ import {
     wranglerWarnings,
     zoneOf,
 } from '../cloudflare/tokens.ts'
-import { tryChildEnv } from '../scripts/cf-tokens.ts'
+import { tryChildEnv } from '../scripts/presets/tokens.ts'
 
 // A fleet like taraxvoid/infra's cf-tokens.ts (the real one lives there).
 const REPOS: Record<string, RepoConfig> = {
@@ -604,120 +601,5 @@ describe('tryChildEnv', () => {
             CLOUDFLARE_API_TOKEN: 'tok',
             CLOUDFLARE_ACCOUNT_ID: acct,
         })
-    })
-})
-
-describe('voidflow tokens cf --repo-config', () => {
-    const CLI = resolve(import.meta.dir, '..', 'scripts', 'cli.ts')
-    const roots: string[] = []
-    afterEach(() => {
-        for (const r of roots.splice(0))
-            rmSync(r, { recursive: true, force: true })
-    })
-    const CF = `export default { kind: 'site', cloudflare: { account: '${'c'.repeat(32)}', adminTokenEnv: 'CF_TOKEN_ADMIN_Q', envs: [{ env: 'prod' }] } }`
-
-    /** Run `voidflow tokens cf` in a temp git dir holding `config` as voidflow.config.ts; `@file` in args is its path. */
-    async function run(
-        args: string[],
-        config = CF,
-        env: Record<string, string> = {},
-        configInBase = false,
-    ) {
-        const root = mkdtempSync(join(tmpdir(), 'voidflow-cf-'))
-        roots.push(root)
-        mkdirSync(join(root, '.git'))
-        const configDir = configInBase ? join(root, 'base') : root
-        if (configInBase) mkdirSync(configDir)
-        const file = join(configDir, 'voidflow.config.ts')
-        writeFileSync(file, config)
-        const proc = Bun.spawn(
-            [
-                'bun',
-                CLI,
-                'tokens',
-                'cf',
-                ...args.map((a) => (a === '@file' ? file : a)),
-            ],
-            {
-                cwd: root,
-                env: {
-                    ...process.env,
-                    GITHUB_REPOSITORY: 'o/n',
-                    CF_TOKEN_ADMIN: '',
-                    CF_TOKEN_ADMIN_Q: '',
-                    VOIDFLOW_CONFIG_BASE: configInBase ? configDir : '',
-                    ...env,
-                },
-                stdout: 'pipe',
-                stderr: 'pipe',
-            },
-        )
-        const [code, err] = await Promise.all([
-            proc.exited,
-            new Response(proc.stderr).text(),
-        ])
-        return { code, err }
-    }
-
-    test('--repo-config and --config are alternatives', async () => {
-        const r = await run(['--repo-config', '@file', '--config', 'x.ts'])
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('--repo-config and --config are alternatives')
-    })
-
-    test('--repo does not apply with --repo-config', async () => {
-        const r = await run(['--repo-config', '@file', '--repo', 'x'])
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('per-repo config')
-    })
-
-    test('a config with no cloudflare section exits 2', async () => {
-        const r = await run(
-            ['--repo-config', '@file'],
-            "export default { kind: 'site' }",
-        )
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('no cloudflare section')
-    })
-
-    test('a relative --repo-config resolves against the working directory', async () => {
-        const r = await run(['--repo-config', 'voidflow.config.ts'])
-        expect(r.err).not.toContain('Cannot find')
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
-    })
-
-    test('a relative --repo-config resolves against VOIDFLOW_CONFIG_BASE', async () => {
-        const r = await run(
-            ['--repo-config', 'voidflow.config.ts'],
-            CF,
-            {},
-            true,
-        )
-        expect(r.err).not.toContain('Cannot find')
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
-    })
-
-    test('names the missing admin variable', async () => {
-        const r = await run(['--repo-config', '@file'])
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
-    })
-
-    test('uses the named variable, not CF_TOKEN_ADMIN', async () => {
-        const r = await run(['--repo-config', '@file'], CF, {
-            CF_TOKEN_ADMIN: 'x',
-        })
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
-    })
-
-    test('no repo slug exits 2 with the reason', async () => {
-        const r = await run(['--repo-config', '@file'], CF, {
-            GITHUB_REPOSITORY: '',
-        })
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('cannot tell which GitHub repo')
     })
 })

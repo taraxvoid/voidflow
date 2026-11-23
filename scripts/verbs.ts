@@ -1,386 +1,215 @@
 /**
- * The fleet verbs over the per-tool commands:
+ * The verbs, run on the repo's own voidflow.config.ts (found from the current
+ * directory up to the git root):
  *
- *   voidflow plan  [rulesets|settings|tokens [provider]] [--repo <name>]   # read-only
- *   voidflow check [rulesets|settings|tokens [provider]] [--repo <name>]   # exit 1 on drift
- *   voidflow apply  rulesets|settings|tokens [provider]  --repo <name> | --entire-fleet
+ *   voidflow plan  [rulesets|settings|tokens]   # read-only
+ *   voidflow check [rulesets|settings|tokens]   # exit 1 on drift
+ *   voidflow apply  rulesets|settings|tokens    # write
+ *   voidflow try    tokens <env> -- <command...>
  *
- * settings run only on a repo's voidflow.config.ts (scripts/settings.ts).
- *
- * Each finds the tool's config (scripts/lib/discover.ts), prints a header
- * line to stderr, then runs `voidflow <tool> --config <file> [--check|--apply]`
- * as a child process with the remaining flags (token tools run as
- * `voidflow tokens <provider>`, cf when none is named; see
- * scripts/lib/providers.ts). See
- * docs/fleet.md.
+ * Each preset runs in this process (scripts/presets/). See docs/config.md.
  */
-import { spawnSync } from 'node:child_process'
-import { readFileSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { checkRepos } from '../cloudflare/tokens.ts'
-import {
-    adminTokenVar,
-    type CloudflareConfig,
-    type VoidflowConfig,
-} from '../config/index.ts'
-import { checkFleet } from '../rulesets/index.ts'
+import { adminTokenVar, type VoidflowConfig } from '../config/index.ts'
 import { credentialSource } from './init/gh.ts'
-import { loadConfig } from './lib/config.ts'
-import {
-    discover,
-    type Found,
-    TOOL_FILE,
-    type Tool,
-    xdgDir,
-} from './lib/discover.ts'
 import { packageRoot } from './lib/package-root.ts'
 import {
-    DEFAULT_PROVIDER,
-    PROVIDERS,
-    type Provider,
-    providerOf,
-    TOKEN_TOOLS,
-} from './lib/providers.ts'
-import {
+    CONFIG_FILE,
     findRepoConfig,
     loadVoidflowConfig,
     repoSlug,
 } from './lib/repo-config.ts'
+import {
+    PRESETS,
+    type Preset,
+    type PresetCtx,
+    type Verb,
+} from './presets/context.ts'
+import type { TokensMode } from './presets/tokens.ts'
 
-type Verb = 'plan' | 'check' | 'apply'
+export type { Preset, Verb }
 
-/** Fleet tools in run order, rulesets first. */
-const TOOLS: Tool[] = ['rulesets', ...TOKEN_TOOLS]
-
-/** A tool the verbs run; `settings` exists only for a voidflow.config.ts. */
-export type RepoTool = Tool | 'settings'
-
-/** Flags the verb sets itself, or that belong to the per-tool command only. */
-const REFUSED: Record<string, string> = {
-    '--apply':
-        'plan and check never write; run `voidflow apply <tool>` (or `voidflow <tool> apply`)',
-    '--check':
-        'the verb is the command; run `voidflow check <tool>` (or `voidflow <tool> check`)',
-    '--try': 'use `voidflow tokens cf --try`',
-    '--groups': 'use `voidflow tokens cf --groups`',
+/** Flags that belonged to the fleet tools or the per-tool commands. */
+const REMOVED: Record<string, string> = {
+    '--config':
+        'fleet configs were removed; voidflow reads the voidflow.config.ts of the repo you run it in',
+    '--repo':
+        'voidflow manages the repo whose voidflow.config.ts it reads; run it inside that repo',
+    '--entire-fleet':
+        'fleet configs were removed; run voidflow inside each repo',
     '--repo-config':
-        'the verbs find the repo file themselves; run them inside that repo',
+        'voidflow finds the voidflow.config.ts itself; run it inside that repo',
+    '--apply': 'the verb is the command: run `voidflow apply <preset>`',
+    '--check': 'the verb is the command: run `voidflow check <preset>`',
+    '--try': 'run `voidflow try tokens <env> -- <command>`',
 }
 
 export type VerbArgs = {
-    tool?: RepoTool
-    provider?: Provider
-    config?: string
-    entireFleet: boolean
-    repo?: string
-    rest: string[]
+    preset?: Preset
+    prune: boolean
+    rotate: boolean
+    groups: boolean
+    noColor: boolean
+    help: boolean
+    /** try: the env, then the command after `--`. */
+    env?: string
+    cmd: string[]
 }
 
-/**
- * Split the verb's own arguments from the tool's: the first positional is the
- * tool (`rulesets`, or `tokens` with an optional provider), `--config` and
- * `--entire-fleet` are consumed, `--repo` is recorded and kept for the tool,
- * everything else is forwarded. Throws on a bad argument.
- */
-export function splitVerbArgs(argv: string[]): VerbArgs {
-    const out: VerbArgs = { entireFleet: false, rest: [] }
+/** Parse a verb's arguments; throws with the reason on a bad one. */
+export function parseVerbArgs(verb: Verb | 'try', argv: string[]): VerbArgs {
+    const out: VerbArgs = {
+        prune: false,
+        rotate: false,
+        groups: false,
+        noColor: false,
+        help: false,
+        cmd: [],
+    }
     const pos: string[] = []
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i]
         if (a === '--') {
-            out.rest.push(...argv.slice(i))
+            out.cmd = argv.slice(i + 1)
             break
         }
-        const [flag, inline] = a.startsWith('--')
-            ? (a.split(/=(.*)/s, 2) as [string, string | undefined])
-            : [a, undefined]
-        if (Object.hasOwn(REFUSED, flag))
-            throw new Error(`${flag}: ${REFUSED[flag]}`)
-        if (flag === '--config') {
-            const v = inline ?? argv[++i]
-            if (v === undefined || v === '')
-                throw new Error('--config needs a value')
-            out.config = v
-        } else if (flag === '--entire-fleet') {
-            if (inline !== undefined)
-                throw new Error('--entire-fleet takes no value')
-            out.entireFleet = true
-        } else if (a.startsWith('-')) {
-            out.rest.push(a)
-            if (flag === '--repo') {
-                const v = inline ?? argv[i + 1]
-                if (!v || (inline === undefined && v.startsWith('-')))
-                    throw new Error('--repo needs a value')
-                if (inline === undefined) out.rest.push(argv[++i])
-                out.repo = v
-            }
-        } else {
-            pos.push(a)
-        }
+        const flag = a.split('=', 1)[0]
+        if (a === '-h' || a === '--help') out.help = true
+        else if (Object.hasOwn(REMOVED, flag))
+            throw new Error(`${flag}: ${REMOVED[flag]}`)
+        else if (a === '--prune') out.prune = true
+        else if (a === '--rotate') out.rotate = true
+        else if (a === '--groups') out.groups = true
+        else if (a === '--no-color') out.noColor = true
+        else if (a.startsWith('-')) throw new Error(`unknown flag ${a}`)
+        else pos.push(a)
     }
-    const [first, second, third] = pos
-    if (first === 'rulesets' || first === 'settings') {
-        if (second !== undefined)
+    if (out.help) return out
+
+    const [first, ...more] = pos
+    if (first !== undefined) {
+        if (!(PRESETS as readonly string[]).includes(first))
             throw new Error(
-                `${first} takes no provider, got ${JSON.stringify(second)}`,
+                `unknown preset ${JSON.stringify(first)} (${PRESETS.join(', ')})`,
             )
-        out.tool = first
-    } else if (first === 'tokens') {
-        const provider = second ?? DEFAULT_PROVIDER
-        if (Object.hasOwn(PROVIDERS, provider)) {
-            out.provider = provider as Provider
-            out.tool = PROVIDERS[provider as Provider]
-        } else {
-            throw new Error(
-                `unknown provider ${JSON.stringify(second)} (${Object.keys(PROVIDERS).join(' or ')})`,
-            )
-        }
-        if (third !== undefined)
-            throw new Error(
-                `one provider at a time, got ${JSON.stringify(third)} after ${second}`,
-            )
-    } else if (first !== undefined) {
-        throw new Error(
-            // CLI text, not HTML: <provider> is a placeholder.
-            // nosemgrep
-            `unknown tool ${JSON.stringify(first)} (rulesets, settings or tokens <provider>)`,
-        )
+        out.preset = first as Preset
     }
+    if (verb === 'try') {
+        if (out.preset !== 'tokens')
+            throw new Error(
+                'try takes tokens: voidflow try tokens <env> -- <command>',
+            )
+        if (more.length !== 1)
+            throw new Error(
+                'try tokens needs one env: voidflow try tokens <env> -- <command>',
+            )
+        out.env = more[0]
+        if (out.cmd.length === 0)
+            throw new Error('try needs a command after --')
+    } else {
+        if (more.length > 0)
+            throw new Error(
+                `one preset at a time, got ${JSON.stringify(more[0])} after ${first}`,
+            )
+        if (out.cmd.length > 0)
+            throw new Error(`${verb} takes no command after --`)
+        if (verb === 'apply' && out.preset === undefined)
+            throw new Error(
+                `apply needs a preset: voidflow apply ${PRESETS.join('|')}`,
+            )
+    }
+    if (out.groups && (verb !== 'plan' || out.preset !== 'tokens'))
+        throw new Error('--groups goes with `voidflow plan tokens`')
+    if (out.rotate && out.preset !== undefined && out.preset !== 'tokens')
+        throw new Error('--rotate is a tokens flag')
+    if (out.prune && out.preset === 'settings')
+        throw new Error('--prune is a rulesets and tokens flag')
     return out
 }
 
-/** The repos `--repo` names: an exact owner/name, or a bare name. */
-function matches(repos: string[], name: string): string[] {
-    return repos.filter(
-        (r) => r === name || (!name.includes('/') && r.split('/')[1] === name),
-    )
-}
+export const usage = (verb: Verb | 'try') =>
+    verb === 'try'
+        ? `usage: voidflow try tokens <env> -- <command...>
 
-/**
- * Why `apply` may not run with these targets, or null when it may: exactly
- * one of `--entire-fleet`, or `--repo` naming a single repo in `repos`.
- */
-export function applyTargetError(
-    repos: string[],
-    v: { repo?: string; entireFleet: boolean },
-): string | null {
-    const list = repos.map((r) => `  ${r}`).join('\n') || '  (none)'
-    if (v.entireFleet && v.repo !== undefined)
-        return 'apply takes --repo <name> or --entire-fleet, not both'
-    if (v.entireFleet) return null
-    if (v.repo === undefined)
-        return `apply needs a target: --repo <name> for one repo, or --entire-fleet for all of them. Repos:\n${list}`
-    const hit = matches(repos, v.repo)
-    if (hit.length === 1) return null
-    if (hit.length === 0)
-        return `no repo matches --repo ${v.repo}. Repos:\n${list}`
-    return `--repo ${v.repo} matches several repos, name one as owner/name:\n${hit.map((r) => `  ${r}`).join('\n')}`
-}
+Runs the command with a throwaway Cloudflare token scoped like <env>'s, the
+admin token removed from its environment; the token is deleted afterwards.
+Needs the cloudflare section's admin token variable.`
+        : `usage: voidflow ${verb} ${verb === 'apply' ? PRESETS.join('|') : `[${PRESETS.join('|')}]`} [flags]
 
-/** The exit code for a run of several tools: 2 over 1 over 0. */
-export function worstExit(codes: number[]): 0 | 1 | 2 {
-    if (codes.includes(2)) return 2
-    return codes.some((c) => c !== 0) ? 1 : 0
-}
-
-const usage = (verb: Verb) =>
-    `${
-        verb === 'apply'
-            ? 'usage: voidflow apply rulesets|settings|tokens [provider] (--repo <name> | --entire-fleet) [flags]'
-            : // CLI usage text, not HTML: <name> is a placeholder.
-              // nosemgrep
-              `usage: voidflow ${verb} [rulesets|settings|tokens [provider]] [--repo <name>] [flags]`
-    }
-
-  --config <file|dir>  the fleet config: a tool's module, or the infra repo
-                       directory holding rulesets.ts and cf-tokens.ts.
-                       Otherwise found from VOIDFLOW_CONFIG, then
-                       $XDG_CONFIG_HOME/voidflow (~/.config/voidflow), then
-                       the nearest directory up from here holding the file
-  --repo <name>        only this repo (owner/name, or a name unique in the config)${
-      verb === 'apply'
-          ? '\n  --entire-fleet       apply to every repo in the config'
-          : ''
-  }
+  --prune      ${verb === 'apply' ? 'also delete' : 'with apply, delete'} what the config lists under retire (rulesets, tokens)
+  --rotate     tokens: rotate every token now
+${verb === 'plan' ? '  --groups     tokens: print the live names of the permission groups used\n' : ''}  --no-color   no ANSI colors
 
 ${
     verb === 'plan'
         ? 'Read-only: prints what apply would change.'
         : verb === 'check'
           ? 'Read-only: exit 1 on drift, 2 on a config or auth error.'
-          : 'Writes. Other flags (--prune, --rotate) go to the tool; see `voidflow <tool> --help`.'
-}
-Without a tool, ${verb === 'apply' ? 'apply refuses' : 'runs each configured tool, rulesets first'}; \`tokens\` alone means \`tokens ${DEFAULT_PROVIDER}\`.
-
-Inside a repo with a voidflow.config.ts (and no --config or VOIDFLOW_CONFIG),
-rulesets and settings run from that file for that repo only, and so do tokens
-when it has a cloudflare section. settings exist only there. For token
-verbs, --repo and --entire-fleet select the fleet instead. Without a tool,
-settings are skipped when gh lacks admin on the repo, and tokens run only
-when the section's admin token variable is set. See docs/config.md.`
-
-/** Why per-repo mode refuses these arguments, or null when it takes them. */
-export function repoModeError(v: VerbArgs): string | null {
-    if (v.repo !== undefined)
-        return '--repo does not apply to a per-repo config; it manages the repo it sits in'
-    if (v.entireFleet)
-        return '--entire-fleet does not apply to a per-repo config; it manages the repo it sits in'
-    return null
+          : 'Writes the repo the config sits in.'
+}${
+    verb === 'apply'
+        ? ''
+        : `
+Without a preset, runs rulesets, then settings (skipped when gh lacks admin
+on the repo), then tokens (skipped without a cloudflare section or its admin
+token variable).`
 }
 
-export { credentialSource }
+Reads the ${CONFIG_FILE} found from here up to the git root. See
+https://github.com/taraxvoid/voidflow/blob/main/docs/config.md`
 
-const VERB_FLAG: Record<Verb, string[]> = {
-    plan: [],
-    check: ['--check'],
-    apply: ['--apply'],
-}
-
-/** The user-facing name of a tool: `rulesets`, `settings` or `tokens cf`. */
-const toolName = (tool: RepoTool) => {
-    if (tool === 'settings') return tool
-    const provider = providerOf(tool)
-    return provider ? `tokens ${provider}` : tool
-}
-
-function shellArg(arg: string): string {
-    return /^[\w@%+=:,./-]+$/u.test(arg)
-        ? arg
-        : `'${arg.replaceAll("'", "'\\''")}'`
+/** The exit code for a run of several presets: 2 over 1 over 0. */
+export function worstExit(codes: number[]): 0 | 1 | 2 {
+    if (codes.includes(2)) return 2
+    return codes.some((c) => c !== 0) ? 1 : 0
 }
 
 /**
- * The complete command a plan or check child can recommend to apply its
- * changes. Fleet plans without a repo apply to the entire fleet.
+ * The presets one verb runs: a named preset alone; otherwise rulesets,
+ * settings (which skips itself without admin), then tokens when the file has
+ * a cloudflare section and its admin token variable is set (so a repo's CI,
+ * which has neither, still checks rulesets), with `skipped` saying why tokens
+ * did not run.
  */
-export function applyHint(
-    tool: RepoTool,
-    file: string | undefined,
-    rest: string[],
-    entireFleet: boolean,
-): string {
-    const args = [
-        'voidflow',
-        'apply',
-        ...toolName(tool).split(' '),
-        ...(file === undefined ? [] : ['--config', file]),
-        ...(entireFleet ? ['--entire-fleet'] : []),
-        ...rest,
-    ]
-    return args.map(shellArg).join(' ')
-}
-
-/** Environment for a verb child, including its complete apply hint. */
-export function verbChildEnv(hint: string): NodeJS.ProcessEnv {
-    return {
-        ...process.env,
-        VOIDFLOW_VIA_VERB: '1',
-        VOIDFLOW_APPLY_HINT: hint,
-    }
-}
-
-/**
- * The per-tool command line for one verb run. The verb's flag goes before the
- * forwarded flags: after a `--` in them it would be a positional, and check
- * or apply would silently plan.
- */
-export function toolArgs(
-    verb: Verb,
-    tool: Tool,
-    file: string,
-    rest: string[],
-): string[] {
-    const provider = providerOf(tool)
-    return [
-        ...(provider ? ['tokens', provider] : [tool]),
-        '--config',
-        file,
-        ...VERB_FLAG[verb],
-        ...rest,
-    ]
-}
-
-/**
- * The per-tool command line for one verb run on a voidflow.config.ts.
- * `bare` (no tool named) lets settings skip when it cannot check.
- */
-export function repoToolArgs(
-    verb: Verb,
-    file: string,
-    rest: string[],
-    tool: RepoTool = 'rulesets',
-    bare = false,
-): string[] {
-    const provider = tool === 'settings' ? undefined : providerOf(tool)
-    return [
-        ...(provider ? ['tokens', provider] : [tool]),
-        '--repo-config',
-        file,
-        ...VERB_FLAG[verb],
-        ...(tool === 'settings' && bare ? ['--if-admin'] : []),
-        // A bare run forwards one set of flags to every tool; settings takes
-        // none of the others' (--prune, --rotate), so it gets only its own.
-        ...(tool === 'settings' && bare
-            ? rest.filter((a) => SETTINGS_FLAGS.has(a))
-            : rest),
-    ]
-}
-
-/** The forwarded flags `voidflow settings` takes. */
-const SETTINGS_FLAGS = new Set(['--no-color'])
-
-/**
- * The tools one verb runs on a voidflow.config.ts: a named tool alone;
- * otherwise rulesets, settings (which skips itself without admin), then
- * tokens when the file has a cloudflare section and its admin token variable
- * is set (so a repo's CI, which has neither, still checks rulesets), with
- * `skipped` saying why tokens did not run.
- */
-export function repoModeTools(
-    v: VerbArgs,
-    cf: CloudflareConfig | undefined,
+export function presetsFor(
+    preset: Preset | undefined,
+    cfg: VoidflowConfig,
     env: Record<string, string | undefined>,
-): { run: RepoTool[]; skipped?: string } {
-    if (v.tool) return { run: [v.tool] }
-    const always: RepoTool[] = ['rulesets', 'settings']
+): { run: Preset[]; skipped?: string } {
+    if (preset) return { run: [preset] }
+    const always: Preset[] = ['rulesets', 'settings']
+    const cf = cfg.cloudflare
     if (!cf)
         return {
             run: always,
-            skipped:
-                'tokens skipped (no cloudflare section in voidflow.config.ts)',
+            skipped: `tokens skipped (no cloudflare section in ${CONFIG_FILE})`,
         }
     const admin = adminTokenVar(cf)
     if (!env[admin])
-        return {
-            run: always,
-            skipped: `tokens skipped (${admin} not set)`,
-        }
-    return { run: [...always, 'cf-tokens'] }
+        return { run: always, skipped: `tokens skipped (${admin} not set)` }
+    return { run: [...always, 'tokens'] }
 }
 
-/** Where discovery looked, for a "not found" message. */
-function lookedIn(tool: Tool, v: VerbArgs, xdg: string): string {
-    const file = TOOL_FILE[tool]
-    if (v.config !== undefined) return `--config ${v.config}`
-    if (process.env.VOIDFLOW_CONFIG)
-        return `VOIDFLOW_CONFIG ${process.env.VOIDFLOW_CONFIG}`
-    if (isDir(xdg))
-        return `${xdg} (it exists, so ${process.cwd()} and the directories above it were not searched; add ${file} there, or set --config or VOIDFLOW_CONFIG to point elsewhere)`
-    return `${xdg}, then ${file} in ${process.cwd()} and each directory above it (set --config or VOIDFLOW_CONFIG to point elsewhere)`
+/** The command that applies what a plan of `preset` shows. */
+export function applyHint(preset: Preset, a: VerbArgs): string {
+    return [
+        'voidflow apply',
+        preset,
+        ...(a.prune ? ['--prune'] : []),
+        ...(a.rotate && preset === 'tokens' ? ['--rotate'] : []),
+    ].join(' ')
 }
 
-function isDir(path: string): boolean {
-    try {
-        return statSync(path).isDirectory()
-    } catch {
-        return false
-    }
-}
-
-/** The repo keys of a tool's config file; throws on a bad config. */
-async function reposIn(tool: Tool, file: string): Promise<string[]> {
-    return Object.keys(await loadConfig(file, '/', CHECKS[tool]))
+/** The credential a preset uses, by name (never its value). */
+function credential(
+    preset: Preset,
+    cfg: VoidflowConfig,
+    env: PresetCtx['env'],
+) {
+    return preset === 'tokens' && cfg.cloudflare
+        ? adminTokenVar(cfg.cloudflare)
+        : credentialSource(env)
 }
 
 function version(): string {
@@ -393,19 +222,28 @@ function version(): string {
     }
 }
 
-/** The bin to re-run: the source cli under Bun, the built one otherwise. */
-function cliPath(): string {
-    return join(
-        packageRoot(),
-        import.meta.url.endsWith('.ts')
-            ? 'scripts/cli.ts'
-            : 'dist/scripts/cli.js',
-    )
-}
-
-const CHECKS: Record<Tool, (x: unknown) => Record<string, unknown>> = {
-    rulesets: checkFleet,
-    'cf-tokens': checkRepos,
+/** The config, the repo it belongs to, or exit 2 with the reason. */
+async function loadRepo(
+    prog: string,
+): Promise<{ file: string; cfg: VoidflowConfig; repo: string }> {
+    // It used to point the verbs at a fleet config; say so rather than
+    // leave someone wondering why it no longer does anything.
+    if (process.env.VOIDFLOW_CONFIG)
+        console.error(
+            `${prog}: VOIDFLOW_CONFIG is set but ignored: fleet configs were removed, and voidflow reads the ${CONFIG_FILE} of the repo it runs in`,
+        )
+    const file = findRepoConfig(process.cwd())
+    if (!file)
+        fail(
+            `${prog}: no ${CONFIG_FILE} in ${process.cwd()} or above it up to the git root; write one with \`voidflow init --kind tool|site\` (see docs/config.md)`,
+        )
+    try {
+        const cfg = await loadVoidflowConfig(file)
+        const repo = await repoSlug(process.env, dirname(file))
+        return { file, cfg, repo }
+    } catch (e) {
+        fail(`${prog}: ${(e as Error).message}`)
+    }
 }
 
 function fail(msg: string): never {
@@ -413,217 +251,96 @@ function fail(msg: string): never {
     process.exit(2)
 }
 
-/**
- * One verb run on the repo's own validated voidflow.config.ts: for each tool
- * (repoModeTools) prints the header and re-runs `voidflow rulesets` or
- * `voidflow tokens cf` on it. Exits with the worst tool's code.
- */
-async function runRepoMode(
-    verb: Verb,
-    v: VerbArgs,
+/** Run one preset, loaded when it runs, so --help and usage errors stay cheap. */
+async function run(
+    preset: Preset,
+    ctx: PresetCtx,
+    mode?: TokensMode,
+): Promise<number> {
+    switch (preset) {
+        case 'rulesets':
+            return (await import('./presets/rulesets.ts')).rulesets(ctx)
+        case 'settings':
+            return (await import('./presets/settings.ts')).settings(ctx)
+        case 'tokens':
+            return (await import('./presets/tokens.ts')).tokens(ctx, mode)
+    }
+}
+
+/** One preset: the header line on stderr, then the run; a throw is exit 1. */
+async function runPreset(
+    preset: Preset,
+    ctx: PresetCtx,
     prog: string,
-    file: string,
-    cfg: VoidflowConfig,
-): Promise<never> {
-    const refused = repoModeError(v)
-    if (refused) fail(`${prog}: ${refused}`)
-    const cf: CloudflareConfig | undefined = cfg.cloudflare
-    let slug: string
+    mode?: TokensMode,
+): Promise<number> {
+    console.error(
+        `voidflow ${version()} ${ctx.verb} ${preset} | config ${ctx.file} | repo ${ctx.repo} | credential ${credential(preset, ctx.cfg, ctx.env)}`,
+    )
     try {
-        slug = await repoSlug(process.env, dirname(file))
+        return await run(preset, ctx, mode)
     } catch (e) {
-        fail(`${prog}: ${(e as Error).message}`)
+        console.error(`${prog} ${preset}: ${(e as Error).message}`)
+        return 1
     }
-    const { run, skipped } = repoModeTools(v, cf, process.env)
-    if (skipped) console.error(`${prog}: ${skipped}`)
-    const codes: number[] = []
-    for (const tool of run) {
-        const credential =
-            tool !== 'cf-tokens' || !cf
-                ? credentialSource(process.env)
-                : adminTokenVar(cf)
-        console.error(
-            `voidflow ${version()} ${verb} ${toolName(tool)} | config ${file} (repo) | repo ${slug} | credential ${credential}`,
-        )
-        const r = spawnSync(
-            process.execPath,
-            [
-                cliPath(),
-                ...repoToolArgs(verb, file, v.rest, tool, v.tool === undefined),
-            ],
-            {
-                stdio: 'inherit',
-                env: verbChildEnv(applyHint(tool, undefined, v.rest, false)),
-            },
-        )
-        if (r.error)
-            console.error(`${prog}: ${toolName(tool)}: ${r.error.message}`)
-        codes.push(r.error || r.status === null ? 2 : r.status)
-    }
-    process.exit(worstExit(codes))
 }
 
 /** The `main` of one verb, for scripts/cli.ts. */
-export function verbMain(verb: Verb) {
+export function verbMain(verb: Verb | 'try') {
     return async (argv: string[], prog = `voidflow ${verb}`): Promise<void> => {
-        const end = argv.indexOf('--')
-        const head = end === -1 ? argv : argv.slice(0, end)
-        if (head.some((a) => a === '-h' || a === '--help')) {
-            console.log(usage(verb))
-            process.exit(0)
-        }
-        let v: VerbArgs
+        let a: VerbArgs
         try {
-            v = splitVerbArgs(argv)
+            a = parseVerbArgs(verb, argv)
         } catch (e) {
             fail(`${prog}: ${(e as Error).message}\n\n${usage(verb)}`)
         }
-        if (verb === 'apply' && !v.tool)
-            fail(
-                `${prog}: apply needs a tool: voidflow apply rulesets|settings|tokens [provider]\n\n${usage(verb)}`,
-            )
-
-        // Inside a repo with a voidflow.config.ts, the verbs run from that
-        // file unless the fleet is named explicitly. Token verbs also honor
-        // --repo and --entire-fleet as explicit fleet intent.
-        const repoFile =
-            v.config === undefined && !process.env.VOIDFLOW_CONFIG
-                ? findRepoConfig(process.cwd())
-                : null
-        // Explicit fleet intent for token verbs skips the repo file entirely,
-        // so an invalid local cloudflare section can't block a fleet run.
-        const tokenFleetTarget =
-            v.tool === 'cf-tokens' && (v.repo !== undefined || v.entireFleet)
-        if (repoFile && !tokenFleetTarget) {
-            let cfg: VoidflowConfig
-            try {
-                cfg = await loadVoidflowConfig(repoFile)
-            } catch (e) {
-                fail(`${prog}: ${(e as Error).message}`)
-            }
-            const fromRepo =
-                v.tool !== 'cf-tokens' || cfg.cloudflare !== undefined
-            if (fromRepo) return runRepoMode(verb, v, prog, repoFile, cfg)
+        if (a.help) {
+            console.log(usage(verb))
+            process.exit(0)
         }
+        const { file, cfg, repo } = await loadRepo(prog)
+        const ctx = (preset: Preset, bare: boolean): PresetCtx => ({
+            verb: verb === 'try' ? 'plan' : verb,
+            file,
+            cfg,
+            repo,
+            env: process.env,
+            prune: a.prune,
+            rotate: a.rotate,
+            noColor: a.noColor,
+            bare,
+            applyHint: applyHint(preset, a),
+        })
 
-        if (v.tool === 'settings')
-            fail(
-                `${prog}: settings are per-repo; run inside a repo with voidflow.config.ts`,
+        if (verb === 'try') {
+            process.exit(
+                await runPreset('tokens', ctx('tokens', false), prog, {
+                    kind: 'try',
+                    env: a.env as string,
+                    cmd: a.cmd,
+                }),
             )
-        const wanted: Tool[] = v.tool ? [v.tool] : TOOLS
-
-        const env = process.env
-        const home = homedir()
-        const xdg = xdgDir({ env, home })
-
-        let found: [Tool, Found][] = []
-        try {
-            for (const tool of wanted) {
-                const hit = discover(tool, {
-                    flag: v.config,
-                    env,
-                    cwd: process.cwd(),
-                    home,
-                })
-                if (hit) found.push([tool, hit])
-                else if (v.tool)
-                    fail(
-                        `${prog}: ${toolName(tool)}: no ${TOOL_FILE[tool]} found; looked in ${lookedIn(tool, v, xdg)}`,
-                    )
-                else
-                    console.error(
-                        `${prog}: ${toolName(tool)}: no ${TOOL_FILE[tool]} in ${lookedIn(tool, v, xdg)}, skipped`,
-                    )
-            }
-        } catch (e) {
-            fail(`${prog}: ${(e as Error).message}`)
         }
-        if (found.length === 0)
+        if (a.preset === 'tokens' && !cfg.cloudflare)
             fail(
-                `${prog}: no fleet config found; looked in ${lookedIn(wanted[0], v, xdg)} (for ${wanted.map((t) => TOOL_FILE[t]).join(' or ')})`,
-            )
-        // A --config or VOIDFLOW_CONFIG file (not a directory) is the same
-        // file for every tool.
-        if (
-            !v.tool &&
-            found.length > 1 &&
-            found.length === wanted.length &&
-            found.every(([, f]) => f.file === found[0][1].file)
-        )
-            fail(
-                `${prog}: ${v.config !== undefined ? `--config ${v.config}` : `VOIDFLOW_CONFIG ${process.env.VOIDFLOW_CONFIG}`} is a file, so name the tool it is for: voidflow ${verb} rulesets or tokens <provider>`,
+                `${prog}: tokens: no cloudflare section in ${file} (see docs/config.md#cloudflare-tokens)`,
             )
 
-        // Without a tool, --repo runs only the tools whose config lists it, so
-        // a repo in one config is not a "no repo matches" error from the other.
-        if (!v.tool && v.repo !== undefined) {
-            const repo = v.repo
-            const listed: [Tool, Found][] = []
-            for (const [tool, hit] of found) {
-                let repos: string[]
-                try {
-                    repos = await reposIn(tool, hit.file)
-                } catch (e) {
-                    fail((e as Error).message)
-                }
-                if (matches(repos, repo).length > 0) listed.push([tool, hit])
-                else
-                    console.error(
-                        `${prog}: ${toolName(tool)}: no repo matches --repo ${repo} in ${hit.file}, skipped`,
-                    )
-            }
-            if (listed.length === 0)
-                fail(
-                    `${prog}: no repo matches --repo ${repo} in ${found.map(([, f]) => f.file).join(' or ')}`,
-                )
-            found = listed
-        }
-
-        let scope: string
-        if (verb === 'apply') {
-            const [tool, hit] = found[0]
-            let repos: string[]
-            try {
-                repos = await reposIn(tool, hit.file)
-            } catch (e) {
-                fail((e as Error).message)
-            }
-            const err = applyTargetError(repos, v)
-            if (err) fail(`${prog}: ${err}`)
-            scope = v.entireFleet
-                ? 'entire fleet'
-                : `repo ${matches(repos, v.repo as string)[0]}`
-        } else {
-            scope =
-                v.repo === undefined
-                    ? 'fleet (read-only)'
-                    : `repo ${v.repo} (read-only)`
-        }
-
-        if (found.some(([tool]) => tool === 'rulesets'))
-            console.error(
-                'voidflow: fleet configs are deprecated for rulesets; move each repo to a voidflow.config.ts (docs/config.md)',
-            )
-
-        const ver = version()
-        const cli = cliPath()
+        const { run, skipped } = presetsFor(a.preset, cfg, process.env)
+        if (skipped) console.error(`${prog}: ${skipped}`)
         const codes: number[] = []
-        for (const [tool, hit] of found) {
-            console.error(
-                `voidflow ${ver} ${verb} ${toolName(tool)} | config ${hit.file} (${hit.via}) | scope ${scope}`,
+        for (const preset of run) {
+            const mode: TokensMode | undefined = a.groups
+                ? { kind: 'groups' }
+                : undefined
+            codes.push(
+                await runPreset(
+                    preset,
+                    ctx(preset, a.preset === undefined),
+                    prog,
+                    mode,
+                ),
             )
-            const r = spawnSync(
-                process.execPath,
-                [cli, ...toolArgs(verb, tool, hit.file, v.rest)],
-                {
-                    stdio: 'inherit',
-                    env: verbChildEnv(
-                        applyHint(tool, hit.file, v.rest, v.repo === undefined),
-                    ),
-                },
-            )
-            if (r.error) console.error(`${prog}: ${tool}: ${r.error.message}`)
-            codes.push(r.error || r.status === null ? 2 : r.status)
         }
         process.exit(worstExit(codes))
     }

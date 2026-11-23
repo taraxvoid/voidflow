@@ -59,9 +59,9 @@ sites ran a single `main`. They are deleted only with `--prune`.
 
 ## Cloudflare tokens
 
-The `cloudflare` section has the shape of a fleet `cf-tokens.ts` entry (see
-[`cloudflare/tokens.ts`](../cloudflare/tokens.ts) for every `envs` field), plus
-the name of the variable holding the admin token:
+The `cloudflare` section lists the repo's scoped deploy tokens (see
+[`cloudflare/tokens.ts`](../cloudflare/tokens.ts) for every `envs` field), and
+names the variable holding the admin token:
 
 ```ts
 export default {
@@ -92,8 +92,8 @@ export default {
   none.
 
 The admin token can mint tokens, so it stays on a maintainer's machine:
-token commands run locally, never from CI. Like a fleet run, a plan needs `gh`
-with admin on the repo; it reads the wrangler config from the default branch,
+token commands run locally, never from CI. A plan needs `gh` with admin on the
+repo; it reads the wrangler config from the default branch,
 prints where each env's Worker and zones came from, and warns when the
 checkout's wrangler file resolves differently or its `account_id` is not the
 env's account. The admin token's permissions are listed in
@@ -153,7 +153,7 @@ manual steps.
 
 ## Running it
 
-From inside the repo, with no `--config` and no `VOIDFLOW_CONFIG`:
+From inside the repo, as `voidflow <verb> <preset>`:
 
 ```sh
 voidflow plan rulesets      # what apply would change, read-only
@@ -161,39 +161,47 @@ voidflow check rulesets     # exit 1 on drift
 voidflow apply rulesets     # make GitHub match the file
 voidflow plan settings      # the settings section, on top of the baseline
 voidflow apply settings     # turn on the settings that differ
-voidflow plan tokens        # the cloudflare section's tokens (tokens means tokens cf)
+voidflow plan tokens        # the cloudflare section's tokens
 voidflow apply tokens       # create, update and rotate them; set each env's secret
 voidflow apply tokens --prune    # also delete `retire` tokens
+voidflow plan tokens --groups    # the live names of the permission groups used
+voidflow try tokens prod -- bunx wrangler deploy   # a throwaway token scoped like prod's
 ```
 
-Each also reads noun first (`voidflow rulesets plan`, `voidflow settings apply`,
-`voidflow tokens apply --prune`); both spellings run the same command.
-
-```sh
-voidflow tokens cf --repo-config voidflow.config.ts --try prod -- bunx wrangler deploy
-```
-
-voidflow looks for `voidflow.config.ts` from the current directory up to the
-repo's git root. Every run prints a header line with the config path, the
-voidflow version, the repo, and the name of the credential `gh` uses (never its
-value; for tokens, the name of the admin token variable). `apply` writes only
-the repo the file sits in, so `--repo` and `--entire-fleet` are refused.
+voidflow reads the `voidflow.config.ts` found from the current directory up to
+the repo's git root, and only that file: there is no flag or variable that
+points it elsewhere, and it writes only the repo the file belongs to. Without
+one, every verb exits 2 pointing at `voidflow init`. Every run prints a header
+line per preset with the voidflow version, the config path, the repo, and the
+name of the credential it uses (never its value: `gh`'s for rulesets and
+settings, the admin token variable for tokens).
 
 A bare `voidflow plan` or `check` runs rulesets, then settings, then tokens
 when the file has a `cloudflare` section and its admin token variable is set.
 Settings are skipped, with the reason, when `gh` lacks admin on the repo (or
 is missing); tokens are skipped, with the reason, otherwise. Neither skip
 changes the exit code, so a repo's CI (which has neither) still checks
-rulesets. Naming the tool (`voidflow check settings`) makes a missing admin an
-error (exit 2) instead. Settings exist only in a repo's own file: outside
-one, `voidflow plan settings` exits 2. Passing
-`--config`, setting `VOIDFLOW_CONFIG`, or using `--repo` or `--entire-fleet`
-with a token verb selects a fleet config instead, and so does naming tokens in
-a repo whose file has no `cloudflare` section. Fleet
-configs are deprecated and are removed once each repo has its own file; see
-[`fleet.md`](fleet.md). To move a repo's tokens over, copy its `cf-tokens.ts`
-entry into the `cloudflare` section, run `voidflow plan tokens` in the repo
-(it should show no changes), then delete the fleet entry.
+rulesets. Naming the preset (`voidflow check settings`) makes a missing admin
+an error (exit 2) instead, and so does naming tokens in a file without a
+`cloudflare` section. `apply` always names one preset.
+
+| Code | Meaning |
+|---|---|
+| 0 | in sync, or applied cleanly |
+| 1 | drift (`check`), or a failure while planning or applying |
+| 2 | config, usage or auth error |
+
+With several presets the worst code wins, 2 over 1 over 0.
+
+Up to 1.2, voidflow also read fleet configs (`rulesets.ts` and
+`cf-tokens.ts` in an infra repo, found with `--config`, `VOIDFLOW_CONFIG` or
+`~/.config/voidflow`) and had per-tool commands (`voidflow rulesets`,
+`voidflow tokens cf`, `voidflow settings`). Those are gone, and the old
+commands exit 2 naming their replacement. To move a repo over, copy its fleet
+entries into its `voidflow.config.ts` (the rulesets entry into `rulesets`,
+the `cf-tokens.ts` entry into `cloudflare`, adding `adminTokenEnv` if its
+account's admin token is not `CF_TOKEN_ADMIN`), run `voidflow plan` in the
+repo (it should show no changes), then delete the fleet entries.
 
 ### Keeping it in sync
 
@@ -212,10 +220,10 @@ It runs in two places, both skipped when a repo does not define the script:
   before CI depends on it:
 
   ```json
-  "try:deploy": "voidflow tokens cf --repo-config voidflow.config.ts --try prod -- bunx wrangler deploy --dry-run"
+  "try:deploy": "voidflow try tokens prod -- bunx wrangler deploy --dry-run"
   ```
 
-  `--try` creates and deletes a real Cloudflare token, so guard the script on
+  `try` creates and deletes a real Cloudflare token, so guard the script on
   the admin token being set.
 
 A file that does not load, or fails validation, exits 2 naming the file, before

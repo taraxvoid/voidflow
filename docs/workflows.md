@@ -78,8 +78,8 @@ listed there are already covered.
 
 **Merge queue:** GitHub offers one on public repos owned by an organization,
 and on private org repos only with Enterprise Cloud; personal repos and
-private repos on other plans can't use one. Set `mergeQueue: true` on the
-repo's entry in your fleet's rulesets config (in your infra repo, see
+private repos on other plans can't use one. Set `mergeQueue: true` in the
+`rulesets` section of the repo's `voidflow.config.ts` (see
 [`CONTRIBUTING.md`](../CONTRIBUTING.md#branch-rulesets)), apply it, and add
 `merge_group:` to your `on:` so the required check reports on the queue's
 branch.
@@ -239,7 +239,7 @@ skip forks, which get no secrets. Give the job `environment: preview` so it
 reads the `preview` environment's token, not a repository secret every job can
 read. A job with an environment still falls back to a repository secret of the
 same name, so once the environment has its own token, delete the repo-wide
-`CLOUDFLARE_API_TOKEN` (`apply tokens cf --prune` does).
+`CLOUDFLARE_API_TOKEN` (`voidflow apply tokens --prune` does).
 
 The `preview` environment has to accept PR branches, so anyone who can push a
 branch can write a job that reads its token. Previews of the prod Worker need

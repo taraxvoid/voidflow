@@ -1,20 +1,20 @@
 /**
  * `voidflow init --preset rulesets`: apply voidflow's branch rulesets to the
- * repo being initialised, reusing the planner and diff of `voidflow rulesets`.
+ * repo being initialised, reusing the planner and diff of
+ * `voidflow apply rulesets`.
  * Never prunes: rulesets the config does not describe are left alone.
  */
 
 import {
     type Fleet,
     mergeQueueIneligible,
-    tool,
     wantsMergeQueue,
 } from '../../rulesets/index.ts'
 import {
     type RulesetApi,
     type RulesetOutcome,
     syncRepo,
-} from '../apply-rulesets.ts'
+} from '../presets/rulesets.ts'
 import type { Gh, GhResult } from './gh.ts'
 import type { SettingResult } from './settings.ts'
 
@@ -22,11 +22,6 @@ function object(value: unknown): Record<string, unknown> | null {
     return typeof value === 'object' && value !== null && !Array.isArray(value)
         ? (value as Record<string, unknown>)
         : null
-}
-
-/** The default fleet entry for a repo: `tool()`; sites have no builder yet. */
-export function defaultFleet(repo: string): Fleet {
-    return { [repo]: tool() }
 }
 
 /** A RulesetApi over the injectable Gh; failures read `... (HTTP nnn)`. */
@@ -66,7 +61,7 @@ const STATUS: Record<
     retire: (o) => ({
         name: `ruleset ${o.name}`,
         status: 'unchanged',
-        detail: 'listed in retire, still active; run voidflow rulesets --prune',
+        detail: 'listed in retire, still active; run voidflow apply rulesets --prune',
     }),
     // Unmanaged rulesets are not init's business.
     unmanaged: () => null,

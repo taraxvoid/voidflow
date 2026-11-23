@@ -36,25 +36,20 @@ is only `SEE LICENSE IN <file>` isn't read.
 "check:licenses": "check-licenses"
 ```
 
-**Fleet tools** - the `voidflow` CLI, for branch rulesets and scoped
-Cloudflare deploy tokens as code (and [`init`](init.md)). Run it with `bunx` or `npx` (Node 24+) from
-an org's infra repo that holds the fleet map (`--config`) and pins the version;
-no voidflow checkout needed. `rulesets` needs `gh` with admin on the repos; `tokens cf`
-also needs `CF_TOKEN_ADMIN`. [`docs/fleet.md`](fleet.md) covers the
-infra repo, how the verbs find its config (including `~/.config/voidflow`) and
-their targets; config shapes and flags are in
-[`CONTRIBUTING.md`](../CONTRIBUTING.md#fleet-config---config). Experimental while
-they settle: the CLI's commands and flags and the `./cloudflare` and
-`./rulesets` exports may change in a minor
-([`STABILITY.md`](../STABILITY.md#experimental)). Pin an exact version.
+**`voidflow` CLI** - [`init`](init.md), and branch rulesets, repo settings and
+scoped Cloudflare deploy tokens as code, from the repo's own
+[`voidflow.config.ts`](config.md). Run it with `bunx` or `npx` (Node 24+)
+inside the repo; no voidflow checkout needed. Rulesets and settings need
+`gh` with admin on the repo; tokens also need the admin token variable the
+config names. Experimental while it settles: the CLI's commands and flags
+and the `./config`, `./cloudflare` and `./rulesets` exports may change in a
+minor ([`STABILITY.md`](../STABILITY.md#experimental)). Pin an exact version.
 
 ```sh
-bunx @taraxvoid/voidflow@<version> plan                             # both tools, config found from ~/.config/voidflow
-bunx @taraxvoid/voidflow@<version> check rulesets                   # exit 1 on drift
-bunx @taraxvoid/voidflow@<version> apply rulesets --repo transbot   # or --entire-fleet; no default target
-bunx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts    # plan; --check, --apply, --prune
-bunx @taraxvoid/voidflow@<version> tokens cf --config cf-tokens.ts  # plan; --check, --apply, --rotate, --try
-npx @taraxvoid/voidflow@<version> rulesets --config rulesets.ts     # the same, under Node 24+
+bunx @taraxvoid/voidflow@<version> plan                  # rulesets, settings and tokens, read-only
+bunx @taraxvoid/voidflow@<version> check rulesets        # exit 1 on drift
+bunx @taraxvoid/voidflow@<version> apply rulesets        # make GitHub match the file
+npx @taraxvoid/voidflow@<version> apply tokens --rotate  # the same bin under Node 24+
 ```
 
 **Playwright** - for Astro sites testing against `astro preview`. Needs

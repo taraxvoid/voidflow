@@ -71,16 +71,13 @@ beforeAll(() => {
 
 describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
     const voidflow = (args: string[], cwd = ROOT) =>
-        run([...cli, ...args], cwd, {
-            CF_TOKEN_ADMIN: '',
-            VOIDFLOW_CONFIG_BASE: '',
-        })
+        run([...cli, ...args], cwd, { CF_TOKEN_ADMIN: '' })
 
     test('without a command, prints usage and exits 2', async () => {
         const r = await voidflow([])
         expect(r.code).toBe(2)
-        expect(r.out).toContain('tokens')
-        expect(r.out).toContain('rulesets')
+        for (const c of ['plan', 'check', 'apply', 'try', 'init'])
+            expect(r.out).toContain(`  ${c} `)
         expect(r.out).not.toContain('cf-tokens')
     })
 
@@ -106,78 +103,49 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
     })
 
     test('a flag before the command says the command comes first', async () => {
-        const r = await voidflow(['--config', 'rulesets.ts', 'rulesets'])
+        const r = await voidflow(['--prune', 'apply'])
         expect(r.code).toBe(2)
         expect(r.err).toContain(
-            'the command comes before its flags, got "--config"',
+            'the command comes before its flags, got "--prune"',
         )
     })
 
-    test('hands the remaining flags to the script', async () => {
-        for (const c of [['rulesets'], ['tokens', 'cf']]) {
-            const r = await voidflow(c)
-            expect(r.code).toBe(2)
-            expect(r.err).toContain('needs --config')
-        }
-    })
-
-    test('tokens rejects an unknown provider', async () => {
-        const r = await voidflow(['tokens', 'bogus'])
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('unknown provider "bogus"')
-        expect(r.err).toContain('providers: cf')
-    })
-
-    test('tokens rejects an object prototype name as a provider', async () => {
-        const r = await voidflow(['tokens', 'constructor'])
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('unknown provider "constructor"')
-    })
-
-    test('tokens with no provider runs cf', async () => {
-        for (const args of [[], ['--check']]) {
-            const r = await voidflow(['tokens', ...args])
-            expect(r.code).toBe(2)
-            expect(r.err).not.toContain('needs a provider')
-            expect(r.err).toContain('needs --config')
-        }
-    })
-
-    test('tokens --help lists the providers', async () => {
-        const r = await voidflow(['tokens', '--help'])
-        expect(r.code).toBe(0)
-        expect(r.out).toContain('usage: voidflow tokens <provider>')
-        expect(r.out).toContain('providers: cf')
-    })
-
-    test('cf-tokens still works as a hidden alias for tokens cf', async () => {
-        const r = await voidflow(['cf-tokens'])
-        expect(r.code).toBe(2)
-        expect(r.err).toContain('needs --config')
-    })
-
-    test("a command's --help lists its flags, without needing --config", async () => {
-        for (const [c, flag] of [
-            ['rulesets', '--prune'],
-            ['tokens', '--try <env>'],
+    test('the per-tool commands say which verb replaced them', async () => {
+        for (const argv of [
+            ['rulesets', '--config', 'rulesets.ts'],
+            ['rulesets', 'plan'],
+            ['settings'],
+            ['tokens', 'cf', '--apply'],
+            ['cf-tokens'],
         ]) {
-            const argv = c === 'tokens' ? [c, 'cf'] : [c]
+            const r = await voidflow(argv)
+            expect(r.code).toBe(2)
+            expect(r.err).toContain(`voidflow ${argv[0]} was replaced by`)
+            expect(r.err).toContain('voidflow plan|check|apply')
+        }
+    })
+
+    test("a verb's --help lists its flags", async () => {
+        for (const [verb, flag] of [
+            ['plan', '--groups'],
+            ['check', '--rotate'],
+            ['apply', '--prune'],
+            ['try', 'tokens <env> -- <command...>'],
+        ]) {
             for (const h of ['--help', '-h']) {
-                const r = await voidflow([...argv, h])
+                const r = await voidflow([verb, h])
                 expect(r.code).toBe(0)
-                expect(r.out).toContain(
-                    `usage: voidflow ${argv.join(' ')} --config <module>`,
-                )
+                expect(r.out).toContain(`usage: voidflow ${verb}`)
                 expect(r.out).toContain(flag)
             }
         }
     })
 
     test('an unknown flag prints usage, not a stack trace', async () => {
-        const r = await voidflow(['rulesets', '--nope'])
+        const r = await voidflow(['plan', '--nope'])
         expect(r.code).toBe(2)
-        expect(r.err).toContain("Unknown option '--nope'")
-        expect(r.err).toContain('usage: voidflow rulesets')
+        expect(r.err).toContain('unknown flag --nope')
+        expect(r.err).toContain('usage: voidflow plan')
         expect(r.err).not.toContain('    at ')
     })
 
@@ -202,41 +170,19 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
         // resolveSha may wait on the network for up to 10s.
     }, 20_000)
 
-    test('a relative --config resolves from the current directory', async () => {
+    test('plan reads the repo config under this runtime', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
         roots.push(dir)
+        mkdirSync(join(dir, '.git'))
         writeFileSync(
-            join(dir, 'rulesets.ts'),
-            "export const REPOS = { 'o/r': { tiers: ['nope'] } }",
+            join(dir, 'voidflow.config.ts'),
+            "export default { kind: 'tool', rulesets: { tiers: ['nope'] } }",
         )
-        const r = await voidflow(['rulesets', '--config', 'rulesets.ts'], dir)
-        expect(r.code).toBe(2)
-        expect(r.err).toContain(`${join(dir, 'rulesets.ts')}:`)
-        expect(r.err).toContain('unknown tier "nope"')
-    })
-
-    test('plan finds a config dir and re-runs the tool under the same runtime', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'voidflow-cli-'))
-        roots.push(dir)
-        mkdirSync(join(dir, 'infra'))
-        mkdirSync(join(dir, 'home'))
-        writeFileSync(
-            join(dir, 'infra', 'rulesets.ts'),
-            "export default { orgs: { o: { repos: { r: { tiers: ['nope'] } } } } }",
-        )
-        const r = await run(
-            [...cli, 'plan', 'rulesets', '--config', 'infra'],
-            dir,
-            {
-                CF_TOKEN_ADMIN: '',
-                VOIDFLOW_CONFIG: '',
-                VOIDFLOW_CONFIG_BASE: '',
-                XDG_CONFIG_HOME: join(dir, 'home'),
-            },
-        )
+        const r = await run([...cli, 'plan', 'rulesets'], dir, {
+            GITHUB_REPOSITORY: 'o/r',
+        })
         expect(r.err).toContain(
-            // relative to the child's cwd, which the OS reports resolved
-            `plan rulesets | config ${join(realpathSync(dir), 'infra', 'rulesets.ts')} (flag)`,
+            `${join(realpathSync(dir), 'voidflow.config.ts')}:`,
         )
         expect(r.err).toContain('unknown tier "nope"')
         expect(r.code).toBe(2)
@@ -246,9 +192,9 @@ describe.each(RUNTIMES)('voidflow bin: %s', (_, cli) => {
 // The published shape: Node won't strip types inside node_modules, so the bin
 // and the `default` export condition must be plain JS there, while Bun takes
 // the `bun` condition (the .ts source). A config's value import of
-// '@taraxvoid/voidflow/rulesets' has to resolve under both.
+// '@taraxvoid/voidflow/config' has to resolve under both.
 describe('packed tarball, installed in node_modules', () => {
-    test('runs the bin and resolves the fleet exports under each runtime', async () => {
+    test('runs the bin and resolves the config export under each runtime', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'voidflow-pack-'))
         roots.push(dir)
         const pack = Bun.spawnSync(
@@ -270,27 +216,20 @@ describe('packed tarball, installed in node_modules', () => {
         renameSync(join(scope, 'package'), join(scope, 'voidflow'))
 
         writeFileSync(join(dir, 'package.json'), '{"type": "module"}')
+        mkdirSync(join(dir, '.git'))
         writeFileSync(
-            join(dir, 'rulesets.ts'),
+            join(dir, 'voidflow.config.ts'),
             [
-                "import { tool } from '@taraxvoid/voidflow/rulesets'",
-                "export const REPOS = { 'o/r': tool({ tiers: ['nope'] as never }) }",
+                "import { KINDS } from '@taraxvoid/voidflow/config'",
+                "export default { kind: KINDS[1], rulesets: { tiers: ['nope'] } }",
             ].join('\n'),
         )
         const bin = join(scope, 'voidflow/dist/scripts/cli.js')
-        const env = { CF_TOKEN_ADMIN: '', VOIDFLOW_CONFIG_BASE: '' }
+        const env = { GITHUB_REPOSITORY: 'o/r' }
         for (const runtime of nodeStrips ? ['node', 'bun'] : ['bun']) {
-            const help = await run(
-                [runtime, bin, 'rulesets', '--help'],
-                dir,
-                env,
-            )
+            const help = await run([runtime, bin, 'plan', '--help'], dir, env)
             expect({ runtime, code: help.code }).toEqual({ runtime, code: 0 })
-            const r = await run(
-                [runtime, bin, 'rulesets', '--config', 'rulesets.ts'],
-                dir,
-                env,
-            )
+            const r = await run([runtime, bin, 'plan', 'rulesets'], dir, env)
             expect({ runtime, code: r.code }).toEqual({ runtime, code: 2 })
             expect(r.err).toContain('unknown tier "nope"')
         }
@@ -363,9 +302,11 @@ describe('package files', () => {
         }
     })
 
-    test('the fleet config modules are exported', async () => {
+    test('the config modules are exported', async () => {
+        const config = await import('@taraxvoid/voidflow/config')
         const rulesets = await import('@taraxvoid/voidflow/rulesets')
         const cloudflare = await import('@taraxvoid/voidflow/cloudflare')
+        expect(typeof config.checkVoidflowConfig).toBe('function')
         expect(typeof rulesets.tool).toBe('function')
         expect(typeof cloudflare.checkRepos).toBe('function')
     })
