@@ -108,7 +108,7 @@ describe('planFiles', () => {
             'utf8',
         )
         expect(a?.content.endsWith(proxyTables(own))).toBe(true)
-        expect(a?.content).toContain('egress = "strict"')
+        expect(a?.content).toContain('egress = "permissive"')
         writeFileSync(join(dir, 'fnox.toml'), 'mine\n')
         const kept = planFiles(dir, sel('site'), { ...ctx, kind: 'site' }).find(
             (x) => x.name === 'fnox',

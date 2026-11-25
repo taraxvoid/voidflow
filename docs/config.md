@@ -127,18 +127,19 @@ shell hook doesn't export it into your shell, where voidflow would read the
 real value. If `adminTokenEnv` names another variable, rename the secret and
 the rule's `secret` to match.
 
-Egress is strict: the proxy refuses every host but `api.cloudflare.com` and
-`api.github.com` (the verbs call `gh`). That binds only clients that honor
-`HTTPS_PROXY`; the token is safe either way, since only the proxy holds it.
+Egress is permissive: hosts without a rule (`api.github.com`, which the verbs
+call through `gh`) get an uninspected tunnel and no secret. fnox 1.42 has no
+per-domain allow list, and `egress = "strict"` would refuse `gh`. The proxy
+binds only clients that honor `HTTPS_PROXY`; the token is safe either way,
+since only the proxy holds it.
 
 `try tokens` works behind the proxy too: the command gets the throwaway
 token, which fnox passes through untouched (it replaces only the
 placeholder). The command shares the proxy's limits, though. On
 `api.cloudflare.com` only the rule's methods and paths get through, and
-request bodies need a `Content-Length` and stay under 10 MiB; other hosts it
-needs, such as `registry.npmjs.org` for a `bunx` that downloads, are refused.
-To allow more, restate the whole `[proxy]` table in `fnox.local.toml` with
-them added (a `[proxy]` there replaces the committed one).
+request bodies need a `Content-Length` and stay under 10 MiB; other hosts tunnel
+through without the token. To tighten egress, restate the whole `[proxy]`
+table in `fnox.local.toml` (a `[proxy]` there replaces the committed one).
 
 To keep the token behind a YubiKey touch, redefine it in `fnox.local.toml`
 with fnox's `fido2` provider:

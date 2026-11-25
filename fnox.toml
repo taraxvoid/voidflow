@@ -16,12 +16,12 @@ CF_TOKEN_ADMIN= { provider = "cf-admin", value = "voidflow-cf-token-admin", desc
 # `fnox proxy run -- bun run voidflow plan|apply tokens` hands voidflow a
 # placeholder for CF_TOKEN_ADMIN and puts the real token into the
 # Authorization header only on Cloudflare API calls, so the bun process and its
-# dependencies never see it. Egress is strict: other hosts are refused, except
-# api.github.com (the verbs call gh), which gets an uninspected tunnel and no
-# secret. This only binds clients that honor HTTPS_PROXY.
+# dependencies never see it. Egress is permissive: other hosts (api.github.com
+# for gh) get an uninspected tunnel and no secret. fnox 1.42 has no per-domain
+# allow list, so strict would refuse gh. This only binds clients that honor
+# HTTPS_PROXY.
 [proxy]
-egress = "strict"
-allow_domains = ["api.github.com"]
+egress = "permissive"
 
 [[proxy.rules]]
 secret = "CF_TOKEN_ADMIN"
