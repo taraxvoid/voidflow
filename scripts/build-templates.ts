@@ -74,8 +74,8 @@ function siteFnox(root: string): string {
 #   fnox set -k "voidflow-cf-token-admin:{{repo}}" CF_TOKEN_ADMIN
 #   fnox proxy run -- bun run voidflow plan tokens
 # voidflow sees a placeholder; fnox puts the real token into the Authorization
-# header only on Cloudflare API calls, and refuses other hosts but GitHub's
-# API. If cloudflare.adminTokenEnv names
+# header only on Cloudflare API calls; other hosts (GitHub's API) tunnel
+# through without it. If cloudflare.adminTokenEnv names
 # another variable, rename the secret and the rule's \`secret\` to match. To
 # keep the token on a YubiKey (fido2) or another backend, redefine the secret
 # in a gitignored fnox.local.toml: https://github.com/taraxvoid/voidflow/blob/main/docs/config.md#keeping-the-admin-token-out-of-voidflow
