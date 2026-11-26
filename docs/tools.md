@@ -64,6 +64,11 @@ import { definePreviewConfig } from '@taraxvoid/voidflow/playwright'
 export default definePreviewConfig({ ciPort: 4141 })
 ```
 
+Inside the Claude Code sandbox (`SANDBOX_RUNTIME=1`, outside CI) the config
+launches Chromium with `--single-process`. The sandbox profile never allows the
+Mach name Chromium registers for its child processes, so normal launches abort
+with `bootstrap_check_in ... Permission denied (1100)`.
+
 **Biome** (v2) - 4-space indent, width 80, single quotes, `recommended` rules.
 Lists merge with the base; scalar values in your config win.
 

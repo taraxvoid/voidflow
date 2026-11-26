@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { defaultProjects, definePreviewConfig } from '../playwright/index.mjs'
 
-const ENV_KEYS = ['CI', 'PLAYWRIGHT_BASE_URL', 'PLAYWRIGHT_TEST_PORT']
+const ENV_KEYS = [
+    'CI',
+    'PLAYWRIGHT_BASE_URL',
+    'PLAYWRIGHT_TEST_PORT',
+    'SANDBOX_RUNTIME',
+]
 let saved
 
 beforeEach(() => {
@@ -50,6 +55,28 @@ describe('definePreviewConfig outside CI', () => {
         expect(custom.webServer.timeout).toBe(5_000)
         expect(custom.testDir).toBe('./e2e')
         expect(custom.projects).toEqual([])
+    })
+})
+
+describe('definePreviewConfig in the Claude sandbox', () => {
+    test('runs Chromium single-process', () => {
+        process.env.PLAYWRIGHT_TEST_PORT = '5123'
+        process.env.SANDBOX_RUNTIME = '1'
+        const { use } = definePreviewConfig()
+        expect(use.launchOptions.args).toEqual(['--single-process'])
+    })
+
+    test('leaves launch options alone outside the sandbox', () => {
+        process.env.PLAYWRIGHT_TEST_PORT = '5123'
+        expect(definePreviewConfig().use.launchOptions).toBeUndefined()
+    })
+
+    test('never applies in CI', () => {
+        process.env.CI = 'true'
+        process.env.SANDBOX_RUNTIME = '1'
+        expect(
+            definePreviewConfig({ ciPort: 4141 }).use.launchOptions,
+        ).toBeUndefined()
     })
 })
 
