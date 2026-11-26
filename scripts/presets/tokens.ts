@@ -269,7 +269,9 @@ export async function tokens(
             }
             due++
             if (s.kind === 'missing') {
-                console.log(`! ${s.env}: no expiry recorded`)
+                console.log(
+                    `! ${s.env}: no expiry recorded (apply records it, and rotates the token only if it is due)`,
+                )
             } else {
                 const when =
                     s.left < 0 ? 'expired' : `expires in ${Math.floor(s.left)}d`
