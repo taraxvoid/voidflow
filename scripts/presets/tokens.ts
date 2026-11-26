@@ -172,8 +172,11 @@ export async function tokens(
             )
             if (!json) why.push('response was not JSON')
             const hint =
-                res.status === 401
-                    ? ` (${adminVar} is invalid or expired)`
+                // Cloudflare answers 403 9109 "Invalid access token" for a
+                // token that is expired, wrong, or used outside its IP filter.
+                res.status === 401 ||
+                (json?.errors ?? []).some((e) => e.code === 9109)
+                    ? ` (${adminVar} is invalid, expired, or its IP filter does not allow this address)`
                     : res.status === 403
                       ? ` (${adminVar} lacks permission for this call; it needs account API token edit rights, see CONTRIBUTING.md)`
                       : ''
