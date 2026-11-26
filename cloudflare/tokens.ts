@@ -607,3 +607,80 @@ export function plan(
     }
     return [{ kind: 'ok', token }]
 }
+
+// ---- recorded expiry --------------------------------------------------------
+
+/**
+ * Repo variable `apply` writes each env's token expiry to, as JSON (env name
+ * to ISO date). Not a secret: a check without the admin token (the drift
+ * workflow, which gets it from the `vars` context) reads it to warn before a
+ * token expires, since only the admin token can list tokens.
+ */
+export const EXPIRY_VAR = 'VOIDFLOW_CF_TOKEN_EXPIRY'
+
+export type ExpiryRecord = Record<string, string>
+
+/** The record in a variable's text; an Error when it is not one. */
+export function parseExpiryRecord(text: string): ExpiryRecord | Error {
+    let v: unknown
+    try {
+        v = JSON.parse(text)
+    } catch {
+        return new Error(`${EXPIRY_VAR} is not JSON`)
+    }
+    if (typeof v !== 'object' || v === null || Array.isArray(v))
+        return new Error(`${EXPIRY_VAR} is not an object of env to date`)
+    for (const [env, date] of Object.entries(v)) {
+        if (typeof date !== 'string' || Number.isNaN(Date.parse(date)))
+            return new Error(`${EXPIRY_VAR}.${env} is not a date`)
+    }
+    return v as ExpiryRecord
+}
+
+/** The variable's text: keys sorted, so equal records render equal. */
+export const renderExpiryRecord = (r: ExpiryRecord): string =>
+    JSON.stringify(
+        Object.fromEntries(
+            Object.keys(r)
+                .sort()
+                .map((k) => [k, r[k]]),
+        ),
+    )
+
+/**
+ * The record a run leaves: `recorded` cut to the config's envs, with each
+ * expiry this run knows (`known`) over it.
+ */
+export function nextExpiryRecord(
+    envs: string[],
+    recorded: ExpiryRecord,
+    known: Map<string, string>,
+): ExpiryRecord {
+    const out: ExpiryRecord = {}
+    for (const env of envs) {
+        const date = known.get(env) ?? recorded[env]
+        if (date !== undefined) out[env] = date
+    }
+    return out
+}
+
+export type ExpiryStatus =
+    | { env: string; kind: 'ok' | 'due'; expires: string; left: number }
+    | { env: string; kind: 'missing' }
+
+/**
+ * Each env's token by its recorded expiry: due inside RENEW_DAYS (when `plan`
+ * rotates it), missing without a record.
+ */
+export function expiryStatus(
+    envs: string[],
+    recorded: ExpiryRecord,
+    now: Date,
+): ExpiryStatus[] {
+    return envs.map((env) => {
+        const expires = recorded[env]
+        if (expires === undefined) return { env, kind: 'missing' }
+        const left = daysLeft(expires, now)
+        return { env, kind: left < RENEW_DAYS ? 'due' : 'ok', expires, left }
+    })
+}

@@ -31,15 +31,21 @@ import {
     type Action,
     D1_WRITE,
     type EnvConfig,
+    EXPIRY_VAR,
+    type ExpiryRecord,
     envAccount,
     expiresOn,
+    expiryStatus,
     fromWrangler,
     missingWorkerMessage,
     missingZoneMessage,
+    nextExpiryRecord,
     type Policy,
+    parseExpiryRecord,
     plan,
     policies,
     type RepoConfig,
+    renderExpiryRecord,
     repoAccounts,
     resolveTarget,
     retireTargets,
@@ -63,6 +69,8 @@ export type TokensMode =
     | { kind: 'sync' }
     | { kind: 'groups' }
     | { kind: 'try'; env: string; cmd: string[] }
+    /** No admin token: check the expiry `apply` recorded in EXPIRY_VAR. */
+    | { kind: 'expiry' }
 
 /**
  * The environment for a --try command: `env` without CF_TOKEN_ADMIN or its
@@ -121,6 +129,8 @@ export async function tokens(
             return 2
         }
     }
+
+    if (mode.kind === 'expiry') return recordedExpiry()
 
     const ADMIN = ctx.env[adminVar]
     if (!ADMIN) {
@@ -211,6 +221,65 @@ export async function tokens(
         const { code, out, err } = await capture(['gh', ...args], stdin)
         if (code !== 0) throw new Error(`gh ${args.join(' ')}: ${err || out}`)
         return out
+    }
+
+    /**
+     * The repo's EXPIRY_VAR as `gh` reads it: undefined when the variable is
+     * not set, an Error when it holds something else.
+     */
+    async function readRecord(
+        repo: string,
+    ): Promise<ExpiryRecord | Error | undefined> {
+        let text: string
+        try {
+            text = await gh(['variable', 'get', EXPIRY_VAR, '-R', repo])
+        } catch (e) {
+            if (/not found|HTTP 404/i.test((e as Error).message))
+                return undefined
+            throw e
+        }
+        return parseExpiryRecord(text.trim())
+    }
+
+    /**
+     * `check` without the admin token: each env's token by the expiry `apply`
+     * recorded. The drift workflow passes the record in the environment (from
+     * the `vars` context, which needs no permission); otherwise `gh` reads it.
+     */
+    async function recordedExpiry(): Promise<number> {
+        const [repo] = Object.keys(REPOS)
+        const envs = REPOS[repo].envs.map((e) => e.env)
+        const passed = ctx.env[EXPIRY_VAR]
+        const recorded = passed
+            ? parseExpiryRecord(passed)
+            : await readRecord(repo)
+        console.log(
+            `\n== ${repo} (${adminVar} not set: checking the expiry recorded in ${EXPIRY_VAR})`,
+        )
+        const rotate = `run \`voidflow apply tokens\` with ${adminVar} (behind \`fnox proxy run --\` when fnox holds it)`
+        if (recorded instanceof Error) {
+            console.log(`! ${recorded.message}; ${rotate} to record it again`)
+            return ctx.verb === 'check' ? 1 : 0
+        }
+        let due = 0
+        for (const s of expiryStatus(envs, recorded ?? {}, new Date())) {
+            if (s.kind === 'ok') {
+                console.log(`  ok ${s.env}, expires ${s.expires}`)
+                continue
+            }
+            due++
+            if (s.kind === 'missing') {
+                console.log(`! ${s.env}: no expiry recorded`)
+            } else {
+                const when =
+                    s.left < 0 ? 'expired' : `expires in ${Math.floor(s.left)}d`
+                console.log(`@ ${s.env}: ${when} (${s.expires}), rotate it`)
+            }
+        }
+        console.log(
+            `\n${due === 0 ? 'no token due to rotate' : `${due} token(s) to rotate or record: ${rotate}`}`,
+        )
+        return ctx.verb === 'check' && due > 0 ? 1 : 0
     }
 
     // ---- --groups ---------------------------------------------------------------
@@ -496,19 +565,22 @@ export async function tokens(
         name: string,
         want: Policy[],
         a: Action,
-    ) {
+    ): Promise<string | undefined> {
         const label = `${env.env} "${name}"`
         if (a.kind === 'ok') {
             const used = a.token.last_used_on ?? 'never'
             console.log(
                 `  ok ${label}, expires ${a.token.expires_on}, last used ${used}`,
             )
-            return
+            return a.token.expires_on ?? undefined
         }
         pending++
         const sign = { create: '+', update: '~', rotate: '@' }[a.kind]
         console.log(`${sign} ${a.kind} ${label}: ${a.reason}`)
-        if (!apply) return
+        if (!apply)
+            return a.kind === 'update'
+                ? (a.token.expires_on ?? undefined)
+                : undefined
         const path = `/accounts/${acct}/tokens`
         switch (a.kind) {
             case 'create': {
@@ -516,7 +588,7 @@ export async function tokens(
                 console.log(
                     `  created ${t.id}, secret set in ${scopeLabel(repo, env)}`,
                 )
-                return
+                return t.expires_on ?? expiresOn(now)
             }
             case 'update':
                 await cf('PUT', `${path}/${a.token.id}`, {
@@ -526,7 +598,7 @@ export async function tokens(
                     status: 'active',
                 })
                 console.log('  updated (value unchanged)')
-                return
+                return a.token.expires_on ?? undefined
             case 'rotate': {
                 // New token, then the secret, then delete the old ones, so a
                 // deploy in between still has a working token. A stop before the
@@ -536,7 +608,7 @@ export async function tokens(
                     await cf('DELETE', `${path}/${old.id}`)
                 const ids = a.tokens.map((o) => o.id).join(', ')
                 console.log(`  rotated ${ids} to ${t.id}, secret set`)
-                return
+                return t.expires_on ?? expiresOn(now)
             }
         }
     }
@@ -578,14 +650,50 @@ export async function tokens(
                 `  ! ${env.env}: no CLOUDFLARE_API_TOKEN secret in ${scopeLabel(repo, env)}`,
             )
         }
+        let expires: string | undefined
         for (const a of plan(want, have, now, {
             rotate: ctx.rotate,
             secretMissing,
             name,
         })) {
-            await act(repo, acct, env, name, want, a)
+            expires = await act(repo, acct, env, name, want, a)
         }
         if (apply) await syncFallbackVar(repo, env)
+        return expires
+    }
+
+    /**
+     * Keep EXPIRY_VAR in step with the expiries this run knows (`known`): a
+     * pending change under plan or check, written under apply.
+     */
+    async function syncExpiryRecord(
+        repo: string,
+        cfg: RepoConfig,
+        known: Map<string, string>,
+    ) {
+        const read = await readRecord(repo)
+        const recorded = read instanceof Error || !read ? {} : read
+        const next = nextExpiryRecord(
+            cfg.envs.map((e) => e.env),
+            recorded,
+            known,
+        )
+        const text = renderExpiryRecord(next)
+        if (text === renderExpiryRecord(recorded) && !(read instanceof Error))
+            return
+        pending++
+        const why =
+            read instanceof Error
+                ? read.message
+                : read === undefined
+                  ? 'not set'
+                  : 'out of date'
+        console.log(
+            `~ record token expiry in the ${EXPIRY_VAR} variable (${why}), for checks without ${adminVar}`,
+        )
+        if (!apply) return
+        await gh(['variable', 'set', EXPIRY_VAR, '-R', repo, '--body', text])
+        console.log('  recorded')
     }
 
     // ---- --try ------------------------------------------------------------------
@@ -658,14 +766,22 @@ export async function tokens(
             continue
         }
         let envsOk = true
+        const known = new Map<string, string>()
         for (const env of cfg.envs) {
             try {
-                await run(repo, cfg, env, tokens)
+                const expires = await run(repo, cfg, env, tokens)
+                if (expires) known.set(env.env, expires)
             } catch (e) {
                 envsOk = false
                 failed++
                 console.error(`  x ${env.env}: ${(e as Error).message}`)
             }
+        }
+        try {
+            await syncExpiryRecord(repo, cfg, known)
+        } catch (e) {
+            failed++
+            console.error(`  x ${EXPIRY_VAR}: ${(e as Error).message}`)
         }
         // Retire old tokens (and a shadowed repo secret) only once every env, in
         // every account, has its replacement.

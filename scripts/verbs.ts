@@ -193,8 +193,9 @@ ${
         ? ''
         : `
 Without a preset, runs rulesets, then settings (skipped when gh lacks admin
-on the repo), then tokens (skipped without a cloudflare section or its admin
-token variable).`
+on the repo), then tokens (skipped without a cloudflare section; without its
+admin token variable, only the token expiry apply recorded in the
+VOIDFLOW_CF_TOKEN_EXPIRY repo variable is checked).`
 }
 
 Reads the ${CONFIG_FILE} found from here up to the git root. See
@@ -209,15 +210,15 @@ export function worstExit(codes: number[]): 0 | 1 | 2 {
 /**
  * The presets one verb runs: a named preset alone; otherwise rulesets,
  * settings (which skips itself without admin), then tokens when the file has
- * a cloudflare section and its admin token variable is set (so a repo's CI,
- * which has neither, still checks rulesets), with `skipped` saying why tokens
- * did not run.
+ * a cloudflare section: in full when its admin token variable is set, else
+ * (`expiryOnly`, as in a repo's CI) only the token expiry `apply` recorded.
+ * `skipped` says why tokens did not run.
  */
 export function presetsFor(
     preset: Preset | undefined,
     cfg: VoidflowConfig,
     env: Record<string, string | undefined>,
-): { run: Preset[]; skipped?: string } {
+): { run: Preset[]; skipped?: string; expiryOnly?: true } {
     if (preset) return { run: [preset] }
     const always: Preset[] = ['rulesets', 'settings']
     const cf = cfg.cloudflare
@@ -227,8 +228,7 @@ export function presetsFor(
             skipped: `tokens skipped (no cloudflare section in ${CONFIG_FILE})`,
         }
     const admin = adminTokenVar(cf)
-    if (!env[admin])
-        return { run: always, skipped: `tokens skipped (${admin} not set)` }
+    if (!env[admin]) return { run: [...always, 'tokens'], expiryOnly: true }
     return { run: [...always, 'tokens'] }
 }
 
@@ -340,7 +340,7 @@ async function runPreset(
     mode?: TokensMode,
 ): Promise<number> {
     console.error(
-        `voidflow ${version()} ${ctx.verb} ${preset} | config ${ctx.file} | repo ${ctx.repo} | credential ${credential(preset, ctx.cfg, ctx.env)}`,
+        `voidflow ${version()} ${ctx.verb} ${preset} | config ${ctx.file} | repo ${ctx.repo} | credential ${mode?.kind === 'expiry' ? 'gh (recorded expiry only)' : credential(preset, ctx.cfg, ctx.env)}`,
     )
     try {
         return await run(preset, ctx, mode)
@@ -435,13 +435,19 @@ export function verbMain(verb: Command) {
             }
         }
 
-        const { run: presets, skipped } = presetsFor(a.preset, cfg, process.env)
+        const {
+            run: presets,
+            skipped,
+            expiryOnly,
+        } = presetsFor(a.preset, cfg, process.env)
         if (skipped) console.error(`${prog}: ${skipped}`)
         const codes: number[] = []
         for (const preset of presets) {
             const mode: TokensMode | undefined = a.groups
                 ? { kind: 'groups' }
-                : undefined
+                : expiryOnly && preset === 'tokens'
+                  ? { kind: 'expiry' }
+                  : undefined
             codes.push(
                 await runPreset(
                     preset,

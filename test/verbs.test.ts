@@ -166,11 +166,11 @@ describe('presetsFor', () => {
         })
     })
 
-    test('a bare verb skips tokens when the admin variable is unset or empty', () => {
+    test('a bare verb checks only the recorded token expiry when the admin variable is unset or empty', () => {
         for (const env of [{}, { CF_TOKEN_ADMIN_Q: '' }])
             expect(presetsFor(undefined, CF, env)).toEqual({
-                run: ['rulesets', 'settings'],
-                skipped: 'tokens skipped (CF_TOKEN_ADMIN_Q not set)',
+                run: ['rulesets', 'settings', 'tokens'],
+                expiryOnly: true,
             })
     })
 
@@ -379,10 +379,43 @@ describe('voidflow plan|check|apply|try', () => {
         expect(r.err).toContain('CF_TOKEN_ADMIN_Q is not set')
     })
 
-    test('a bare plan skips tokens when the admin variable is unset', async () => {
+    test('a bare plan without the admin variable checks only the recorded expiry', async () => {
         const r = await inRepo(['plan'], CF)
-        expect(r.err).toContain('tokens skipped (CF_TOKEN_ADMIN_Q not set)')
-        expect(r.err).not.toContain('plan tokens |')
+        expect(r.err).toContain(
+            'plan tokens | config ' +
+                `${r.file} | repo o/n | credential gh (recorded expiry only)`,
+        )
+        expect(r.err).toContain('gh variable get VOIDFLOW_CF_TOKEN_EXPIRY')
+    })
+
+    describe('a bare check reads the expiry the drift workflow passes', () => {
+        const days = (n: number) =>
+            new Date(Date.now() + n * 86_400_000).toISOString()
+        const check = (record: string) =>
+            inRepo(['check'], CF, { VOIDFLOW_CF_TOKEN_EXPIRY: record })
+
+        test('a token due to rotate names the command that rotates it', async () => {
+            const r = await check(JSON.stringify({ prod: days(5) }))
+            expect(r.out).toContain('@ prod: expires in 4d')
+            expect(r.out).toContain(
+                '1 token(s) to rotate or record: run `voidflow apply tokens` with CF_TOKEN_ADMIN_Q',
+            )
+        })
+
+        test('an env without a record, or a record that does not parse, is due too', async () => {
+            expect((await check('{}')).out).toContain(
+                '! prod: no expiry recorded',
+            )
+            expect((await check('nope')).out).toContain(
+                '! VOIDFLOW_CF_TOKEN_EXPIRY is not JSON',
+            )
+        })
+
+        test('a token outside the window is ok', async () => {
+            const r = await check(JSON.stringify({ prod: days(60) }))
+            expect(r.out).toContain('ok prod, expires')
+            expect(r.out).toContain('no token due to rotate')
+        })
     })
 
     test('a bare plan runs tokens after rulesets when the admin variable is set', async () => {
