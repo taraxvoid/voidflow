@@ -76,6 +76,7 @@ with `--apply --force` to overwrite the files that differ.
 | `--apply` | write files and change settings (otherwise plan only) |
 | `--preset files\|settings\|ci\|rulesets` | do only part of the setup |
 | `--skip <name>` | leave out one file or setting (repeatable) |
+| `--only <name>` | do just one file or setting (repeatable; not with `--skip`) |
 | `--repo owner/name` | target repo, if not the `origin` remote |
 | `--enable-pvr` | private vulnerability reporting and a `SECURITY.md` |
 | `--enable-actions-lock` | lock this repo's own workflow actions with `actions.lock` |
