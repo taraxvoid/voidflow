@@ -142,7 +142,9 @@ the only one with `issues: write`, edits the issue from that result, so the
 token that writes issues never shares a job with installed code. Exit 2 (a
 read failed, the token cannot read something, or the config does not load)
 warns and leaves the issue alone; a failed install fails the run and leaves
-it alone too. Inputs: `runner`, `socket-scanner` (as in tool-ci).
+It also checks each Cloudflare deploy token's expiry, as `apply tokens`
+recorded it in the `VOIDFLOW_CF_TOKEN_EXPIRY` repo variable, so a token due
+to rotate opens the same issue. it alone too. Inputs: `runner`, `socket-scanner` (as in tool-ci).
 `voidflow init` writes this caller:
 
 ```yaml

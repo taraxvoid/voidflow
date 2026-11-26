@@ -14,8 +14,12 @@ name: voidflow drift
 #
 # Callers trigger it on push to main, a weekly schedule and workflow_dispatch,
 # and must grant `contents: read`, `actions: read` (environments) and
-# `issues: write`. Settings and tokens are never checked here: GITHUB_TOKEN is
-# not an admin and there is no Cloudflare admin token.
+# `issues: write`. Settings are never checked here (GITHUB_TOKEN is not an
+# admin), and there is no Cloudflare admin token, so tokens are checked only
+# by the expiry `voidflow apply tokens` records in the VOIDFLOW_CF_TOKEN_EXPIRY
+# repo variable: a token inside its last 14 days, or an env with no record,
+# is drift, and the issue says to rotate it locally. The weekly run lands
+# inside that window at least once.
 
 on:
   workflow_call:
@@ -145,6 +149,8 @@ jobs:
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          # Read from the caller's vars, which needs no token permission.
+          VOIDFLOW_CF_TOKEN_EXPIRY: ${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY }}
         run: |
           # voidflow's own repo runs its checkout; everyone else the bin they pin.
           if [ "$(jq -r .name package.json)" = "@taraxvoid/voidflow" ]; then
@@ -205,7 +211,7 @@ jobs:
                 printf '%s\n' "$RESULT"
                 echo '```'
                 echo
-                echo "Review with \`voidflow plan\` in a checkout of the default branch, then \`voidflow apply <preset>\`. This issue closes itself when a later run is in sync."
+                echo "Review with \`voidflow plan\` in a checkout of the default branch, then \`voidflow apply <preset>\`. Tokens rotate only with the Cloudflare admin token, so run that apply where it lives. This issue closes itself when a later run is in sync."
               } > "$body"
               if [ -n "$open" ]; then
                 gh issue edit "$open" --body-file "$body"

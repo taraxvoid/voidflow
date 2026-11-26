@@ -312,6 +312,11 @@ $vf apply tokens --prune      # also delete `retire` tokens and a leftover repo-
 $vf plan tokens --groups      # live names of the permission group ids the config uses
 ```
 
+`apply` also records each token's expiry in the `VOIDFLOW_CF_TOKEN_EXPIRY`
+repo variable, which the drift workflow reads without the admin token: a token
+due to rotate (or an env with no record) opens its drift issue, and running
+`apply tokens` here closes it on the next run.
+
 The plan prints when each token was last used, so a CI deploy shows up there.
 To prove a token's policies are enough before CI depends on them, run the
 deploy with a throwaway token that has the same policies:

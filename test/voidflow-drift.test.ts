@@ -29,6 +29,14 @@ describe('voidflow-drift.yml', () => {
         expect(uses).toEqual([])
     })
 
+    // No Cloudflare admin token in CI: the check reads the expiry apply
+    // recorded, from the vars context rather than a token permission.
+    test('passes the recorded token expiry to the check', () => {
+        expect(step('check', 'check').env.VOIDFLOW_CF_TOKEN_EXPIRY).toBe(
+            '${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY }}',
+        )
+    })
+
     test('checks the default branch, whatever ref triggered it', () => {
         const checkout = drift.jobs.check.steps[0]
         expect(checkout.uses).toMatch(/^actions\/checkout@/)

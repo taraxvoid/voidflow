@@ -289,7 +289,13 @@ Both CI steps run only when the repo defines a `check:voidflow` script (the
 templates add `voidflow check`) and `node_modules/.bin/voidflow` is
 installed. CI and the drift workflow use `GITHUB_TOKEN`, which is not an
 admin: settings are skipped and rulesets are compared without their
-`bypass_actors`, and tokens are never checked there.
+`bypass_actors`. Without the Cloudflare admin token a bare `voidflow check`
+cannot list tokens, so it checks only the expiry `voidflow apply tokens`
+records in the `VOIDFLOW_CF_TOKEN_EXPIRY` repo variable (JSON, env name to
+date): a token within 14 days of expiry, or an env with no record, is drift.
+The drift workflow passes that variable from the `vars` context, so its
+weekly run opens the drift issue in time to rotate the token locally with
+`voidflow apply tokens` behind `fnox proxy run --`.
 
 The `pre-push` hook in `lefthook/base.yml` runs when the pushed commits
 change `voidflow.config.ts`, on any branch: `voidflow validate` blocks the

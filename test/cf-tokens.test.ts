@@ -3,14 +3,18 @@ import {
     checkRepos,
     D1_WRITE,
     expiresOn,
+    expiryStatus,
     fromWrangler,
     missingWorkerMessage,
     missingZoneMessage,
+    nextExpiryRecord,
     type Policy,
+    parseExpiryRecord,
     plan,
     policies,
     RENEW_DAYS,
     type RepoConfig,
+    renderExpiryRecord,
     repoAccounts,
     resolveTarget,
     retireTargets,
@@ -292,6 +296,52 @@ describe('plan', () => {
         expect(a.kind === 'rotate' && a.tokens.map((t) => t.id)).toEqual([
             'old',
             'new',
+        ])
+    })
+})
+
+describe('recorded expiry', () => {
+    const at = (days: number) =>
+        new Date(now.getTime() + days * 86_400_000).toISOString()
+
+    test('parses an object of env to date and rejects anything else', () => {
+        expect(parseExpiryRecord('{"prod":"2027-01-13T23:59:59Z"}')).toEqual({
+            prod: '2027-01-13T23:59:59Z',
+        })
+        for (const bad of ['nope', '[]', 'null', '{"prod":1}', '{"prod":"x"}'])
+            expect(parseExpiryRecord(bad)).toBeInstanceOf(Error)
+    })
+
+    test('renders with sorted keys, so equal records compare equal', () => {
+        expect(renderExpiryRecord({ prod: 'b', preview: 'a' })).toBe(
+            renderExpiryRecord({ preview: 'a', prod: 'b' }),
+        )
+    })
+
+    test('a run keeps the config envs, with what it knows over the record', () => {
+        const next = nextExpiryRecord(
+            ['prod', 'preview'],
+            { prod: 'old', preview: 'kept', gone: 'x' },
+            new Map([['prod', 'new']]),
+        )
+        expect(next).toEqual({ prod: 'new', preview: 'kept' })
+    })
+
+    test('due inside the renewal window or expired, missing without a record', () => {
+        const s = expiryStatus(
+            ['prod', 'preview', 'old', 'new'],
+            {
+                prod: at(RENEW_DAYS + 1),
+                preview: at(RENEW_DAYS - 1),
+                old: at(-1),
+            },
+            now,
+        )
+        expect(s.map((x) => [x.env, x.kind])).toEqual([
+            ['prod', 'ok'],
+            ['preview', 'due'],
+            ['old', 'due'],
+            ['new', 'missing'],
         ])
     })
 })
