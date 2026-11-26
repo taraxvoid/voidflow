@@ -47,11 +47,21 @@ export function definePreviewConfig({
     const external = process.env.PLAYWRIGHT_BASE_URL
     const baseURL = external ?? `http://localhost:${port}`
 
+    // Inside the Claude Code sandbox (macOS Seatbelt, sets SANDBOX_RUNTIME)
+    // Chromium aborts: its parent registers a Mach rendezvous name, which the
+    // profile never allows. --single-process skips that handshake. Not used in
+    // CI or outside the sandbox, where multi-process Chromium works.
+    const sandboxed = !process.env.CI && process.env.SANDBOX_RUNTIME === '1'
+
     return {
         testDir,
         timeout,
         fullyParallel: true,
-        use: { baseURL, serviceWorkers: 'block' },
+        use: {
+            baseURL,
+            serviceWorkers: 'block',
+            ...(sandboxed && { launchOptions: { args: ['--single-process'] } }),
+        },
         // Set PLAYWRIGHT_BASE_URL to test a deployed site or preview instead.
         webServer: external
             ? undefined
