@@ -17,6 +17,34 @@ import {
     wantsMergeQueue,
 } from '../rulesets/index.ts'
 import { isPlanGated } from '../rulesets/plan-gate.ts'
+import { type RulesetApi, syncRepo } from '../scripts/presets/rulesets.ts'
+
+describe('syncRepo with a token that cannot read bypass_actors', () => {
+    test('reports which rulesets were not fully compared', async () => {
+        const repo = 'taraxvoid/queeromaha'
+        const fleet: Fleet = { [repo]: REPOS[repo] as RepoConfig }
+        const live = desired(repo, fleet).map(({ ruleset }, i) => {
+            const have = structuredClone(ruleset) as Partial<Ruleset>
+            delete have.bypass_actors
+            return { id: i + 1, ...have }
+        })
+        const api = (async (_method: string, path: string) => {
+            if (path === `repos/${repo}/rulesets`) return live
+            const id = Number(path.split('/').pop())
+            return live.find((r) => r.id === id)
+        }) as RulesetApi
+        const r = await syncRepo(
+            api,
+            repo,
+            fleet,
+            { apply: false, prune: false },
+            () => {},
+        )
+        expect(r.drift).toBe(0)
+        expect(r.unseen.length).toBeGreaterThan(0)
+        expect(r.unseen).toEqual(live.map((l) => l.name as string))
+    })
+})
 
 // A fleet as an infra repo would pass it with --config: sites on a
 // single main, and voidflow's release channels.

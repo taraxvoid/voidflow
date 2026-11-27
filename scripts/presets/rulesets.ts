@@ -193,16 +193,23 @@ export async function syncRepo(
     fleet: Fleet,
     opts: { apply: boolean; prune: boolean },
     log: (line: string) => void,
-): Promise<{ drift: number; gated: boolean; outcomes: RulesetOutcome[] }> {
+): Promise<{
+    drift: number
+    gated: boolean
+    outcomes: RulesetOutcome[]
+    /** Rulesets whose bypass_actors this token could not read, so were not compared. */
+    unseen: string[]
+}> {
     let drift = 0
     const outcomes: RulesetOutcome[] = []
+    const unseen: string[] = []
     let listed: Array<{ id: number; name: string }>
     try {
         listed = await api<typeof listed>('GET', `repos/${repo}/rulesets`)
     } catch (e) {
         if (!isPlanGated(String(e))) throw e
         log('  skipped: private repo on a plan without rulesets (HTTP 403)')
-        return { drift, gated: true, outcomes }
+        return { drift, gated: true, outcomes, unseen }
     }
     const matched = new Set<number>()
 
@@ -231,10 +238,12 @@ export async function syncRepo(
         )
         // A read-only token gets no bypass_actors back; compare the rest.
         const bypass = Array.isArray(have.bypass_actors)
-        if (!bypass)
+        if (!bypass) {
+            unseen.push(ruleset.name)
             log(
                 `  note "${ruleset.name}": bypass_actors not visible to this token, not compared`,
             )
+        }
         const lines = diff(
             normalise(have, { bypass }),
             normalise(ruleset, { bypass }),
@@ -276,7 +285,7 @@ export async function syncRepo(
         }
         outcomes.push({ name: r.name, kind: 'retire', done })
     }
-    return { drift, gated: false, outcomes }
+    return { drift, gated: false, outcomes, unseen }
 }
 
 /**
@@ -372,8 +381,17 @@ export async function rulesets(ctx: PresetCtx): Promise<number> {
         console.log(`\nskipped ${repo}: private repo without ruleset support`)
     else drift += await syncEnvs(repo, fleet[repo], apply)
 
-    console.log(
-        `\n${drift === 0 ? 'in sync' : `${drift} ruleset(s) or environment(s) ${apply ? 'changed' : `differ (${ctx.applyHint})`}`}`,
-    )
+    // A check that could not compare something must not read as a clean one.
+    const partial =
+        r.unseen.length > 0
+            ? `partial: bypass_actors not compared for ${r.unseen.length} ruleset(s); this token cannot read them (needs admin on ${repo})`
+            : null
+    const verdict =
+        drift === 0
+            ? partial
+                ? 'in sync for what was compared'
+                : 'in sync'
+            : `${drift} ruleset(s) or environment(s) ${apply ? 'changed' : `differ (${ctx.applyHint})`}`
+    console.log(`\n${verdict}${partial ? `\n${partial}` : ''}`)
     return ctx.verb === 'check' && drift > 0 ? 1 : 0
 }
