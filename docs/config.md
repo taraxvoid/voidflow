@@ -291,7 +291,10 @@ Both CI steps run only when the repo defines a `check:voidflow` script (the
 templates add `voidflow check`) and `node_modules/.bin/voidflow` is
 installed. CI and the drift workflow use `GITHUB_TOKEN`, which is not an
 admin: settings are skipped and rulesets are compared without their
-`bypass_actors`. Without the Cloudflare admin token a bare `voidflow check`
+`bypass_actors`. The summary says so: rulesets end with `in sync for what was
+compared` and a `partial:` line naming how many rulesets went uncompared, and
+settings print `settings not checked (...): partial check`. Neither counts as
+drift. A token that can read both is tracked in #492. Without the Cloudflare admin token a bare `voidflow check`
 cannot list tokens, so it checks only the expiry `voidflow apply tokens`
 records in the `VOIDFLOW_CF_TOKEN_EXPIRY` repo variable (JSON, env name to
 date): a token within 14 days of expiry, or an env with no record, is drift.

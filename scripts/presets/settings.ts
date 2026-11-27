@@ -53,7 +53,12 @@ export async function settingsCommand(
     const unavailable = await ghAvailable(gh)
     if (unavailable)
         return opts.ifAdmin
-            ? { lines: [`settings skipped (${unavailable})`], code: 0 }
+            ? {
+                  lines: [
+                      `settings not checked (${unavailable}): partial check`,
+                  ],
+                  code: 0,
+              }
             : { lines: [`settings: ${unavailable}`], code: 2 }
     const enabled = enabledGroups(cfg.settings?.enable)
     const run = await runSettings(gh, repo, {
@@ -64,7 +69,9 @@ export async function settingsCommand(
     if (run.notAdmin !== undefined)
         return opts.ifAdmin
             ? {
-                  lines: [`settings skipped (${credential} lacks admin)`],
+                  lines: [
+                      `settings not checked (${credential} lacks admin): partial check`,
+                  ],
                   code: 0,
               }
             : {

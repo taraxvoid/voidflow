@@ -151,7 +151,9 @@ describe('voidflow settings', () => {
             ifAdmin: true,
         })
         expect(bare).toEqual({
-            lines: ['settings skipped (GH_TOKEN lacks admin)'],
+            lines: [
+                'settings not checked (GH_TOKEN lacks admin): partial check',
+            ],
             code: 0,
         })
     })
@@ -160,7 +162,9 @@ describe('voidflow settings', () => {
         const gh = fake({ unavailable: 'gh is not installed' })
         expect((await run(gh, 'plan')).code).toBe(2)
         expect(await run(gh, 'plan', { ifAdmin: true })).toEqual({
-            lines: ['settings skipped (gh is not installed)'],
+            lines: [
+                'settings not checked (gh is not installed): partial check',
+            ],
             code: 0,
         })
     })
