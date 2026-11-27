@@ -70,6 +70,8 @@ Mach name Chromium registers for its child processes, so normal launches abort
 with `bootstrap_check_in ... Permission denied (1100)`.
 
 **Biome** (v2) - 4-space indent, width 80, single quotes, `recommended` rules.
+Markdown formatting and linting are off (Biome 2.6 rewrites release-please's
+`CHANGELOG.md` and fails every release PR); YAML is still formatted.
 Lists merge with the base; scalar values in your config win.
 
 ```json
