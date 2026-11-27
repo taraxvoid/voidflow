@@ -94,22 +94,19 @@ describe('templates', () => {
         expect(site.files.includes).toEqual([
             '**',
             '!**/bun.lock',
+            '!.release-please',
             '!.astro',
             '!**/*.svg',
         ])
         expect(t.get('tool/biome.json')).not.toContain('.astro')
     })
 
-    test('site biome.json also ignores .astro and svg', () => {
+    test('biome.json ignores release-please files in both kinds', () => {
         const t = buildTemplates(ROOT)
-        const site = JSON.parse(t.get('site/biome.json')!)
-        expect(site.files.includes).toEqual([
-            '**',
-            '!**/bun.lock',
-            '!.astro',
-            '!**/*.svg',
-        ])
-        expect(t.get('tool/biome.json')).not.toContain('.astro')
+        for (const kind of ['tool', 'site']) {
+            const cfg = JSON.parse(t.get(`${kind}/biome.json`)!)
+            expect(cfg.files.includes).toContain('!.release-please')
+        }
     })
 
     test('bunfig template keeps the install gate and the scanner', () => {

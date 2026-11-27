@@ -2,6 +2,12 @@
     "$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
     "extends": ["@taraxvoid/voidflow/biome"],
     "files": {
-        "includes": ["**", "!**/bun.lock", "!.astro", "!**/*.svg"]
+        "includes": [
+            "**",
+            "!**/bun.lock",
+            "!.release-please",
+            "!.astro",
+            "!**/*.svg"
+        ]
     }
 }
