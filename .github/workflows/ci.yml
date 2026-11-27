@@ -107,8 +107,9 @@ jobs:
         # The config must load and validate (exit 2 fails the job). What
         # applying it would change goes to the job summary and never fails:
         # a PR that changes the config is applied after merge, and drift on
-        # main is the voidflow-drift workflow's to report. Tokens are never
-        # planned here (CI has no admin token).
+        # main is the voidflow-drift workflow's to report. Without an admin token
+        # the tokens plan checks only the expiry recorded in the caller's vars,
+        # which it must be handed: GITHUB_TOKEN cannot read the variable (403).
         run: |
           vf() { bun scripts/cli.ts "$@"; }
           vf validate
@@ -129,3 +130,4 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+          VOIDFLOW_CF_TOKEN_EXPIRY: ${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY }}

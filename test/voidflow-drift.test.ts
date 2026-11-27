@@ -37,6 +37,20 @@ describe('voidflow-drift.yml', () => {
         )
     })
 
+    // GITHUB_TOKEN gets a 403 reading the variable, which made every plan
+    // exit 2 and annotate a warning on callers with a cloudflare section.
+    test.each(['ci', 'tool-ci', 'site-ci'])(
+        '%s hands the recorded token expiry to the plan step',
+        (f) => {
+            const wf = yaml(read(`.github/workflows/${f}.yml`))
+            const steps = Object.values<any>(wf.jobs).flatMap((j) => j.steps)
+            const s = steps.find((s: any) => s.name === 'voidflow config')
+            expect(s.env.VOIDFLOW_CF_TOKEN_EXPIRY).toBe(
+                '${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY }}',
+            )
+        },
+    )
+
     test('checks the default branch, whatever ref triggered it', () => {
         const checkout = drift.jobs.check.steps[0]
         expect(checkout.uses).toMatch(/^actions\/checkout@/)
