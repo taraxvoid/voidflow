@@ -105,7 +105,10 @@ Shared lefthook hooks for bun, pnpm or aube repos (aube is detected from
 - `pre-commit`: dependency guard, `format`, `lint:actions`, `check`,
   `test:unit`, plus `check:licenses` / `audit` when the lockfile changed
 - `commit-msg`: Conventional Commits hint (non-blocking)
-- `pre-push`: stops if the remote is ahead, then `test:push`
+- `pre-push`: stops if the remote is ahead or `node_modules` is missing (runs
+  everywhere), then `test:push` (tagged `ci`, so Claude's sandboxed pre-push
+  check, which sets `LEFTHOOK_EXCLUDE=ci`, skips only the tests and leaves them
+  to CI; pushes from your own shell still run them)
 
 ```yaml
 # lefthook.yml

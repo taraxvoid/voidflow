@@ -35,6 +35,19 @@ describe('lefthook/base.yml', () => {
             expect(text).toContain(`\n${hook}`)
         }
     })
+
+    test('only the pre-push test run is tagged ci; the guards run in the sandbox too', async () => {
+        const parsed: any = Bun.YAML.parse(await Bun.file(config).text())
+        const cmds = parsed['pre-push'].commands
+        expect(cmds.test.tags).toContain('ci')
+        expect(cmds.test.run).not.toContain('git fetch')
+        for (const name of ['sync', 'voidflow-sync']) {
+            expect(cmds[name].tags ?? []).not.toContain('ci')
+        }
+        expect(cmds.sync.run).not.toContain('{pm} run')
+        expect(cmds.sync.priority).toBeLessThan(cmds.test.priority)
+    })
+
     test('pre-commit unit step prefers test:unit:precommit when a site defines it', async () => {
         const text = await Bun.file(config).text()
         expect(text).toContain('grep -q \'"test:unit:precommit"\' package.json')
@@ -67,7 +80,8 @@ describe('lefthook/base.yml', () => {
 
 const hooks: any = Bun.YAML.parse(readFileSync(config, 'utf8'))
 const unitRun: string = hooks['pre-commit'].commands.unit.run
-const pushRun: string = hooks['pre-push'].commands['sync-and-test'].run
+const syncRun: string = hooks['pre-push'].commands.sync.run
+const testRun: string = hooks['pre-push'].commands.test.run
 const voidflowRun: string = hooks['pre-push'].commands['voidflow-sync'].run
 
 // Runs a hook snippet in a temp repo with git's hook env exported, `{pm}`
@@ -157,14 +171,14 @@ async function runHook(
 }
 
 describe('git env cleanup before tests', () => {
-    // A pushed branch with a new commit, so sync-and-test doesn't take the
+    // A pushed branch with a new commit, so pre-push test doesn't take the
     // "nothing new to push" exit. `{1}` (remote) is empty, so no fetch.
     // `{head}` is the temp repo's real commit (see runHook).
     const pushStdin = `refs/heads/x {head} refs/heads/x ${'0'.repeat(40)}\n`
 
     test.each([
         ['pre-commit unit', unitRun, ''],
-        ['pre-push sync-and-test', pushRun, pushStdin],
+        ['pre-push test', testRun, pushStdin],
     ])(
         '%s: test script sees no GIT_* vars and git still finds the repo',
         async (_name, run, stdin) => {
@@ -178,18 +192,19 @@ describe('git env cleanup before tests', () => {
     )
 
     test("uses git's own list of repo-local vars", () => {
-        for (const run of [unitRun, pushRun]) {
+        for (const run of [unitRun, testRun]) {
             expect(run).toContain('unset $(git rev-parse --local-env-vars)')
         }
     })
 
-    test('pre-push unsets only after the remote check, which needs the repo env', () => {
-        expect(pushRun.indexOf('unset $(git rev-parse')).toBeGreaterThan(
-            pushRun.indexOf('git merge-base'),
+    test('pre-push test unsets only after the new-commit check, which needs the repo env', () => {
+        expect(testRun.indexOf('unset $(git rev-parse')).toBeGreaterThan(
+            testRun.indexOf('git rev-list'),
         )
-        expect(pushRun.indexOf('unset $(git rev-parse')).toBeLessThan(
-            pushRun.indexOf('{pm} run --if-present test:push'),
+        expect(testRun.indexOf('unset $(git rev-parse')).toBeLessThan(
+            testRun.indexOf('{pm} run --if-present test:push'),
         )
+        expect(syncRun).not.toContain('unset $(git rev-parse')
     })
 })
 
@@ -362,11 +377,11 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
     // GIT_DIR would point these git calls at the wrong repo.
     const env = () => ({ PATH: process.env.PATH, HOME: tmpdir() })
 
-    // The hook's script with lefthook's {1} (remote name) filled in and {pm}
+    // The hook's scripts with lefthook's {1} (remote name) filled in and {pm}
     // made an echo, so the test sees whether test:push would run.
-    const script = pushRun
-        .replaceAll('{1}', 'origin')
-        .replaceAll('{pm}', 'echo PM')
+    const fill = (run: string) =>
+        run.replaceAll('{1}', 'origin').replaceAll('{pm}', 'echo PM')
+    const scripts = [fill(syncRun), fill(testRun)]
 
     const git = (cwd: string, ...args: string[]) => {
         const proc = Bun.spawnSync(
@@ -401,16 +416,23 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
         return { repo, pushed: git(repo, 'rev-parse', 'HEAD') }
     }
 
+    // Runs sync then test, like lefthook's priority order, stopping when
+    // sync fails.
     const run = async (repo: string, stdin: string) => {
-        const proc = Bun.spawn(['sh', '-c', script], {
-            cwd: repo,
-            env: env(),
-            stdin: new Blob([stdin]),
-            stdout: 'pipe',
-            stderr: 'pipe',
-        })
-        const code = await proc.exited
-        return { code, out: await new Response(proc.stdout).text() }
+        let out = ''
+        for (const script of scripts) {
+            const proc = Bun.spawn(['sh', '-c', script], {
+                cwd: repo,
+                env: env(),
+                stdin: new Blob([stdin]),
+                stdout: 'pipe',
+                stderr: 'pipe',
+            })
+            const code = await proc.exited
+            out += await new Response(proc.stdout).text()
+            if (code !== 0) return { code, out }
+        }
+        return { code: 0, out }
     }
 
     test('skips checks for a branch delete', async () => {
@@ -463,5 +485,29 @@ describe('lefthook/base.yml pre-push new-commit detection', () => {
         const stdin = `refs/tags/v1 ${pushed} refs/tags/v1 ${ZERO}\nrefs/heads/main ${head} refs/heads/main ${pushed}\n`
         const { out } = await run(repo, stdin)
         expect(out).toContain('PM run --if-present test:push')
+    })
+
+    test('sync blocks the push when the remote branch is ahead', async () => {
+        const { repo, pushed } = setup()
+        git(
+            repo,
+            'commit',
+            '-q',
+            '--allow-empty',
+            '--no-verify',
+            '-m',
+            'remote',
+        )
+        git(repo, 'push', '-q', '--no-verify', 'origin', 'main')
+        git(repo, 'reset', '-q', '--hard', pushed)
+        git(repo, 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'local')
+        const head = git(repo, 'rev-parse', 'HEAD')
+        const { code, out } = await run(
+            repo,
+            `refs/heads/main ${head} refs/heads/main ${pushed}\n`,
+        )
+        expect(code).toBe(1)
+        expect(out).toContain('remote has commits not in local branch')
+        expect(out).not.toContain('PM run')
     })
 })

@@ -127,7 +127,11 @@ commit-msg:
 
 pre-push:
   commands:
-    sync-and-test:
+    sync:
+      priority: 1
+      # Git-only guards, so they run everywhere, Claude's sandboxed pre-push
+      # check included: stop when the remote branch is ahead or dependencies
+      # are missing.
       use_stdin: true
       run: |
         # Nothing new to push (branch delete, or a tag or branch pointing at
@@ -170,6 +174,29 @@ pre-push:
           echo "          Run '{pm} install' before pushing, then push again."
           exit 1
         fi
+    test:
+      priority: 2
+      # Tagged ci: the test run (Playwright e2e, builds) cannot run in Claude's
+      # sandboxed pre-push check (LEFTHOOK_EXCLUDE=ci), so it leaves tests to
+      # CI. Pushes from your own shell still run them. Only the test run lives
+      # here; guards that can run sandboxed belong in `sync`. Skipped without
+      # node_modules, which `sync` reports.
+      tags: [ci]
+      skip: *no-deps
+      use_stdin: true
+      run: |
+        # Nothing new to push (branch delete, or a tag or branch pointing at
+        # commits the remote already has): skip the checks. A commit counts
+        # as new when no ref of the remote contains it.
+        has_new_commits=false
+        remote_name="{1}"
+        while read -r _local_ref local_sha _remote_ref _remote_sha; do
+          case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+          if [ -n "$(git rev-list -n 1 "$local_sha" --not --remotes="$remote_name" 2>/dev/null)" ]; then
+            has_new_commits=true
+          fi
+        done
+        [ "$has_new_commits" = true ] || exit 0
 
         unset $(git rev-parse --local-env-vars)
         {pm} run --if-present test:push
