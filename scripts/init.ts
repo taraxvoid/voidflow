@@ -68,7 +68,7 @@ export const PRESETS: Record<
     full: { files: 'all', settings: true },
     files: { files: 'all', settings: false },
     settings: { files: null, settings: true },
-    ci: { files: ['ci'], settings: false },
+    ci: { files: ['ci', 'zizmor'], settings: false },
     codeowners: { files: ['codeowners'], settings: false },
     // Opt-in only: rulesets block direct pushes to main, which surprises a
     // fresh repo before its first push.
@@ -76,6 +76,8 @@ export const PRESETS: Record<
 }
 
 const KINDS: Kind[] = ['tool', 'site']
+/** File items whose templates call voidflow at `@{{sha}} # v{{version}}`. */
+const SHA_PINNED = ['ci', 'drift', 'agentic']
 
 const OPTIONS = {
     kind: { type: 'string' },
@@ -88,6 +90,7 @@ const OPTIONS = {
     'agentic-stage': { type: 'string', default: 'shadow' },
     'enable-actions-lock': { type: 'boolean', default: false },
     'enable-actions-relock': { type: 'boolean', default: false },
+    'pin-sha': { type: 'boolean', default: false },
     repo: { type: 'string' },
     owner: { type: 'string' },
     force: { type: 'boolean', short: 'f', default: false },
@@ -108,6 +111,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --agentic-stage <s>     with --enable-agentic: shadow (default; nothing merges) or gate (adds the gate job and Renovate automerge)
   --enable-actions-lock   opt in: verify-lockfile.yml, then run gh actions-lock once to write .github/workflows/actions.lock
   --enable-actions-relock opt in (implies --enable-actions-lock): relock-actions.yml, which relocks and pushes actions.lock on Renovate PRs and PRs labelled relock-actions; needs a GitHub App
+  --pin-sha               pin voidflow's workflows to the release commit SHA (default: the immutable vX.Y.Z tag)
   --repo owner/name       the GitHub repo (default: the origin remote)
   --owner @handle         CODEOWNERS owner: @user or @org/team (default: the repo owner when it is a user)
   --no-color              no ANSI colors (also off when NO_COLOR is set or stdout is not a terminal; FORCE_COLOR=1 forces them on)
@@ -386,13 +390,28 @@ export async function main(
     let fileActions: FileAction[] = []
     const securityPlanned = () => fileActions.some((a) => a.name === 'security')
     if (wantFiles && kind) {
-        const sha = await (deps.resolveSha ?? defaultResolveSha)(version)
-        if (sha === null) {
+        const picked = preset.files === 'all' ? null : new Set(preset.files)
+        const wants = (name: string) =>
+            (picked === null || picked.has(name)) && !skipNames.includes(name)
+        // Releases are immutable, so the tag is as fixed as its commit; a
+        // SHA pin is opt-in for callers whose policy wants one anyway. Only
+        // the workflows that call voidflow carry one.
+        const pinSha =
+            values['pin-sha'] && SHA_PINNED.some((name) => wants(name))
+        const sha = pinSha
+            ? await (deps.resolveSha ?? defaultResolveSha)(version)
+            : null
+        if (pinSha && sha === null) {
             notes.push(
-                `could not resolve the v${version} tag (offline?); ci.yml pins @v${version}, Renovate pins the digest later`,
+                `could not resolve the v${version} tag (offline?); the voidflow workflows pin @v${version} instead of its SHA; rerun with --pin-sha to pin the SHA`,
             )
         }
-        const picked = preset.files === 'all' ? null : new Set(preset.files)
+        // The lock policy (a ref on every action) only where a lock checks
+        // the pins: one already committed, or the verify workflow this run
+        // writes. A re-run without the flag keeps it while actions.lock exists.
+        const actionsLock =
+            existsSync(join(dir, '.github/workflows/actions.lock')) ||
+            (enableActionsLock && wants('actions-lock'))
         // An organization cannot be a code owner, only its users and teams.
         let ownerHandle = owner ?? null
         const codeownersWanted =
@@ -435,6 +454,7 @@ export async function main(
             cronMinute:
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
             stage,
+            actionsLock,
             owner: ownerHandle,
             config: withSettings(existingConfig ?? { kind }, merged.settings),
         }
@@ -728,6 +748,7 @@ export async function main(
                 'enable-agentic',
                 'enable-actions-lock',
                 'enable-actions-relock',
+                'pin-sha',
             ] as const
         )
             .filter((f) => values[f])

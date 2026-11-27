@@ -12,7 +12,7 @@ Every preset, flag, skip name, file and setting `init` handles, and how to try a
 | `full` (default) | starter files and repo settings |
 | `files` | starter files only |
 | `settings` | repo settings only (no `--kind` needed) |
-| `ci` | only `.github/workflows/ci.yml` |
+| `ci` | only `.github/workflows/ci.yml` and `.github/zizmor.yml` (which lets zizmor accept its tag pins) |
 | `codeowners` | only `.github/CODEOWNERS` |
 | `rulesets` | only branch rulesets: from the repo's `voidflow.config.ts` when it has one, else the `--kind` defaults |
 
@@ -29,6 +29,7 @@ Every preset, flag, skip name, file and setting `init` handles, and how to try a
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to `rulesets.checks` in the repo's `voidflow.config.ts` |
 | `--enable-actions-lock` | opt in: [actions.lock](#actionslock) for the repo's own workflows. Writes `verify-lockfile.yml`, then runs `gh actions-lock` once |
 | `--enable-actions-relock` | opt in, implies `--enable-actions-lock`: also writes [`relock-actions.yml`](#relock-actions), which relocks and pushes `actions.lock` on Renovate PRs and PRs labelled `relock-actions`. Needs a GitHub App |
+| `--pin-sha` | pin voidflow's reusable workflows to the release commit SHA (`@<sha> # vX.Y.Z`) instead of the immutable `@vX.Y.Z` tag. Not recorded: pass it on every run, or a re-run moves the pins back to tags. If the SHA can't be resolved (offline), init writes the tag and says so in a note |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
 | `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos, or with no repo to read, a full run skips CODEOWNERS with a note and `--preset codeowners` fails until you pass `--owner`) |
 | `--apply` | write the files and change the settings. Without it `init` only plans and changes nothing |
@@ -39,7 +40,7 @@ Every preset, flag, skip name, file and setting `init` handles, and how to try a
 `--skip` and `--only` take any file or setting name; `init --help` lists them all.
 
 - **Files:** `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`,
-  `ci`, `codeowners`, `config`, `drift`, `tsconfig` (tool), `playwright` and
+  `ci`, `codeowners`, `config`, `drift`, `zizmor`, `tsconfig` (tool), `playwright` and
   `unlighthouse` (site), `package`, `security` (with `--enable-pvr`), `agentic`
   (with `--enable-agentic`), `actions-lock` and `actions-relock` (with
   `--enable-actions-lock` / `--enable-actions-relock`)
@@ -58,7 +59,8 @@ The `--enable-*` groups and the settings you skip are recorded in
 
 `lefthook.yml`, `mise.toml`, `renovate.json`, `bunfig.toml`, `biome.json`,
 `.github/workflows/ci.yml` (the CI caller for the kind, pinned to the release
-SHA), `.github/CODEOWNERS`, `voidflow.config.ts` (the repo's
+tag, see [Pinning](../README.md#pinning)), `.github/zizmor.yml` (the policy
+that lets zizmor accept those tag refs), `.github/CODEOWNERS`, `voidflow.config.ts` (the repo's
 [per-repo config](config.md), holding only `kind`),
 `.github/workflows/voidflow-drift.yml` (the [drift check](config.md#reviewing-and-applying-a-change)
 on `main`), and `tsconfig.json`
@@ -99,7 +101,13 @@ lock fails the run at startup with no jobs and no logs, so keep it current.
 `--enable-actions-lock` writes `.github/workflows/verify-lockfile.yml`, which
 runs `gh actions-lock --verify` on pull requests, pushes to `main` and weekly,
 then runs `gh actions-lock` once so every workflow, the new one included, is
-locked; commit `.github/workflows`. Without the
+locked; commit `.github/workflows`. `gh actions-lock` rewrites SHA pins to
+tags and keeps the SHAs in the lock, so `.github/zizmor.yml` switches to
+`'*': ref-pin` (a ref on every action, not a hash), the policy voidflow uses
+for itself. It does so only when this run writes `verify-lockfile.yml` or
+`actions.lock` is already committed. The lock does not cover reusable
+workflows called at `jobs.<id>.uses`, and that policy no longer flags a tag
+on one, so pin a third-party reusable workflow by SHA yourself. Without the
 [gh-actions-lock](https://github.com/github/gh-actions-lock) extension the run
 is a `manual` row with the command to run; any other failure exits 1. `init`
 prints the Require lockfile policy as a manual step: turn it on once the lock

@@ -1,0 +1,8 @@
+# voidflow releases are immutable (a vX.Y.Z tag cannot be moved), so its
+# reusable workflows and actions are referenced by version tag. Every other
+# action keeps zizmor's default: pinned to a commit SHA.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        'taraxvoid/voidflow/*': ref-pin

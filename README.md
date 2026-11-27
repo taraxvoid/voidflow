@@ -100,12 +100,22 @@ a minor ([`STABILITY.md`](STABILITY.md#experimental)).
 
 ## Pinning
 
-Pin workflows and actions to a release SHA with the version in a comment;
-Renovate keeps it current.
+Pin workflows and actions to a release tag; Renovate keeps it current.
 
 ```yaml
-uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@<sha> # vX.Y.Z
+uses: taraxvoid/voidflow/.github/workflows/site-ci.yml@vX.Y.Z
 ```
+
+voidflow releases since v0.5.1 are immutable, so a `vX.Y.Z` tag cannot be
+moved to another commit and pins as firmly as its SHA (check with
+[`gh release verify`](RELEASING.md#verify-a-release); older releases fail it).
+Use a full `vX.Y.Z` tag: the floating `vN` tag and branches do move. zizmor
+wants a hash by default, so allow tag refs for voidflow in `.github/zizmor.yml`
+(`'taraxvoid/voidflow/*': ref-pin`); `voidflow init` writes that file. zizmor's
+`ref-pin` cannot tell a release tag from `@v1` or `@main`, so review voidflow
+ref changes as you would any pin. If your policy wants SHAs anyway, pin
+`@<sha> # vX.Y.Z` (`init --pin-sha`) and Renovate moves the SHA and the comment
+together.
 
 Canary releases are tagged `vX.Y.Z-next.N` and published to the `next`
 dist-tag; if you use an npm release-age cooldown, see

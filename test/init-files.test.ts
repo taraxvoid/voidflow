@@ -47,6 +47,7 @@ const TOOL_TARGETS = [
     '.github/CODEOWNERS',
     'voidflow.config.ts',
     '.github/workflows/voidflow-drift.yml',
+    '.github/zizmor.yml',
     'tsconfig.json',
     'package.json',
 ]
@@ -61,6 +62,16 @@ describe('planFiles', () => {
         const withPvr = planFiles(dir, sel('tool', { enablePvr: true }), ctx)
         expect(withPvr.map((a) => a.name)).toContain('security')
         expect(plan.map((a) => a.name)).not.toContain('security')
+    })
+    test('zizmor policy follows the actions-lock opt-in', () => {
+        const pick = (lock: boolean) =>
+            planFiles(dir, sel('tool', { enableActionsLock: lock }), {
+                ...ctx,
+                actionsLock: lock,
+            }).find((a) => a.name === 'zizmor')?.content ?? ''
+        expect(pick(false)).toContain("'taraxvoid/voidflow/*': ref-pin")
+        expect(pick(false)).not.toContain("'*': ref-pin")
+        expect(pick(true)).toContain("'*': ref-pin")
     })
     test('codeowners renders the owner into every rule', () => {
         const [a] = planFiles(dir, sel('tool'), {
