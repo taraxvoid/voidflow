@@ -128,6 +128,10 @@ commit-msg:
 pre-push:
   commands:
     sync-and-test:
+      # Tagged ci: the test run (Playwright e2e, builds) cannot run in Claude's
+      # sandboxed pre-push check (LEFTHOOK_EXCLUDE=ci), so it leaves tests to
+      # CI. Pushes from your own shell still run them.
+      tags: [ci]
       use_stdin: true
       run: |
         # Nothing new to push (branch delete, or a tag or branch pointing at

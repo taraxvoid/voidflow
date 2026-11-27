@@ -35,6 +35,13 @@ describe('lefthook/base.yml', () => {
             expect(text).toContain(`\n${hook}`)
         }
     })
+    test('pre-push test job is tagged ci so the sandboxed check leaves it to CI', async () => {
+        const parsed: any = Bun.YAML.parse(await Bun.file(config).text())
+        expect(parsed['pre-push'].commands['sync-and-test'].tags).toContain(
+            'ci',
+        )
+    })
+
     test('pre-commit unit step prefers test:unit:precommit when a site defines it', async () => {
         const text = await Bun.file(config).text()
         expect(text).toContain('grep -q \'"test:unit:precommit"\' package.json')
