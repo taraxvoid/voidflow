@@ -369,12 +369,26 @@ export function verbMain(verb: Command) {
                 fail(
                     `${prog}: no ${CONFIG_FILE} in ${process.cwd()} or above it up to the git root`,
                 )
+            let cfg: VoidflowConfig
             try {
-                await loadVoidflowConfig(file)
+                cfg = await loadVoidflowConfig(file)
             } catch (e) {
                 fail(`${prog}: ${(e as Error).message}`)
             }
             console.log(`${file}: valid`)
+            const actions = process.env.GITHUB_ACTIONS === 'true'
+            // Lazy: it pulls in the wrangler parsers, which the validate-only
+            // path of the packed bin should not need loaded for other verbs.
+            const { observabilityFindings } = await import(
+                './lib/observability.ts'
+            )
+            for (const f of observabilityFindings(file, cfg)) {
+                console.log(
+                    actions
+                        ? `::warning file=${f.file}::${f.message}`
+                        : `warning: ${f.file}: ${f.message}`,
+                )
+            }
             process.exit(0)
         }
         const { file, cfg, repo } = await loadRepo(prog)
