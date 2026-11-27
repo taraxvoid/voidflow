@@ -15,7 +15,6 @@ import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { adminTokenVar, type VoidflowConfig } from '../config/index.ts'
 import { credentialSource } from './init/gh.ts'
-import { observabilityFindings } from './lib/observability.ts'
 import { packageRoot } from './lib/package-root.ts'
 import {
     CONFIG_FILE,
@@ -378,6 +377,11 @@ export function verbMain(verb: Command) {
             }
             console.log(`${file}: valid`)
             const actions = process.env.GITHUB_ACTIONS === 'true'
+            // Lazy: it pulls in the wrangler parsers, which the validate-only
+            // path of the packed bin should not need loaded for other verbs.
+            const { observabilityFindings } = await import(
+                './lib/observability.ts'
+            )
             for (const f of observabilityFindings(file, cfg)) {
                 console.log(
                     actions
