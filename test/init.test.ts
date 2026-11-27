@@ -308,9 +308,49 @@ describe('voidflow init', () => {
         expect(r.code).toBe(1)
         expect(r.out).toMatch(/conflict\s+mise/)
         expect(r.out).toContain('--force')
+        expect(r.out).toContain(
+            `voidflow init --kind tool --apply --only config ${dir}`,
+        )
+        expect(r.out).not.toContain('write a voidflow.config.ts')
         expect(existsSync(join(dir, 'lefthook.yml'))).toBe(false)
         expect(readFileSync(join(dir, 'mise.toml'), 'utf8')).toBe('[tools]\n')
         expect(f.writes.length).toBeGreaterThan(0)
+    })
+
+    test('the config retry after a conflict keeps the opt-ins and lists the skips', async () => {
+        const dir = repo()
+        writeFileSync(join(dir, 'mise.toml'), '[tools]\n')
+        const r = await run([
+            '--kind',
+            'tool',
+            '--enable-pvr',
+            '--skip',
+            'codeql',
+            '--apply',
+            dir,
+        ])
+        expect(r.code).toBe(1)
+        expect(r.out).toContain(
+            `voidflow init --kind tool --enable-pvr --apply --only config ${dir}\n`,
+        )
+        expect(r.out).toContain(
+            "then add 'codeql' to settings.skip in voidflow.config.ts",
+        )
+
+        // Following the hint writes a config with the opt-in recorded.
+        const retry = await run([
+            '--kind',
+            'tool',
+            '--enable-pvr',
+            '--apply',
+            '--only',
+            'config',
+            dir,
+        ])
+        expect(retry.code).toBe(0)
+        expect(readFileSync(join(dir, 'voidflow.config.ts'), 'utf8')).toContain(
+            "'pvr'",
+        )
     })
 
     test('a conflict that blocks the config write prints the settings to add', async () => {

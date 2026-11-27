@@ -137,6 +137,10 @@ function fail(msg: string, prog: string): never {
     process.exit(2)
 }
 
+/** A word to paste into a shell: single-quoted unless plainly safe. */
+const shellWord = (w: string) =>
+    /^[\w@%+=:,./-]+$/.test(w) ? w : `'${w.replaceAll("'", "'\\''")}'`
+
 /** Set once per run from the flags and environment; plain text until then. */
 let paint: Paint = (_style, text) => text
 
@@ -709,6 +713,42 @@ export async function main(
             '    voidflow apply settings',
             '  (see https://github.com/taraxvoid/voidflow/blob/main/docs/config.md)',
         )
+    } else if (
+        !existingConfig &&
+        fileActions.some((a) => a.name === 'config' && a.status !== 'conflict')
+    ) {
+        // The config was planned but a conflict elsewhere blocked every
+        // write: re-running the same command would refuse again. The retry
+        // keeps the dir and the opt-ins the config records; --only cannot
+        // take --skip, so the setting skips are listed to add by hand.
+        const optIns = (
+            [
+                'enable-pvr',
+                'enable-ai-scan',
+                'enable-agentic',
+                'enable-actions-lock',
+                'enable-actions-relock',
+            ] as const
+        )
+            .filter((f) => values[f])
+            .map((f) => `--${f}`)
+        const target = positionals[0] === undefined ? [] : [positionals[0]]
+        const retry = [
+            'voidflow init',
+            `--kind ${kind}`,
+            ...optIns,
+            '--apply --only config',
+            ...target.map(shellWord),
+        ].join(' ')
+        out.push(
+            `  ${CONFIG_FILE} was not written (file conflicts above); write it alone with:`,
+            `    ${retry}`,
+        )
+        for (const a of merged.added) {
+            const [path, value] = a.split(' + ')
+            if (path === 'settings.skip')
+                out.push(`  then add '${value}' to ${path} in ${CONFIG_FILE}`)
+        }
     } else {
         out.push(
             existingConfig
