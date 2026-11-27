@@ -37,6 +37,14 @@
             "whitespaceSensitivity": "strict"
         }
     },
+    "markdown": {
+        "formatter": {
+            "enabled": false
+        },
+        "linter": {
+            "enabled": false
+        }
+    },
     "css": {
         "linter": {
             "enabled": false

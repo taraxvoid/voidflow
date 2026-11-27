@@ -79,6 +79,25 @@ describe('biome/base.json', () => {
         expect(code).toBe(0)
     })
 
+    test('leaves Markdown alone (release-please CHANGELOGs)', () => {
+        // release-please writes `*` bullets and doubled blank lines; Biome's
+        // Markdown formatter rewrites both and fails CI on every release PR.
+        const changelog =
+            '# Changelog\n\n## [1.0.0](https://x) (2026-01-01)\n\n\n### Features\n\n* thing ([#1](https://x))\n'
+        const bare = site({}, { 'CHANGELOG.md': changelog })
+        expect(check(bare, 'CHANGELOG.md').code).not.toBe(0)
+
+        const dir = site(extendsBase, { 'CHANGELOG.md': changelog })
+        const { code, out } = check(dir, 'CHANGELOG.md')
+        expect(out).not.toContain('Formatter')
+        expect(code).toBe(0)
+    })
+
+    test('still formats YAML', () => {
+        const dir = site(extendsBase, { 'ci.yml': 'a:   1\nb:\n    - c\n' })
+        expect(check(dir, 'ci.yml').code).not.toBe(0)
+    })
+
     test('a setting in the site overrides the base', () => {
         const dir = site(
             {
