@@ -40,17 +40,17 @@
         },
         "./biome": "./biome/base.json",
         "./cloudflare": {
-            "types": "./cloudflare/tokens.ts",
+            "types": "./dist/cloudflare/tokens.d.ts",
             "bun": "./cloudflare/tokens.ts",
             "default": "./dist/cloudflare/tokens.js"
         },
         "./config": {
-            "types": "./config/index.ts",
+            "types": "./dist/config/index.d.ts",
             "bun": "./config/index.ts",
             "default": "./dist/config/index.js"
         },
         "./rulesets": {
-            "types": "./rulesets/index.ts",
+            "types": "./dist/rulesets/index.d.ts",
             "bun": "./rulesets/index.ts",
             "default": "./dist/rulesets/index.js"
         },
@@ -73,7 +73,7 @@
         "node": ">=24"
     },
     "scripts": {
-        "build": "bun build ./scripts/cli.ts ./cloudflare/tokens.ts ./rulesets/index.ts ./config/index.ts --outdir=dist --root=. --target=node --format=esm --splitting --packages=external",
+        "build": "bun build ./scripts/cli.ts ./cloudflare/tokens.ts ./rulesets/index.ts ./config/index.ts --outdir=dist --root=. --target=node --format=esm --splitting --packages=external && tsc -p tsconfig.build.json",
         "prepack": "rm -rf dist && bun run build",
         "prepare": "lefthook install || echo 'lefthook not installed (run mise install); git hooks skipped'",
         "lint": "biome check .",

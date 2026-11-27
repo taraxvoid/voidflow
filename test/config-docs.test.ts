@@ -38,10 +38,24 @@ describe('package.json', () => {
 
     test('exports ./config like ./rulesets', () => {
         expect(pkg.exports['./config']).toEqual({
-            types: './config/index.ts',
+            types: './dist/config/index.d.ts',
             bun: './config/index.ts',
             default: './dist/config/index.js',
         })
+    })
+
+    // Consumers type-check a `.ts` types entry under their own compiler
+    // flags (skipLibCheck does not cover it), so each fleet export ships
+    // declarations built next to its Node entry point.
+    test('fleet exports point types at built declarations', () => {
+        for (const name of ['./cloudflare', './config', './rulesets']) {
+            const e = pkg.exports[name]
+            expect({ name, types: e.types }).toEqual({
+                name,
+                types: e.default.replace(/\.js$/, '.d.ts'),
+            })
+        }
+        expect(pkg.scripts.build).toContain('tsc -p tsconfig.build.json')
     })
 
     test('ships and builds the config module', () => {

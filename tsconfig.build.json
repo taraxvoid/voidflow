@@ -1,0 +1,13 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "noEmit": false,
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "rewriteRelativeImportExtensions": true,
+        "rootDir": ".",
+        "outDir": "dist"
+    },
+    "include": [],
+    "files": ["cloudflare/tokens.ts", "config/index.ts", "rulesets/index.ts"]
+}
