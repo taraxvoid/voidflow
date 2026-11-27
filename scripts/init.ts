@@ -709,6 +709,16 @@ export async function main(
             '    voidflow apply settings',
             '  (see https://github.com/taraxvoid/voidflow/blob/main/docs/config.md)',
         )
+    } else if (
+        !existingConfig &&
+        fileActions.some((a) => a.name === 'config' && a.status !== 'conflict')
+    ) {
+        // The config was planned but a conflict elsewhere blocked every
+        // write: re-running the same command would refuse again.
+        out.push(
+            `  ${CONFIG_FILE} was not written (file conflicts above); write it alone with:`,
+            `    voidflow init --kind ${kind} --apply --only config`,
+        )
     } else {
         out.push(
             existingConfig

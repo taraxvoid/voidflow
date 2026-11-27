@@ -308,6 +308,10 @@ describe('voidflow init', () => {
         expect(r.code).toBe(1)
         expect(r.out).toMatch(/conflict\s+mise/)
         expect(r.out).toContain('--force')
+        expect(r.out).toContain(
+            'voidflow init --kind tool --apply --only config',
+        )
+        expect(r.out).not.toContain('write a voidflow.config.ts')
         expect(existsSync(join(dir, 'lefthook.yml'))).toBe(false)
         expect(readFileSync(join(dir, 'mise.toml'), 'utf8')).toBe('[tools]\n')
         expect(f.writes.length).toBeGreaterThan(0)
