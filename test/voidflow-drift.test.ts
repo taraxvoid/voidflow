@@ -33,7 +33,7 @@ describe('voidflow-drift.yml', () => {
     // recorded, from the vars context rather than a token permission.
     test('passes the recorded token expiry to the check', () => {
         expect(step('check', 'check').env.VOIDFLOW_CF_TOKEN_EXPIRY).toBe(
-            '${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY }}',
+            "${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY || '{}' }}",
         )
     })
 
@@ -46,7 +46,7 @@ describe('voidflow-drift.yml', () => {
             const steps = Object.values<any>(wf.jobs).flatMap((j) => j.steps)
             const s = steps.find((s: any) => s.name === 'voidflow config')
             expect(s.env.VOIDFLOW_CF_TOKEN_EXPIRY).toBe(
-                '${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY }}',
+                "${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY || '{}' }}",
             )
         },
     )

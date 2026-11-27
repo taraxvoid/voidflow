@@ -471,7 +471,7 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
-          VOIDFLOW_CF_TOKEN_EXPIRY: ${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY }}
+          VOIDFLOW_CF_TOKEN_EXPIRY: ${{ vars.VOIDFLOW_CF_TOKEN_EXPIRY || '{}' }}
 
       - name: Build Code
         if: steps.decide.outputs.validate == 'true' && steps.scripts.outputs.build == 'true' && inputs.build
