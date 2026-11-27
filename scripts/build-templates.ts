@@ -477,11 +477,22 @@ export function buildTemplates(root: string): Map<string, string> {
             extends: ['@taraxvoid/voidflow/biome'],
             files: { includes },
         })
-    t.set('tool/biome.json', biomeConfig(['**', '!**/bun.lock']))
+    // release-please rewrites its manifest as `{ ".": "x.y.z" }` on one line,
+    // which Biome's JSON formatter flags on every release PR.
+    t.set(
+        'tool/biome.json',
+        biomeConfig(['**', '!**/bun.lock', '!.release-please']),
+    )
     // Sites are Astro: skip its generated dir and svg assets.
     t.set(
         'site/biome.json',
-        biomeConfig(['**', '!**/bun.lock', '!.astro', '!**/*.svg']),
+        biomeConfig([
+            '**',
+            '!**/bun.lock',
+            '!.release-please',
+            '!.astro',
+            '!**/*.svg',
+        ]),
     )
     t.set('common/gitignore', 'node_modules/\ndist/\n.env*\n')
     t.set('common/SECURITY.md', securityMd)
