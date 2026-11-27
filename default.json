@@ -25,15 +25,6 @@
     },
     "packageRules": [
         {
-            "description": "Our own package is exempt from the release-age gate (mirrors minimumReleaseAgeExcludes in bunfig.toml)",
-            "matchPackageNames": [
-                "@taraxvoid/voidflow",
-                "voidflow",
-                "taraxvoid/voidflow"
-            ],
-            "minimumReleaseAge": null
-        },
-        {
             "description": "One PR for all GitHub Actions bumps",
             "matchManagers": ["github-actions"],
             "groupName": "github actions"
@@ -66,6 +57,18 @@
                 "@axe-core/playwright"
             ],
             "groupName": "playwright"
+        },
+        {
+            "description": "Our own package (stable releases only, canaries are prereleases Renovate skips) skips the release-age gate and the Monday schedule so callers get the bump PR right after a release. Last so it wins over the grouping rules above (mirrors minimumReleaseAgeExcludes in bunfig.toml)",
+            "matchPackageNames": [
+                "@taraxvoid/voidflow",
+                "voidflow",
+                "taraxvoid/voidflow"
+            ],
+            "minimumReleaseAge": null,
+            "schedule": ["at any time"],
+            "groupName": "voidflow",
+            "prPriority": 10
         }
     ],
     "customManagers": [

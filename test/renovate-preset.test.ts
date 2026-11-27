@@ -13,6 +13,16 @@ describe('renovate preset (default.json)', () => {
         expect(own.minimumReleaseAge).toBeNull()
     })
 
+    test('our own package bumps skip the schedule and win over grouping rules', () => {
+        const rules = preset.packageRules
+        const idx = rules.findIndex((r: any) =>
+            r.matchPackageNames?.includes('@taraxvoid/voidflow'),
+        )
+        expect(idx).toBe(rules.length - 1)
+        expect(rules[idx].schedule).toEqual(['at any time'])
+        expect(rules[idx].groupName).toBe('voidflow')
+    })
+
     test('uses conventional chore(deps) commits', () => {
         expect(preset.semanticCommits).toBe('enabled')
         expect(preset.semanticCommitType).toBe('chore')
