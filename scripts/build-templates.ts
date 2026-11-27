@@ -523,6 +523,34 @@ export default { kind: '{{kind}}' } satisfies VoidflowConfig
     t.set('common/verify-lockfile.yml', verifyLockfile(pins))
     t.set('common/relock-actions.yml', relockActions(pins))
     t.set('common/voidflow-drift.yml', voidflowDrift)
+    // zizmor (run by site-ci/tool-ci on the caller's .github) requires hash
+    // pins by default, which fails on init's tag-pinned voidflow refs and, with
+    // actions.lock, on every action. Same policy as .github/zizmor.yml here.
+    t.set(
+        'common/zizmor.yml',
+        `# voidflow releases are immutable (a vX.Y.Z tag cannot be moved), so its
+# reusable workflows and actions are referenced by version tag. Every other
+# action keeps zizmor's default: pinned to a commit SHA.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        'taraxvoid/voidflow/*': ref-pin
+`,
+    )
+    t.set(
+        'common/zizmor-lock.yml',
+        `# Action refs are pinned to commits by .github/workflows/actions.lock
+# (gh actions-lock), checked by verify-lockfile.yml, so workflows reference
+# version tags. voidflow's reusable workflows are outside the lock (an
+# upstream limitation) but its releases are immutable. Require a ref, not a hash.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        '*': ref-pin
+`,
+    )
 
     t.set('tool/ci.yml', toolCi)
     t.set(

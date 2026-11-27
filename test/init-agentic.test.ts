@@ -212,7 +212,7 @@ describe('init --enable-agentic', () => {
             join(dir, '.github/workflows/agentic.yml'),
             'utf8',
         )
-        expect(text).toContain('agentic-locks.yml@sha')
+        expect(text).toContain('agentic-locks.yml@v')
         expect(text).not.toContain('deps-review-gate')
         expect(readFileSync(join(dir, 'renovate.json'), 'utf8')).not.toContain(
             'deps-review-automerge',
@@ -242,7 +242,7 @@ describe('init --enable-agentic', () => {
         )
         expect(
             readFileSync(join(dir, '.github/workflows/agentic.yml'), 'utf8'),
-        ).toContain('deps-review-gate.yml@sha')
+        ).toContain('deps-review-gate.yml@v')
         expect(readFileSync(join(dir, 'renovate.json'), 'utf8')).toContain(
             'github>taraxvoid/voidflow:deps-review-automerge',
         )

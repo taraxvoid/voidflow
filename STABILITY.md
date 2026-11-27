@@ -144,8 +144,8 @@ published when callers need to act.
 
 ## Pinning
 
-Pin a release commit SHA with the version in a comment and let Renovate move
-it ([Pinning](README.md#pinning)). The floating `vN` tag follows the newest
+Pin a release tag (`@vX.Y.Z`, immutable) or its commit SHA with the version in
+a comment, and let Renovate move it ([Pinning](README.md#pinning)). The floating `vN` tag follows the newest
 stable release on major N, so a `@v1` reference picks up minors and patches
 without review; it's there for trying voidflow, not for production. Canary
 `-next.N` tags carry no stability promise.

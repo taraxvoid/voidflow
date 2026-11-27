@@ -1,6 +1,6 @@
 # Workflows and actions
 
-The reusable CI, release and code-scanning workflows, and the deploy and preview actions. Pin each to a release SHA (see [Pinning](../README.md#pinning)).
+The reusable CI, release and code-scanning workflows, and the deploy and preview actions. Pin each to a release tag or SHA (see [Pinning](../README.md#pinning)).
 
 ## Site CI
 

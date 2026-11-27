@@ -139,6 +139,12 @@ export const FILE_ITEMS: FileItem[] = [
         optIn: 'pvr',
     },
     {
+        name: 'zizmor',
+        target: '.github/zizmor.yml',
+        templates: ['common/zizmor{lock}.yml'],
+        kinds: BOTH,
+    },
+    {
         name: 'agentic',
         target: '.github/workflows/agentic.yml',
         templates: ['common/agentic-{stage}.yml'],
@@ -269,7 +275,8 @@ function templateTexts(item: FileItem, ctx: RenderCtx): string[] {
             t
                 .replace(/^\?/, '')
                 .replaceAll('{kind}', ctx.kind)
-                .replaceAll('{stage}', ctx.stage ?? 'shadow'),
+                .replaceAll('{stage}', ctx.stage ?? 'shadow')
+                .replaceAll('{lock}', ctx.actionsLock ? '-lock' : ''),
         )
         if (!existsSync(p)) {
             if (optional) return []

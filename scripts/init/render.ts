@@ -17,6 +17,8 @@ export type RenderCtx = {
     cronMinute: number
     /** Agentic rollout stage; shadow when unset. */
     stage?: 'shadow' | 'gate'
+    /** The repo opts in to actions.lock; picks the zizmor policy. */
+    actionsLock?: boolean
     /** `@user`, `@org` or `@org/team` for CODEOWNERS; null renders a placeholder. */
     owner?: string | null
     /** voidflow.config.ts's default export; unset renders `{ kind }`. */

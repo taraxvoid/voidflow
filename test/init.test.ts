@@ -159,6 +159,7 @@ const TOOL_FILES = [
     'biome.json',
     '.gitignore',
     '.github/workflows/ci.yml',
+    '.github/zizmor.yml',
     'tsconfig.json',
     'package.json',
     'voidflow.config.ts',
@@ -179,14 +180,26 @@ describe('voidflow init', () => {
         expect(r.err).toContain('--force needs --apply')
     })
 
+    test('--pin-sha pins the release commit SHA', async () => {
+        const dir = repo()
+        const r = await run(['--kind', 'tool', '--pin-sha', dir])
+        expect(r.code).toBe(0)
+        expect(
+            readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8'),
+        ).toContain('tool-ci.yml@deadbeef # v')
+    })
+
     test('full run on an empty repo exits 0 and writes the tool files', async () => {
         const dir = repo()
         const r = await run(['--kind', 'tool', dir])
         expect(r.code).toBe(0)
         for (const f of TOOL_FILES) expect(existsSync(join(dir, f))).toBe(true)
-        expect(
-            readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8'),
-        ).toContain('@deadbeef # v')
+        const ci = readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8')
+        expect(ci).toContain('tool-ci.yml@v')
+        expect(ci).not.toContain('deadbeef')
+        expect(readFileSync(join(dir, '.github/zizmor.yml'), 'utf8')).toContain(
+            "'taraxvoid/voidflow/*': ref-pin",
+        )
         expect(r.out).toContain('create')
         expect(r.out).toContain('applied')
         expect(r.out).toContain(
@@ -418,12 +431,13 @@ describe('voidflow init', () => {
         expect(r.out).not.toContain('files:')
     })
 
-    test('--preset ci writes only ci.yml and touches no settings', async () => {
+    test('--preset ci writes only ci.yml and its zizmor policy, touching no settings', async () => {
         const dir = repo()
         const f = fakeGh()
         const r = await run(['--kind', 'tool', '--preset', 'ci', dir], f.gh)
         expect(r.code).toBe(0)
         expect(existsSync(join(dir, '.github/workflows/ci.yml'))).toBe(true)
+        expect(existsSync(join(dir, '.github/zizmor.yml'))).toBe(true)
         expect(existsSync(join(dir, 'lefthook.yml'))).toBe(false)
         expect(existsSync(join(dir, 'mise.toml'))).toBe(false)
         expect(r.out).not.toContain('settings')
