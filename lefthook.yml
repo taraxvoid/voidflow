@@ -35,10 +35,9 @@ pre-push:
   parallel: true
   commands:
     zizmor:
-      # Tagged ci: online mode panics in Claude's sandbox (zizmor's HTTP client
-      # can't read the macOS proxy settings there), and ci.yml runs it anyway.
-      tags: [ci]
-      run: just security
+      # Offline, so it also runs in Claude's sandboxed pre-push check; ci.yml
+      # runs the online audit.
+      run: just security-offline
     test:
       # Tagged ci: some tests depend on the host (pnpm installs, biome module
       # resolution, lock files) and fail in Claude's sandbox for sandbox reasons,

@@ -83,6 +83,12 @@ security:
     export GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
     uvx zizmor@{{ zizmor_version }} --min-severity medium .
 
+# Offline zizmor, for the pre-push hook: online mode panics in Claude's sandbox
+# (zizmor's HTTP client can't read the macOS proxy settings there). CI runs the
+# online audit via `just security`.
+security-offline:
+    uvx zizmor@{{ zizmor_version }} --offline --min-severity medium .
+
 # Apply zizmor's auto-fixes. Action pins live in actions.lock (gh actions-lock), so review the diff and re-run `gh actions-lock` if any `uses:` changed.
 security-fix:
     #!/usr/bin/env bash
