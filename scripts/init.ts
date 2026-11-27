@@ -76,6 +76,8 @@ export const PRESETS: Record<
 }
 
 const KINDS: Kind[] = ['tool', 'site']
+/** File items whose templates call voidflow at `@{{sha}} # v{{version}}`. */
+const SHA_PINNED = ['ci', 'drift', 'agentic']
 
 const OPTIONS = {
     kind: { type: 'string' },
@@ -388,17 +390,28 @@ export async function main(
     let fileActions: FileAction[] = []
     const securityPlanned = () => fileActions.some((a) => a.name === 'security')
     if (wantFiles && kind) {
+        const picked = preset.files === 'all' ? null : new Set(preset.files)
+        const wants = (name: string) =>
+            (picked === null || picked.has(name)) && !skipNames.includes(name)
         // Releases are immutable, so the tag is as fixed as its commit; a
-        // SHA pin is opt-in for callers whose policy wants one anyway.
-        const sha = values['pin-sha']
+        // SHA pin is opt-in for callers whose policy wants one anyway. Only
+        // the workflows that call voidflow carry one.
+        const pinSha =
+            values['pin-sha'] && SHA_PINNED.some((name) => wants(name))
+        const sha = pinSha
             ? await (deps.resolveSha ?? defaultResolveSha)(version)
             : null
-        if (values['pin-sha'] && sha === null) {
+        if (pinSha && sha === null) {
             notes.push(
-                `could not resolve the v${version} tag (offline?); ci.yml pins @v${version} instead of its SHA; rerun with --pin-sha to pin the SHA`,
+                `could not resolve the v${version} tag (offline?); the voidflow workflows pin @v${version} instead of its SHA; rerun with --pin-sha to pin the SHA`,
             )
         }
-        const picked = preset.files === 'all' ? null : new Set(preset.files)
+        // The lock policy (a ref on every action) only where a lock checks
+        // the pins: one already committed, or the verify workflow this run
+        // writes. A re-run without the flag keeps it while actions.lock exists.
+        const actionsLock =
+            existsSync(join(dir, '.github/workflows/actions.lock')) ||
+            (enableActionsLock && wants('actions-lock'))
         // An organization cannot be a code owner, only its users and teams.
         let ownerHandle = owner ?? null
         const codeownersWanted =
@@ -441,7 +454,7 @@ export async function main(
             cronMinute:
                 existingCronMinute(dir) ?? Math.floor(Math.random() * 60),
             stage,
-            actionsLock: enableActionsLock,
+            actionsLock,
             owner: ownerHandle,
             config: withSettings(existingConfig ?? { kind }, merged.settings),
         }

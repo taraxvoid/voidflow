@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import {
     existsSync,
+    mkdirSync,
     mkdtempSync,
     readFileSync,
     rmSync,
@@ -189,13 +190,35 @@ describe('voidflow init', () => {
         ).toContain('tool-ci.yml@deadbeef # v')
     })
 
+    test('the lock zizmor policy needs a lock that checks the pins', async () => {
+        const policy = (dir: string) =>
+            readFileSync(join(dir, '.github/zizmor.yml'), 'utf8')
+        // --preset ci writes no verify workflow, so the flag alone is not enough.
+        const ciOnly = repo()
+        await run([
+            '--kind',
+            'tool',
+            '--preset',
+            'ci',
+            '--enable-actions-lock',
+            ciOnly,
+        ])
+        expect(policy(ciOnly)).not.toContain("'*': ref-pin")
+        // A committed actions.lock keeps the lock policy on a re-run without the flag.
+        const locked = repo()
+        mkdirSync(join(locked, '.github/workflows'), { recursive: true })
+        writeFileSync(join(locked, '.github/workflows/actions.lock'), '{}\n')
+        await run(['--kind', 'tool', '--preset', 'ci', locked])
+        expect(policy(locked)).toContain("'*': ref-pin")
+    })
+
     test('full run on an empty repo exits 0 and writes the tool files', async () => {
         const dir = repo()
         const r = await run(['--kind', 'tool', dir])
         expect(r.code).toBe(0)
         for (const f of TOOL_FILES) expect(existsSync(join(dir, f))).toBe(true)
         const ci = readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8')
-        expect(ci).toContain('tool-ci.yml@v')
+        expect(ci).toMatch(/tool-ci\.yml@v\d+\.\d+\.\d+\n/)
         expect(ci).not.toContain('deadbeef')
         expect(readFileSync(join(dir, '.github/zizmor.yml'), 'utf8')).toContain(
             "'taraxvoid/voidflow/*': ref-pin",

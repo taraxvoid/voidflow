@@ -29,7 +29,7 @@ Every preset, flag, skip name, file and setting `init` handles, and how to try a
 | `--agentic-stage shadow\|gate` | with `--enable-agentic`: `shadow` (default, nothing merges) or `gate` (adds the gate job and Renovate automerge). Automerge is only safe once `deps-review` is a required status check, which init does not set: add it to `rulesets.checks` in the repo's `voidflow.config.ts` |
 | `--enable-actions-lock` | opt in: [actions.lock](#actionslock) for the repo's own workflows. Writes `verify-lockfile.yml`, then runs `gh actions-lock` once |
 | `--enable-actions-relock` | opt in, implies `--enable-actions-lock`: also writes [`relock-actions.yml`](#relock-actions), which relocks and pushes `actions.lock` on Renovate PRs and PRs labelled `relock-actions`. Needs a GitHub App |
-| `--pin-sha` | pin voidflow's reusable workflows to the release commit SHA (`@<sha> # vX.Y.Z`) instead of the immutable `@vX.Y.Z` tag. Not recorded: pass it on every run, or a re-run moves the pins back to tags |
+| `--pin-sha` | pin voidflow's reusable workflows to the release commit SHA (`@<sha> # vX.Y.Z`) instead of the immutable `@vX.Y.Z` tag. Not recorded: pass it on every run, or a re-run moves the pins back to tags. If the SHA can't be resolved (offline), init writes the tag and says so in a note |
 | `--repo owner/name` | the GitHub repo, if not the `origin` remote |
 | `--owner @handle` | who owns the paths in `.github/CODEOWNERS`: `@user` or `@org/team` (default: the repo's owner when it is a user; an organization cannot be a code owner, so for org repos, or with no repo to read, a full run skips CODEOWNERS with a note and `--preset codeowners` fails until you pass `--owner`) |
 | `--apply` | write the files and change the settings. Without it `init` only plans and changes nothing |
@@ -104,7 +104,10 @@ then runs `gh actions-lock` once so every workflow, the new one included, is
 locked; commit `.github/workflows`. `gh actions-lock` rewrites SHA pins to
 tags and keeps the SHAs in the lock, so `.github/zizmor.yml` switches to
 `'*': ref-pin` (a ref on every action, not a hash), the policy voidflow uses
-for itself. Without the
+for itself. It does so only when this run writes `verify-lockfile.yml` or
+`actions.lock` is already committed. The lock does not cover reusable
+workflows called at `jobs.<id>.uses`, and that policy no longer flags a tag
+on one, so pin a third-party reusable workflow by SHA yourself. Without the
 [gh-actions-lock](https://github.com/github/gh-actions-lock) extension the run
 is a `manual` row with the command to run; any other failure exits 1. `init`
 prints the Require lockfile policy as a manual step: turn it on once the lock
