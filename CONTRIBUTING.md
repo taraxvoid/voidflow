@@ -19,7 +19,7 @@ bun install    # prepare script runs `lefthook install`
     (`scripts/shellcheck-actions.ts`)
 - `just check`: typecheck with tsc (`bun run check`)
 - `just test`: unit tests (`bun run test`)
-- `just security`: zizmor
+- `just security`: zizmor (online, as in CI); `just security-offline` is the pre-push variant
 
 `just format` applies Biome's fixes. The TypeScript steps are package.json
 scripts named like a voidflow caller's (`lint` is Biome, `check` is the

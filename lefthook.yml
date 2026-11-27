@@ -35,8 +35,15 @@ pre-push:
   parallel: true
   commands:
     zizmor:
-      run: just security
+      # Offline, so it also runs in Claude's sandboxed pre-push check; ci.yml
+      # runs the online audit.
+      run: just security-offline
     test:
+      # Tagged ci: some tests depend on the host (pnpm installs, biome module
+      # resolution, lock files) and fail in Claude's sandbox for sandbox reasons,
+      # so its sandboxed pre-push check (LEFTHOOK_EXCLUDE=ci) leaves them to CI.
+      # Pushes from your own shell still run them.
+      tags: [ci]
       # Git exports GIT_DIR, GIT_INDEX_FILE and others to hooks; clear them so
       # tests that run git in temp repos can't touch this one.
       run: |
