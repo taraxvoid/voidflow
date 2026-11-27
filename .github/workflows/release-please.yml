@@ -348,11 +348,13 @@ jobs:
       # The voidflow bin and the fleet exports' Node entry points live in dist/,
       # which is gitignored. Packing runs `prepack` (which builds too), but npm's
       # script handling under --ignore-scripts is not something to lean on, so
-      # build here. A tag from before dist/ existed has no build script.
+      # install and build here (tsc comes from devDependencies). A tag from
+      # before dist/ existed has no build script.
       - name: Build dist
         run: |
           set -euo pipefail
           if jq -e '.scripts.build' package.json >/dev/null; then
+            bun install --frozen-lockfile --ignore-scripts
             bun run build
           else
             echo "No build script at this tag; nothing to build."
