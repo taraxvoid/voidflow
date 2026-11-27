@@ -22,6 +22,7 @@ Every preset, flag, skip name, file and setting `init` handles, and how to try a
 |---|---|
 | `--kind tool\|site` | which starter files to write; required except with `--preset settings`, or `--preset rulesets` in a repo with a `voidflow.config.ts` |
 | `--skip <name>` | leave one file or setting out (repeatable, [names below](#skip-names)) |
+| `--only <name>` | do just this file or setting and skip the rest (repeatable, same [names](#skip-names)). Cannot be combined with `--skip`, and is not recorded in `voidflow.config.ts` |
 | `--enable-pvr` | opt in: private vulnerability reporting, and a `SECURITY.md` pointing at it |
 | `--enable-ai-scan` | opt in: AI Scan for pull requests and for the repository (`repository_scan`, preview) |
 | `--enable-agentic` | opt in, experimental: [deps-review](agentic.md#deps-review) and the repo settings and labels it relies on. The `COPILOT_GITHUB_TOKEN` secret is a manual step: add it as an Actions secret and again as a Dependabot secret, since runs Dependabot triggers only see Dependabot secrets |
@@ -35,7 +36,7 @@ Every preset, flag, skip name, file and setting `init` handles, and how to try a
 
 ## Skip names
 
-`--skip` takes any file or setting name; `init --help` lists them all.
+`--skip` and `--only` take any file or setting name; `init --help` lists them all.
 
 - **Files:** `lefthook`, `mise`, `renovate`, `bunfig`, `biome`, `gitignore`,
   `ci`, `codeowners`, `config`, `drift`, `tsconfig` (tool), `playwright` and

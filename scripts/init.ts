@@ -81,6 +81,7 @@ const OPTIONS = {
     kind: { type: 'string' },
     preset: { type: 'string', default: 'full' },
     skip: { type: 'string', multiple: true, default: [] as string[] },
+    only: { type: 'string', multiple: true, default: [] as string[] },
     'enable-pvr': { type: 'boolean', default: false },
     'enable-ai-scan': { type: 'boolean', default: false },
     'enable-agentic': { type: 'boolean', default: false },
@@ -100,6 +101,7 @@ const usage = (prog: string) => `usage: ${prog} --kind tool|site [flags] [dir]
   --kind tool|site        required, except with --preset settings (it writes no files)
   --preset <name>         ${Object.keys(PRESETS).join('|')}(default full)
   --skip <name>           leave this file or setting out (repeatable, names below)
+  --only <name>           do just this file or setting, skipping the rest (repeatable, names below; not with --skip)
   --enable-pvr            opt in: private vulnerability reporting and SECURITY.md
   --enable-ai-scan        opt in: AI Scan for pull requests and the repository
   --enable-agentic        opt in (experimental): deps-review, its caller workflow, and the repo settings and labels it relies on
@@ -270,6 +272,22 @@ export async function main(
             )
     }
 
+    for (const n of values.only) {
+        if (!valid.includes(n))
+            fail(
+                `unknown --only "${n}", expected one of: ${valid.join(', ')}`,
+                prog,
+            )
+    }
+    if (values.only.length > 0 && values.skip.length > 0)
+        fail('--only and --skip cannot be combined', prog)
+    // --only is a one-run selection: it skips every other name but, unlike
+    // --skip, is never recorded in voidflow.config.ts (values.skip is).
+    const skipNames =
+        values.only.length > 0
+            ? valid.filter((n) => !values.only.includes(n))
+            : values.skip
+
     const dir = resolve(positionals[0] ?? '.')
     if (!(await isWorkTree(dir)))
         fail(`${dir} is not a git work tree (run git init first)`, prog)
@@ -337,7 +355,7 @@ export async function main(
     )
     const enabled = enabledGroups(merged.settings?.enable)
     const settingSkip = new Set([
-        ...values.skip,
+        ...skipNames,
         ...(merged.settings?.skip ?? []),
     ])
     const version = JSON.parse(
@@ -375,7 +393,7 @@ export async function main(
         let ownerHandle = owner ?? null
         const codeownersWanted =
             (picked === null || picked.has('codeowners')) &&
-            !values.skip.includes('codeowners')
+            !skipNames.includes('codeowners')
         let ownerWhy: string | null = null
         if (owner === undefined && codeownersWanted && !repo)
             ownerWhy = 'there is no repo to take the owner from'
@@ -417,7 +435,7 @@ export async function main(
             config: withSettings(existingConfig ?? { kind }, merged.settings),
         }
         const skip = new Set([
-            ...values.skip,
+            ...skipNames,
             ...(dropCodeowners ? ['codeowners'] : []),
             ...(picked ? fileNames(kind).filter((n) => !picked.has(n)) : []),
         ])
