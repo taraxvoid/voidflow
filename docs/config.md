@@ -269,7 +269,9 @@ A change to `voidflow.config.ts` goes through a PR like any other: reviewed
 as a plan there, applied after merge, and checked for drift from then on.
 
 1. **On the PR**, CI (`tool-ci.yml`, `site-ci.yml`) runs `voidflow validate`,
-   which fails the job on a file that does not load or validate, then
+   which fails the job on a file that does not load or validate (and warns,
+   without failing, when a wrangler config deploys a Worker without
+   `observability.enabled: true`, or turns it or its logs off in an env), then
    `voidflow plan` against live GitHub, printed in the job summary. Drift
    never fails CI: the PR's config is not applied yet, and drift someone made
    in the GitHub UI is not the PR's problem. Exit 1 or 2 from the plan (a read

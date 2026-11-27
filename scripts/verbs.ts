@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { adminTokenVar, type VoidflowConfig } from '../config/index.ts'
 import { credentialSource } from './init/gh.ts'
+import { observabilityFindings } from './lib/observability.ts'
 import { packageRoot } from './lib/package-root.ts'
 import {
     CONFIG_FILE,
@@ -369,12 +370,21 @@ export function verbMain(verb: Command) {
                 fail(
                     `${prog}: no ${CONFIG_FILE} in ${process.cwd()} or above it up to the git root`,
                 )
+            let cfg: VoidflowConfig
             try {
-                await loadVoidflowConfig(file)
+                cfg = await loadVoidflowConfig(file)
             } catch (e) {
                 fail(`${prog}: ${(e as Error).message}`)
             }
             console.log(`${file}: valid`)
+            const actions = process.env.GITHUB_ACTIONS === 'true'
+            for (const f of observabilityFindings(file, cfg)) {
+                console.log(
+                    actions
+                        ? `::warning file=${f.file}::${f.message}`
+                        : `warning: ${f.file}: ${f.message}`,
+                )
+            }
             process.exit(0)
         }
         const { file, cfg, repo } = await loadRepo(prog)
